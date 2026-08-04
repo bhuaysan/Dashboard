@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/ben/.claude/plans && echo \"=== Restliche secrets.json-Erwähnungen \\(sollte leer sein\\):\"; grep -n \"secrets\\\\.json\\\\|DASHBOARD_SECRETS\\\\|DASHBOARD_PVE_CA\" ich-will-ein-dashboard-majestic-pike.md; echo \"\\(Ende\\)\")"
+    ]
+  }
+}
