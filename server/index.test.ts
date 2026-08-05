@@ -34,6 +34,17 @@ describe("/api/config", () => {
     expect(cfg.location.label).toBe("Heilbronn");
   });
 
+  it("GET enthält keine Werte aus der .env", async () => {
+    const res = await app.request("/api/config");
+    const text = await res.text();
+    for (const key of ["PVE_TOKEN_SECRET", "PVE_TOKEN_ID"]) {
+      const value = process.env[key];
+      if (value) expect(text.includes(value)).toBe(false);
+    }
+    expect(text.toLowerCase().includes("token")).toBe(false);
+    expect(text.toLowerCase().includes("secret")).toBe(false);
+  });
+
   it("PUT mit passendem If-Match schreibt und erneuert updatedAt", async () => {
     const before = await getConfig();
     const next = { ...before, theme: "light" as const };

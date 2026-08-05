@@ -20,24 +20,9 @@ import { fetchWeather, Weather } from "./widgets/Weather";
 import { fetchEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, News } from "./widgets/News";
 import type { SourceState } from "./shell/StatusLine";
+import { fetchHomelab, Homelab } from "./widgets/Homelab";
 
 type RowInfo = { url?: string };
-
-const GUESTS = [
-  { vmid: 100, name: "caddy", run: true, cpu: "0 %", mem: "8 %" },
-  { vmid: 101, name: "pihole.local", run: true, cpu: "0 %", mem: "21 %" },
-  { vmid: 102, name: "fileshare.local", run: true, cpu: "0 %", mem: "4 %" },
-  { vmid: 103, name: "torrent.local", run: true, cpu: "0 %", mem: "94 %", warn: true },
-  { vmid: 104, name: "uptime.local", run: true, cpu: "1 %", mem: "25 %" },
-  { vmid: 105, name: "home.local", run: true, cpu: "0 %", mem: "31 %" },
-  { vmid: 106, name: "jellyfin.local", run: true, cpu: "0 %", mem: "3 %" },
-  { vmid: 107, name: "filebrowser.local", run: true, cpu: "0 %", mem: "10 %" },
-  { vmid: 108, name: "qbit.local", run: true, cpu: "6 %", mem: "80 %", warn: true },
-  { vmid: 109, name: "share.local", run: true, cpu: "0 %", mem: "4 %" },
-  { vmid: 110, name: "minecraft.local", run: false, cpu: "–", mem: "–" },
-  { vmid: 111, name: "monitor.local", run: true, cpu: "1 %", mem: "14 %" },
-  { vmid: 112, name: "postgres.local", run: true, cpu: "1 %", mem: "15 %" },
-];
 
 function isoWeek(d: Date): number {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -94,6 +79,7 @@ export default function App() {
     () => fetchNews(config.feeds),
     900_000,
   );
+  const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, 60_000);
 
   const flatLinks = useMemo<FlatLink[]>(
     () =>
@@ -115,8 +101,10 @@ export default function App() {
     links: flatLinks.map((l) => ({ url: l.url })),
     agenda: (calQuery.data ?? []).map(() => ({})),
     news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
-    homelab: GUESTS.map(() => ({})),
-  }), [flatLinks, calQuery.data, newsQuery.data]);
+    homelab: (labQuery.data?.guests ?? []).map((g) => ({
+      url: `https://10.0.10.10:8006/?console=kvm&novnc=1&vmid=${g.vmid}&node=${config.homelab.node}`,
+    })),
+  }), [flatLinks, calQuery.data, newsQuery.data, labQuery.data, config.homelab.node]);
 
   const hintMap = hints;
 
@@ -276,44 +264,7 @@ export default function App() {
           <Pane title="Homelab" subtitle={config.homelab.node} span="full" id="pane-6"
             ref={(el: HTMLElement | null) => { paneRefs.current.homelab = el; }}
           >
-            <div className="lab-node">
-              <span className="metric"><span className="dim">cpu</span><span>1 %</span>
-                <span className="spark">▁▃▁▅▃▁▃▇▃</span></span>
-              <span className="metric"><span className="dim">mem</span><span>51 %</span>
-                <span className="spark">▁▄▄▇▄▁▄▄▇</span></span>
-              <span className="metric"><span className="dim">root</span><span>28 %</span></span>
-              <span className="metric"><span className="dim">up</span><span>87 d</span></span>
-              <span className="metric"><span className="dim">load</span><span>0.05</span></span>
-            </div>
-            <div className="lab-store">
-              <span>tank <span className="bar"><span className="bar-on">━━</span><span className="bar-off">───────────</span></span> <span className="dim">15 %</span></span>
-              <span>local <span className="bar"><span className="bar-on">━━━━</span><span className="bar-off">─────────</span></span> <span className="dim">28 %</span></span>
-              <span>local-lvm <span className="bar"><span className="bar-on">━━━━</span><span className="bar-off">─────────</span></span> <span className="dim">34 %</span></span>
-            </div>
-            <div className="lab-guests">
-              {GUESTS.map((g, i) => (
-                <div key={g.vmid} className={`guest${isSel("homelab", i) ? " is-sel" : ""}`} data-row>
-                  {g.run ? (
-                    <>
-                      <span className="ok">●</span><span className="num">{g.vmid}</span>
-                      <span className="name">{g.name}</span><span className="dim">run</span>
-                      <span className="val">{g.cpu}</span>
-                      <span className={`val${g.warn ? " warn" : ""}`}>{g.mem}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="dim">○</span><span className="num">{g.vmid}</span>
-                      <span className="name dim">{g.name}</span><span className="dim">stop</span>
-                      <span className="val dim">{g.cpu}</span><span className="val dim">{g.mem}</span>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="lab-alerts">
-              <div className="alert crit"><span className="mark">!</span><span>keine vzdump-Backups konfiguriert</span></div>
-              <div className="alert warn"><span className="mark">!</span><span>pve 31 updates verfügbar</span></div>
-            </div>
+            <Homelab data={labQuery.data} selIndex={selIndex("homelab")} />
           </Pane>
 
           <CommandBar
@@ -333,7 +284,7 @@ export default function App() {
             { label: "wx", state: queryState(wxQuery) },
             { label: "news", state: queryState(newsQuery) },
             { label: "cal", state: queryState(calQuery) },
-            { label: "pve", state: "ok" },
+            { label: "pve", state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery) },
             { label: "cfg", state: queryState(configQuery) },
           ]}
           clock={timeFmt.format(now)}

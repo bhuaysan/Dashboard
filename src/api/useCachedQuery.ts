@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-export function useCachedQuery<T>(key: string, fn: () => Promise<T>, ttlMs: number) {
+export function useCachedQuery<T>(key: string, fn: () => Promise<T>, ttlMs: number, refetchIntervalMs?: number) {
   return useQuery<T>({
     queryKey: [key],
     queryFn: async () => {
@@ -16,6 +16,8 @@ export function useCachedQuery<T>(key: string, fn: () => Promise<T>, ttlMs: numb
       } catch { return undefined; }
     },
     staleTime: ttlMs,
+    refetchInterval: refetchIntervalMs ?? false,
+    refetchIntervalInBackground: false,   // pausiert, solange der Tab nicht sichtbar ist
     retry: 1,
   });
 }

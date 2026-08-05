@@ -1,6 +1,5 @@
 // Vorlage — muss vor allen anderen Importen stehen, die process.env lesen
-import { loadEnvFile } from "node:process";
-try { loadEnvFile(); } catch { /* keine .env: echte Umgebungsvariablen nutzen (Produktion) */ }
+import "./load-env.ts";
 
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
@@ -12,6 +11,7 @@ import { readConfig, writeConfig } from "./config-store.ts";
 import { writeGuard } from "./write-guard.ts";
 import { proxyFetch } from "./proxy.ts";
 import { configSchema } from "../src/config/schema.ts";
+import { fetchHomelab, type HomelabData } from "./pve.ts";
 
 export const app = new Hono();
 
@@ -57,6 +57,22 @@ app.get("/api/proxy", async (c) => {
       return c.json({ error: msg }, 403);
     }
     return c.json({ error: msg }, 502);
+  }
+});
+
+let homelabCache: { t: number; data: HomelabData } | undefined;
+
+app.get("/api/homelab", async (c) => {
+  if (homelabCache && Date.now() - homelabCache.t < 60_000) {
+    return c.json(homelabCache.data);
+  }
+  try {
+    const cfg = await readConfig();
+    const data = await fetchHomelab(cfg);
+    homelabCache = { t: Date.now(), data };
+    return c.json(data);
+  } catch {
+    return c.json({ error: "Homelab nicht erreichbar" }, 502);
   }
 });
 
