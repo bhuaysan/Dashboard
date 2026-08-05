@@ -5,5 +5,10 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: { proxy: { "/api": "http://localhost:7777" } },
-  test: { globals: true, environment: "jsdom", passWithNoTests: true },
+  test: {
+    globals: true,
+    environment: "jsdom",
+    passWithNoTests: true,
+    setupFiles: ["src/test/setup.ts"],
+  },
 })
