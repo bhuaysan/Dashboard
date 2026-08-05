@@ -11,8 +11,3 @@ export function sparkline(values: number[]): string {
   }).join("");
 }
 
-export function bar(pct: number, width = 13): string {
-  const p = Math.max(0, Math.min(100, pct));
-  const filled = Math.round((p / 100) * width);
-  return "█".repeat(filled) + "░".repeat(width - filled);
-}

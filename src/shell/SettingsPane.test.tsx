@@ -27,6 +27,28 @@ describe("SettingsPane", () => {
     expect(screen.getByRole("alert").textContent).toContain("Doppelte Link-Kürzel");
   });
 
+  it("blockt Kürzel, die nicht mit g beginnen", () => {
+    const onSave = vi.fn();
+    const cfg = structuredClone(defaultConfig);
+    const link = cfg.linkGroups[0]?.links[0];
+    if (link) link.hint = "d";
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("muss mit g beginnen");
+  });
+
+  it("blockt Adressen ohne http oder https", () => {
+    const onSave = vi.fn();
+    const cfg = structuredClone(defaultConfig);
+    const link = cfg.linkGroups[0]?.links[0];
+    if (link) link.url = "javascript:alert(1)";
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined} onSave={onSave} />);
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("http:// oder https://");
+  });
+
   it("speichert eine gültige Config", () => {
     const onSave = vi.fn();
     render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined} onSave={onSave} />);

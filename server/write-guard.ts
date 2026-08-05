@@ -24,10 +24,14 @@ export function ipAllowed(addr: string, allow: string[]): boolean {
 
 export const writeGuard: MiddlewareHandler = async (c, next) => {
   if (c.req.method !== "PUT" && c.req.method !== "DELETE") return next();
-  let addr = "127.0.0.1";
+  let addr: string | undefined;
   try {
-    addr = getConnInfo(c).remote.address ?? "127.0.0.1";
-  } catch { /* keine Verbindungsinfo (Test): lokal behandeln */ }
+    addr = getConnInfo(c).remote.address;
+  } catch { /* keine Verbindungsinfo: unten abgelehnt */ }
+  if (addr === undefined) {
+    // Ohne bekannte Absenderadresse lässt sich die Freigabe nicht prüfen — dann nicht schreiben.
+    return c.json({ error: "Absenderadresse unbekannt — Schreiben abgelehnt" }, 403);
+  }
   if (addr.startsWith("::ffff:")) addr = addr.slice(7);
   if (addr === "::1") addr = "127.0.0.1";
   if (!ipAllowed(addr, env.writeAllow)) {

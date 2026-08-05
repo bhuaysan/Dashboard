@@ -35,10 +35,10 @@ app.put("/api/config", writeGuard, async (c) => {
 });
 
 app.get("/api/proxy", async (c) => {
-  // die Ziel-URL steht komplett hinter "url=", eigene & gehören zu ihr
-  const idx = c.req.url.indexOf("url=");
-  if (idx < 0) return c.json({ error: "Parameter url fehlt" }, 400);
-  const raw = decodeURIComponent(c.req.url.slice(idx + 4));
+  // Jeder Aufrufer kodiert die Ziel-URL mit encodeURIComponent, eigene & stehen darin
+  // als %26 — der Query-Parser liefert sie deshalb vollständig zurück.
+  const raw = c.req.query("url");
+  if (raw === undefined || raw === "") return c.json({ error: "Parameter url fehlt" }, 400);
   try {
     new URL(raw);
   } catch {

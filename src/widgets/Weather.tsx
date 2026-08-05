@@ -13,55 +13,62 @@ export type WeatherData = {
 };
 
 type OpenMeteo = {
+  timezone?: string;
   current?: { temperature_2m?: number; apparent_temperature?: number; weather_code?: number };
-  hourly?: { time?: string[]; temperature_2m?: number[]; precipitation_probability?: number[] };
+  hourly?: { time?: number[]; temperature_2m?: number[]; precipitation_probability?: number[] };
   daily?: {
-    time?: string[];
+    time?: number[];
     temperature_2m_min?: number[];
     temperature_2m_max?: number[];
     weather_code?: number[];
-    sunrise?: string[];
-    sunset?: string[];
+    sunrise?: number[];
+    sunset?: number[];
   };
 };
 
 export async function fetchWeather(loc: { lat: number; lon: number }): Promise<WeatherData> {
+  // timeformat=unixtime, weil die sonst gelieferten Zeitangaben ohne Zeitzone stehen und
+  // der Browser sie als seine eigene deutet. timezone=auto richtet sich nach dem Ort,
+  // die Antwort nennt die verwendete Zone.
   const target =
     `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}` +
     `&current=temperature_2m,apparent_temperature,weather_code` +
     `&hourly=temperature_2m,precipitation_probability` +
     `&daily=temperature_2m_min,temperature_2m_max,weather_code,sunrise,sunset` +
-    `&timezone=Europe%2FBerlin&forecast_days=5`;
+    `&timezone=auto&timeformat=unixtime&forecast_days=5`;
   const res = await fetch(`/api/proxy?url=${encodeURIComponent(target)}`);
   if (!res.ok) throw new Error(`Wetter nicht ladbar (${res.status})`);
   const j = (await res.json()) as OpenMeteo;
 
+  const timeZone = j.timezone;
   const times = j.hourly?.time ?? [];
   const temps = j.hourly?.temperature_2m ?? [];
   const now = Date.now();
-  let idx = times.findIndex((t) => new Date(t).getTime() > now) - 1;
+  let idx = times.findIndex((t) => t * 1000 > now) - 1;
   if (idx < 0) idx = 0;
   const hours = temps.slice(idx, idx + 12);
   const rainPct = j.hourly?.precipitation_probability?.[idx] ?? 0;
 
-  const fmtTime = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
-  const fmtDay = new Intl.DateTimeFormat("de-DE", { weekday: "short" });
+  const fmtTime = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", timeZone });
+  const fmtDay = new Intl.DateTimeFormat("de-DE", { weekday: "short", timeZone });
   const dayTimes = j.daily?.time ?? [];
   const days = dayTimes.map((t, i) => ({
-    label: fmtDay.format(new Date(`${t}T12:00:00`)),
+    label: fmtDay.format(new Date(t * 1000)),
     hi: Math.round(j.daily?.temperature_2m_max?.[i] ?? 0),
     lo: Math.round(j.daily?.temperature_2m_min?.[i] ?? 0),
     code: j.daily?.weather_code?.[i] ?? -1,
   }));
 
+  const sunrise = j.daily?.sunrise?.[0];
+  const sunset = j.daily?.sunset?.[0];
   return {
     temp: Math.round(j.current?.temperature_2m ?? 0),
     feels: Math.round(j.current?.apparent_temperature ?? 0),
     code: j.current?.weather_code ?? -1,
     hours,
     rainPct,
-    sunrise: j.daily?.sunrise?.[0] ? fmtTime.format(new Date(j.daily.sunrise[0])) : "—",
-    sunset: j.daily?.sunset?.[0] ? fmtTime.format(new Date(j.daily.sunset[0])) : "—",
+    sunrise: sunrise === undefined ? "—" : fmtTime.format(new Date(sunrise * 1000)),
+    sunset: sunset === undefined ? "—" : fmtTime.format(new Date(sunset * 1000)),
     days,
   };
 }

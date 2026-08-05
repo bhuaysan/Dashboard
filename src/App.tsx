@@ -36,8 +36,17 @@ function isoWeek(d: Date): number {
 function useNow(): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    // Angezeigt wird nur hh:mm — einmal pro Minute genügt, ausgerichtet auf die volle Minute.
+    // Sekündlich würde die ganze Seite samt Gästetabelle neu gerendert.
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const timeout = setTimeout(() => {
+      setNow(new Date());
+      interval = setInterval(() => setNow(new Date()), 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+    return () => {
+      clearTimeout(timeout);
+      if (interval !== undefined) clearInterval(interval);
+    };
   }, []);
   return now;
 }
@@ -66,22 +75,25 @@ export default function App() {
     return () => clearTimeout(t);
   }, [message]);
 
+  // Die Intervalle halten einen dauerhaft offenen Tab aktuell; ohne sie wird erst beim
+  // nächsten Fokus nachgeladen, und eine Anzeige, die niemand fokussiert, friert ein.
   const wxQuery = useCachedQuery(
     `wx:${config.location.lat},${config.location.lon}`,
     () => fetchWeather(config.location),
     600_000,
+    { refetchIntervalMs: 600_000 },
   );
   const calQuery = useCachedQuery(
     `cal:${JSON.stringify(config.calendars)}`,
     () => fetchEvents(config.calendars),
     900_000,
-    { revive: reviveEvents },
+    { revive: reviveEvents, refetchIntervalMs: 900_000 },
   );
   const newsQuery = useCachedQuery(
     `news:${JSON.stringify(config.feeds)}`,
     () => fetchNews(config.feeds),
     900_000,
-    { revive: reviveNews },
+    { revive: reviveNews, refetchIntervalMs: 900_000 },
   );
   const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, { refetchIntervalMs: 60_000 });
 
@@ -99,16 +111,33 @@ export default function App() {
     return h;
   }, [flatLinks]);
 
-  const rowsByPane = useMemo<Record<PaneId, RowInfo[]>>(() => ({
-    clock: [],
-    weather: [],
-    links: flatLinks.map((l) => ({ url: l.url })),
-    agenda: (calQuery.data ?? []).map(() => ({})),
-    news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
-    homelab: (labQuery.data?.guests ?? []).map((g) => ({
-      url: `https://10.0.10.10:8006/?console=kvm&novnc=1&vmid=${g.vmid}&node=${config.homelab.node}`,
-    })),
-  }), [flatLinks, calQuery.data, newsQuery.data, labQuery.data, config.homelab.node]);
+  const layoutById = useMemo(
+    () => Object.fromEntries(config.layout.map((l) => [l.id, l])),
+    [config.layout],
+  );
+  const paneVisible = (id: PaneId) => layoutById[id]?.visible ?? true;
+  const paneSpan = (id: PaneId): 1 | 2 => layoutById[id]?.span ?? 1;
+  const visiblePanes = useMemo(
+    () => new Set(PANE_ORDER.map((p) => p.id).filter((id) => layoutById[id]?.visible ?? true)),
+    [layoutById],
+  );
+
+  const consoleBase = config.homelab.uiUrl.replace(/\/+$/, "");
+  const rowsByPane = useMemo<Record<PaneId, RowInfo[]>>(() => {
+    const rows: Record<PaneId, RowInfo[]> = {
+      clock: [],
+      weather: [],
+      links: flatLinks.map((l) => ({ url: l.url })),
+      agenda: (calQuery.data ?? []).map(() => ({})),
+      news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
+      homelab: (labQuery.data?.guests ?? []).map((g) => ({
+        url: `${consoleBase}/?console=kvm&novnc=1&vmid=${g.vmid}&node=${config.homelab.node}`,
+      })),
+    };
+    // Ausgeblendete Panes haben keine Zeilen — sonst wandert die Auswahl unsichtbar weiter.
+    for (const id of PANE_ORDER.map((p) => p.id)) if (!visiblePanes.has(id)) rows[id] = [];
+    return rows;
+  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, config.homelab.node, consoleBase, visiblePanes]);
 
   const hintMap = hints;
 
@@ -129,6 +158,7 @@ export default function App() {
   useKeymap({
     state: ui, dispatch, hints: hintMap, rowCount, selectedUrl, onSeed,
     overlayOpen: settingsOpen, onOverlayEscape: () => setSettingsOpen(false),
+    visiblePanes,
   });
 
   useEffect(() => {
@@ -194,13 +224,6 @@ export default function App() {
 
   const queryState = (q: { isError: boolean; isStale: boolean }): SourceState =>
     q.isError ? "crit" : q.isStale ? "warn" : "ok";
-
-  const layoutById = useMemo(
-    () => Object.fromEntries(config.layout.map((l) => [l.id, l])),
-    [config.layout],
-  );
-  const paneVisible = (id: PaneId) => layoutById[id]?.visible ?? true;
-  const paneSpan = (id: PaneId): 1 | 2 => layoutById[id]?.span ?? 1;
 
   let linkRow = -1;
 
@@ -269,7 +292,7 @@ export default function App() {
           <Pane title="Agenda" span={paneSpan("agenda")} clip id="pane-4"
             ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
           >
-            <Agenda events={calQuery.data} selIndex={selIndex("agenda")} />
+            <Agenda events={calQuery.data} selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
           </Pane>
           )}
 
@@ -277,7 +300,7 @@ export default function App() {
           <Pane title="News" span={paneSpan("news")} clip id="pane-5"
             ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
           >
-            <News items={newsQuery.data} selIndex={selIndex("news")} />
+            <News items={newsQuery.data} selIndex={selIndex("news")} feedCount={config.feeds.length} />
           </Pane>
           )}
 
@@ -301,7 +324,10 @@ export default function App() {
 
         <StatusLine
           mode={ui.mode}
-          panes={PANE_ORDER.map((p, i) => ({ n: i + 1, label: p.label, active: ui.pane === p.id }))}
+          panes={PANE_ORDER
+            .map((p, i) => ({ id: p.id, n: i + 1, label: p.label, active: ui.pane === p.id }))
+            .filter((p) => visiblePanes.has(p.id))
+            .map(({ n, label, active }) => ({ n, label, active }))}
           sources={[
             { label: "wx", state: queryState(wxQuery) },
             { label: "news", state: queryState(newsQuery) },

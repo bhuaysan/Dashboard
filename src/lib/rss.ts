@@ -6,6 +6,10 @@ function text(parent: Element, tag: string): string {
 
 export function parseFeed(xml: string, source: string): NewsItem[] {
   const doc = new DOMParser().parseFromString(xml, "application/xml");
+  // Kaputtes XML ergibt sonst stillschweigend null Meldungen statt eines Fehlers.
+  if (doc.getElementsByTagName("parsererror").length > 0) {
+    throw new Error(`Feed ${source} ist kein gültiges XML`);
+  }
   const out: NewsItem[] = [];
 
   for (const item of Array.from(doc.getElementsByTagName("item"))) {

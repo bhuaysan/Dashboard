@@ -47,4 +47,8 @@ describe("parseFeed", () => {
       expect(items[1]?.title).toBe("Zweite Meldung");
     }
   });
+
+  it("meldet unlesbares XML, statt stillschweigend nichts zu liefern", () => {
+    expect(() => parseFeed("<rss><channel>", "beispiel")).toThrow("kein gültiges XML");
+  });
 });

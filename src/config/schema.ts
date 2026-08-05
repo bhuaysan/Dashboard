@@ -32,6 +32,8 @@ export const configSchema = z.object({
   proxyAllowlist: z.array(z.string()),         // Hostnamen, z.B. "api.open-meteo.com"
   homelab: z.object({
     node: z.string().default("pve"),
+    uiUrl: z.string().default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links
+
     expectRunning: z.array(z.number().int()).default([]),   // VMIDs, die laufen sollen
     thresholds: z.object({
       cpu: z.number().default(90), mem: z.number().default(85),

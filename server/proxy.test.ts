@@ -4,10 +4,10 @@ import { assertAllowed, isBlockedIp } from "./proxy.ts";
 const allow = ["api.open-meteo.com", "localhost", "169.254.169.254"];
 
 describe("assertAllowed", () => {
-  it("lässt erlaubte Hosts durch", async () => {
+  it("lässt erlaubte Hosts durch und liefert die geprüfte Adresse", async () => {
     await expect(
       assertAllowed(new URL("https://api.open-meteo.com/v1/forecast"), allow),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatch(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/);
   });
 
   it("lehnt fremde Hosts ab", async () => {
@@ -40,6 +40,16 @@ describe("isBlockedIp", () => {
     for (const ip of ["10.0.10.10", "127.0.0.1", "192.168.1.1", "172.16.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0"]) {
       expect(isBlockedIp(ip)).toBe(true);
     }
+  });
+
+  it("sperrt reservierte Bereiche", () => {
+    for (const ip of ["192.0.0.1", "192.0.2.1", "198.18.0.1", "198.19.255.255", "224.0.0.1", "240.0.0.1", "255.255.255.255"]) {
+      expect(isBlockedIp(ip)).toBe(true);
+    }
+  });
+
+  it("sperrt Oktette außerhalb von 0–255", () => {
+    expect(isBlockedIp("999.1.1.1")).toBe(true);
   });
 
   it("sperrt IPv6 pauschal", () => {

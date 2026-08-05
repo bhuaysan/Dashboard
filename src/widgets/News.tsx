@@ -10,19 +10,27 @@ export function reviveNews(items: NewsItem[]): NewsItem[] {
 
 export async function fetchNews(feeds: Config["feeds"]): Promise<NewsItem[]> {
   const all: NewsItem[] = [];
+  let failed = 0;
   await Promise.all(feeds.map(async (feed) => {
     try {
       const res = await fetch(`/api/proxy?url=${encodeURIComponent(feed.url)}`);
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       all.push(...parseFeed(await res.text(), feed.label).slice(0, feed.limit));
-    } catch { /* ein kaputter Feed blockiert die anderen nicht */ }
+    } catch {
+      failed += 1;   // ein kaputter Feed blockiert die anderen nicht
+    }
   }));
+  // Fällt jede Quelle aus, ist das ein Fehler und keine leere Liste — sonst meldet die
+  // Statusline „in Ordnung", während nichts geladen wurde.
+  if (feeds.length > 0 && failed === feeds.length) throw new Error("Kein Feed erreichbar");
   return all.sort((a, b) => b.date.getTime() - a.date.getTime());
 }
 
-export function News({ items, selIndex }: { items?: NewsItem[]; selIndex: number }) {
+export function News({ items, selIndex, feedCount }: { items?: NewsItem[]; selIndex: number; feedCount: number }) {
   if (!items) return <div className="dim">noch keine Meldungen</div>;
-  if (items.length === 0) return <div className="dim">keine Feeds eingetragen</div>;
+  if (items.length === 0) {
+    return <div className="dim">{feedCount === 0 ? "keine Feeds eingetragen" : "keine Meldungen geladen"}</div>;
+  }
   const now = new Date();
   const fmtTime = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
   const stamp = (d: Date) => {

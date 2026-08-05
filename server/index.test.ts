@@ -20,12 +20,22 @@ async function getConfig(): Promise<Config> {
   return (await res.json()) as Config;
 }
 
-function putConfig(cfg: Config, ifMatch: string) {
-  return app.request("/api/config", {
-    method: "PUT",
-    headers: { "content-type": "application/json", "If-Match": ifMatch },
-    body: JSON.stringify(cfg),
-  });
+// getConnInfo liest die Absenderadresse aus dem Node-Socket; im Test wird er nachgebildet,
+// weil der Write-Guard ohne bekannte Adresse ablehnt.
+function connInfo(address: string) {
+  return { incoming: { socket: { remoteAddress: address, remotePort: 51234, remoteFamily: "IPv4" } } };
+}
+
+function putConfig(cfg: Config, ifMatch: string, from = "127.0.0.1") {
+  return app.request(
+    "/api/config",
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json", "If-Match": ifMatch },
+      body: JSON.stringify(cfg),
+    },
+    connInfo(from),
+  );
 }
 
 describe("/api/config", () => {
@@ -70,6 +80,22 @@ describe("/api/config", () => {
     const res = await putConfig({ ...before, location: undefined } as unknown as Config, before.updatedAt);
     expect(res.status).toBe(400);
   });
+
+  it("PUT von einer nicht freigegebenen Adresse liefert 403", async () => {
+    const before = await getConfig();
+    const res = await putConfig(before, before.updatedAt, "10.0.99.99");
+    expect(res.status).toBe(403);
+  });
+
+  it("PUT ohne erkennbare Absenderadresse liefert 403", async () => {
+    const before = await getConfig();
+    const res = await app.request("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json", "If-Match": before.updatedAt },
+      body: JSON.stringify(before),
+    });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("/api/proxy", () => {
@@ -91,5 +117,20 @@ describe("/api/proxy", () => {
   it("meldet fehlenden url-Parameter mit 400", async () => {
     const res = await app.request("/api/proxy");
     expect(res.status).toBe(400);
+  });
+
+  it("meldet kaputte Prozentkodierung mit 400 statt 500", async () => {
+    const res = await app.request("/api/proxy?url=%zz");
+    expect(res.status).toBe(400);
+  });
+
+  // Bei falscher Auswertung landete der erlaubte Host aus callbackurl im Ziel und die
+  // Anfrage ginge hinaus, statt am nicht erlaubten Host aus url zu scheitern.
+  it("nimmt den url-Parameter, nicht einen Parameter der auf url endet", async () => {
+    const res = await app.request(
+      "/api/proxy?callbackurl=https%3A%2F%2Fapi.open-meteo.com%2F&url=https%3A%2F%2Fexample.com%2F",
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Host nicht erlaubt" });
   });
 });

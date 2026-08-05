@@ -87,6 +87,28 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
       setError("Doppelte Link-Kürzel — jedes Kürzel darf nur einmal vorkommen.");
       return;
     }
+    // Getippt wird g und dann ein Zeichen; das Kürzel enthält das g, sonst wird es nie erkannt.
+    const badHint = hints.find((h) => !/^g.$/u.test(h));
+    if (badHint !== undefined) {
+      setError(`Kürzel „${badHint}" ist ungültig — es muss mit g beginnen und genau zwei Zeichen haben.`);
+      return;
+    }
+    const badUrl = draft.linkGroups
+      .flatMap((g) => g.links)
+      .find((l) => !/^https?:\/\//i.test(l.url));
+    if (badUrl) {
+      setError(`Adresse von „${badUrl.label}" muss mit http:// oder https:// beginnen.`);
+      return;
+    }
+    for (const [label, tpl] of [
+      ["Standardsuche", draft.search.default] as const,
+      ...Object.entries(draft.search.bangs).map(([k, v]) => [`Bang !${k}`, v] as const),
+    ]) {
+      if (!/^https?:\/\//i.test(tpl)) {
+        setError(`${label} muss mit http:// oder https:// beginnen.`);
+        return;
+      }
+    }
     for (const z of draft.clock.secondary) {
       try {
         new Intl.DateTimeFormat("de-DE", { timeZone: z.tz });
@@ -135,7 +157,7 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
           <div className="set-body">
             {sec === "links" && (
               <section>
-                <p className="set-hint">Kürzel sind ein bis zwei Zeichen und werden nach <b>g</b> getippt. Doppelte Kürzel werden beim Speichern abgelehnt.</p>
+                <p className="set-hint">Kürzel beginnen mit <b>g</b> und sind genau zwei Zeichen lang — <b>gd</b> heißt: erst g, dann d. Doppelte Kürzel werden beim Speichern abgelehnt.</p>
                 {draft.linkGroups.map((g, gi) => (
                   <div key={gi}>
                     <div className="grouprow">
@@ -357,6 +379,12 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
                   <input className="inp" id="s-node" style={{ maxWidth: "16ch" }} value={draft.homelab.node}
                     onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, node: e.target.value } }))} />
                 </div>
+                <div className="field">
+                  <label htmlFor="s-uiurl">Proxmox-Oberfläche</label>
+                  <input className="inp" id="s-uiurl" value={draft.homelab.uiUrl}
+                    onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, uiUrl: e.target.value } }))} />
+                </div>
+                <p className="set-hint">Ziel der Konsolen-Links in der Gästetabelle. Die Daten selbst holt der Server, nicht der Browser.</p>
                 <p className="set-hint" style={{ marginTop: "1rem" }}>Gäste, die laufen sollen. Ist einer davon gestoppt, erscheint eine Alarmzeile. Alle anderen werden nur angezeigt.</p>
                 <div className="checks">
                   {guests.map((g) => (

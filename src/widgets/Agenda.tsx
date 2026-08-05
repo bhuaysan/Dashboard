@@ -15,16 +15,21 @@ export async function fetchEvents(cals: Config["calendars"]): Promise<CalEvent[]
   to.setMilliseconds(-1);
 
   const all: CalEvent[] = [];
+  let failed = 0;
   await Promise.all(cals.map(async (cal) => {
     try {
       const url = cal.url.startsWith("/")
         ? cal.url
         : `/api/proxy?url=${encodeURIComponent(cal.url)}`;
       const res = await fetch(url);
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       all.push(...parseIcs(await res.text(), from, to));
-    } catch { /* ein kaputter Kalender blockiert die anderen nicht */ }
+    } catch {
+      failed += 1;   // ein kaputter Kalender blockiert die anderen nicht
+    }
   }));
+  // Fällt jeder Kalender aus, ist das ein Fehler und kein leerer Terminplan.
+  if (cals.length > 0 && failed === cals.length) throw new Error("Kein Kalender erreichbar");
   return all.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
@@ -54,9 +59,15 @@ function groupEvents(events: CalEvent[]): Group[] {
   return [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([, g]) => g);
 }
 
-export function Agenda({ events, selIndex }: { events?: CalEvent[]; selIndex: number }) {
+export function Agenda({ events, selIndex, calendarCount }: { events?: CalEvent[]; selIndex: number; calendarCount: number }) {
   if (!events) return <div className="dim">noch keine Termine</div>;
-  if (events.length === 0) return <div className="dim">keine Termine in den nächsten Tagen</div>;
+  if (events.length === 0) {
+    return (
+      <div className="dim">
+        {calendarCount === 0 ? "keine Kalender eingetragen" : "keine Termine in den nächsten Tagen"}
+      </div>
+    );
+  }
   const now = new Date();
   const fmtTime = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
   return (

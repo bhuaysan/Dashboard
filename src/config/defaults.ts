@@ -81,6 +81,7 @@ export const defaultConfig: Config = {
   ],
   homelab: {
     node: "pve",
+    uiUrl: "https://10.0.10.10:8006",
     expectRunning: [100, 101, 104, 105, 111, 112],
     thresholds: { cpu: 90, mem: 85, storage: 80, backupAgeHours: 36 },
     reachability: [],

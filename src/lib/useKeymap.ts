@@ -65,14 +65,24 @@ type Params = {
   onSeed: (seed: string, mode: Mode) => void;
   overlayOpen: boolean;
   onOverlayEscape: () => void;
+  visiblePanes: ReadonlySet<PaneId>;
 };
 
 export function openUrl(url: string, newTab: boolean): void {
-  if (newTab) window.open(url, "_blank", "noopener");
-  else window.location.assign(url);
+  // Nur http und https: die Adressen kommen aus der Config, und javascript: oder data:
+  // würden hier als Skript in der eigenen Seite landen.
+  let target: URL;
+  try {
+    target = new URL(url, window.location.href);
+  } catch {
+    return;
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") return;
+  if (newTab) window.open(target.href, "_blank", "noopener");
+  else window.location.assign(target.href);
 }
 
-export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape }: Params): void {
+export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
   useEffect(() => {
     function onKeydown(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -103,7 +113,9 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
         e.preventDefault();
         return;
       }
-      if (e.key === "g") {
+      // Nur solange kein Kürzel angefangen ist — sonst wäre das zweite Zeichen von "gg"
+      // nicht erreichbar.
+      if (e.key === "g" && state.hintBuffer === "") {
         dispatch({ type: "hint", buffer: "g" });
         e.preventDefault();
         return;
@@ -115,17 +127,17 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
         if (url) {
           openUrl(url, e.shiftKey);
           dispatch({ type: "hint", buffer: "" });
-        } else if (buf.length >= 3) {
-          dispatch({ type: "hint", buffer: "" });
         } else {
-          dispatch({ type: "hint", buffer: buf });
+          // Kürzel sind genau zwei Zeichen: nach dem zweiten steht fest, dass keines passt.
+          dispatch({ type: "hint", buffer: buf.length >= 2 ? "" : buf });
         }
         e.preventDefault();
         return;
       }
       if (e.key >= "1" && e.key <= "6") {
         const entry = PANE_ORDER[Number(e.key) - 1];
-        if (entry) dispatch({ type: "focusPane", pane: entry.id });
+        // Ausgeblendete Panes lassen sich nicht fokussieren — die Auswahl wäre unsichtbar.
+        if (entry && visiblePanes.has(entry.id)) dispatch({ type: "focusPane", pane: entry.id });
         e.preventDefault();
         return;
       }
@@ -151,5 +163,5 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
     }
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape]);
+  }, [state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape, visiblePanes]);
 }

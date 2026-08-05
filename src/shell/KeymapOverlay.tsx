@@ -11,7 +11,7 @@ export function KeymapOverlay({ open }: Props) {
           <dt>j / k</dt><dd>Zeile ab / auf im fokussierten Pane</dd>
           <dt>Enter</dt><dd>ausgewählte Zeile öffnen</dd>
           <dt>Shift+Enter</dt><dd>in neuem Tab öffnen</dd>
-          <dt>g + Kürzel</dt><dd>Link direkt öffnen, z. B. gd → Datasphere</dd>
+          <dt>g, dann Zeichen</dt><dd>Link direkt öffnen — das Kürzel neben dem Link, z. B. gd → Datasphere</dd>
           <dt>:</dt><dd>Kommando — settings, export, import, reload, theme</dd>
           <dt>?</dt><dd>diese Übersicht</dd>
           <dt>Esc</dt><dd>zurück nach NORMAL</dd>
