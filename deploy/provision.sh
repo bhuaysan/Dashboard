@@ -25,6 +25,7 @@ sed -i \
   -e 's|^PORT=.*|PORT=80|' \
   -e 's|^DASHBOARD_CONFIG=.*|DASHBOARD_CONFIG=/opt/dashboard/config.json|' \
   -e 's|^PVE_CA_PATH=.*|PVE_CA_PATH=/opt/dashboard/pve-ca.pem|' \
+  -e 's|^DASHBOARD_WRITE_ALLOW=.*|DASHBOARD_WRITE_ALLOW=10.0.10.0/24|' \
   .env
 chown dashboard:dashboard /opt/dashboard/{config.json,.env,pve-ca.pem}
 chmod 600 /opt/dashboard/.env
