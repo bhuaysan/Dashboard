@@ -12,10 +12,9 @@ import {
   type Mode,
   type PaneId,
 } from "./lib/useKeymap";
-import { defaultConfig } from "./config/defaults";
-import { readLocalConfig, writeLocalConfig } from "./config/local";
 import { exportConfig, importConfig } from "./config/io";
 import type { Config } from "./config/schema";
+import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
 
 type RowInfo = { url?: string };
 
@@ -92,7 +91,9 @@ function useNow(): Date {
 }
 
 export default function App() {
-  const [config, setConfig] = useState<Config>(() => readLocalConfig() ?? defaultConfig);
+  const configQuery = useConfig();
+  const saveConfig = useSaveConfig();
+  const config = configQuery.data;
   const [ui, dispatch] = useReducer(uiReducer, initialUiState);
   const [seed, setSeed] = useState<string | null>(null);
   const [message, setMessage] = useState<string | undefined>(undefined);
@@ -161,8 +162,15 @@ export default function App() {
   }, [ui.mode, ui.pane, ui.row]);
 
   function updateConfig(next: Config) {
-    setConfig(next);
-    writeLocalConfig(next);
+    saveConfig.mutate(next, {
+      onError: (err) => {
+        if (err instanceof ConfigConflictError) {
+          setMessage("Ein anderes Gerät hat zuerst gespeichert. Seite neu laden.");
+        } else {
+          setMessage("Server nicht erreichbar — Speichern ist gesperrt.");
+        }
+      },
+    });
   }
 
   function runCommand(cmd: string) {
