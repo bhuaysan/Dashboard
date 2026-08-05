@@ -3,5 +3,33 @@
     "allow": [
       "Bash(cd /Users/ben/.claude/plans && echo \"=== Restliche secrets.json-Erwähnungen \\(sollte leer sein\\):\"; grep -n \"secrets\\\\.json\\\\|DASHBOARD_SECRETS\\\\|DASHBOARD_PVE_CA\" ich-will-ein-dashboard-majestic-pike.md; echo \"\\(Ende\\)\")"
     ]
-  }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"/Users/ben/.claude/skills/impeccable/scripts/hook.mjs\" ] || node \"/Users/ben/.claude/skills/impeccable/scripts/hook.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Checking UI changes"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f \"/Users/ben/.claude/skills/impeccable/scripts/hook.mjs\" ] || node \"/Users/ben/.claude/skills/impeccable/scripts/hook.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Design deep pass"
+          }
+        ]
+      }
+    ]
+  },
+  "description": "Impeccable design detector: immediate-tier checks after Edit/Write/MultiEdit on UI files, full-rule deep pass on Stop."
 }
