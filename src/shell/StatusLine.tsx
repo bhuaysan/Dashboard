@@ -1,8 +1,13 @@
-import { relativeTime, shortAge } from "../lib/relativeTime";
+import { shortAge, spokenAge } from "../lib/relativeTime";
 
 export type SourceState = "ok" | "warn" | "crit";
 
-type Source = { label: string; state: SourceState; updatedAt?: number };
+type Source = {
+  label: string;
+  state: SourceState;
+  updatedAt?: number;
+  alerts?: { count: number; level: "warn" | "crit" };
+};
 
 type Props = {
   mode: string;
@@ -35,11 +40,17 @@ export function StatusLine({ mode, panes, sources, clock, note, problem }: Props
       <span className="sl-right">
         {sources.map((s) => {
           const stamp = s.updatedAt ? new Date(s.updatedAt) : undefined;
-          const spoken = stamp ? `, geladen ${relativeTime(stamp, now)}` : ", noch nicht geladen";
+          const spoken = stamp ? `, geladen ${spokenAge(stamp, now)}` : ", noch nicht geladen";
+          // Alarme stehen unten im Pane; ist es ausgeblendet oder weggescrollt, sieht man
+          // sie sonst nicht. Der Punkt bleibt davon unberührt — er meint die Quelle, nicht ihren Inhalt.
+          const alarm = s.alerts
+            ? `, ${s.alerts.count} ${s.alerts.count === 1 ? "Alarm" : "Alarme"}`
+            : "";
           return (
-            <span key={s.label} className="sl-src" aria-label={`${s.label}: ${STATE_TEXT[s.state]}${spoken}`}>
+            <span key={s.label} className="sl-src" aria-label={`${s.label}: ${STATE_TEXT[s.state]}${spoken}${alarm}`}>
               <span className={s.state} aria-hidden="true">●</span> {s.label}
               {stamp ? <span className="dim" aria-hidden="true">{shortAge(stamp, now)}</span> : null}
+              {s.alerts ? <span className={s.alerts.level} aria-hidden="true">!{s.alerts.count}</span> : null}
             </span>
           );
         })}

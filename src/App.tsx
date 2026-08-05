@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Pane } from "./shell/Pane";
 import { PaneGrid } from "./shell/PaneGrid";
 import { StatusLine } from "./shell/StatusLine";
@@ -52,6 +53,7 @@ function useNow(): Date {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
   const configQuery = useConfig();
   const saveConfig = useSaveConfig();
   const config = configQuery.data;
@@ -189,6 +191,11 @@ export default function App() {
       case "import":
         fileRef.current?.click();
         break;
+      case "refresh":
+        // Nur die Abfragen neu holen — Fokus, Auswahl und Suchzeile bleiben, wie sie sind.
+        void queryClient.invalidateQueries();
+        setMessage("Quellen werden neu geladen.");
+        break;
       case "reload":
         window.location.reload();
         break;
@@ -224,6 +231,9 @@ export default function App() {
 
   const queryState = (q: { isError: boolean; isStale: boolean }): SourceState =>
     q.isError ? "crit" : q.isStale ? "warn" : "ok";
+
+  const labAlerts = labQuery.data?.alerts ?? [];
+  const labAlertLevel = labAlerts.some((a) => a.level === "crit") ? "crit" : "warn";
 
   // Der erste Fehler wird ausgeschrieben — ein roter Punkt allein sagt nicht, was fehlt.
   const failed = ([
@@ -346,6 +356,9 @@ export default function App() {
               label: "pve",
               state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery),
               updatedAt: labQuery.dataUpdatedAt,
+              ...(labAlerts.length > 0
+                ? { alerts: { count: labAlerts.length, level: labAlertLevel } }
+                : {}),
             },
             { label: "cfg", state: queryState(configQuery), updatedAt: configQuery.dataUpdatedAt },
           ]}

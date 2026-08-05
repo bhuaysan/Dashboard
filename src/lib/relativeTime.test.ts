@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { relativeTime, shortAge } from "./relativeTime";
+import { relativeTime, shortAge, spokenAge } from "./relativeTime";
 
 const now = new Date("2026-08-05T12:00:00Z");
 const minutesAway = (n: number) => new Date(now.getTime() + n * 60_000);
@@ -33,5 +33,26 @@ describe("shortAge", () => {
 
   it("bleibt bei Uhrenversatz in der Zukunft bei 0s", () => {
     expect(shortAge(minutesAway(5), now)).toBe("0s");
+  });
+});
+
+describe("spokenAge", () => {
+  it("nennt dieselbe Zahl wie shortAge, nur ausgeschrieben", () => {
+    for (const min of [-0.5, -6.5, -119, -47 * 60]) {
+      const kompakt = shortAge(minutesAway(min), now);
+      const gesprochen = spokenAge(minutesAway(min), now);
+      expect(gesprochen).toContain(kompakt.replace(/[smhd]$/, ""));
+    }
+  });
+
+  it("beugt Einzahl und Mehrzahl", () => {
+    expect(spokenAge(minutesAway(-1), now)).toBe("vor 1 Minute");
+    expect(spokenAge(minutesAway(-6.5), now)).toBe("vor 6 Minuten");
+    expect(spokenAge(minutesAway(-24 * 60), now)).toBe("vor 1 Tag");
+    expect(spokenAge(minutesAway(-48 * 60), now)).toBe("vor 2 Tagen");
+  });
+
+  it("nennt frische Daten gerade eben", () => {
+    expect(spokenAge(now, now)).toBe("gerade eben");
   });
 });

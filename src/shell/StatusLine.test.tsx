@@ -19,7 +19,7 @@ describe("StatusLine", () => {
     );
     expect(screen.getByText("4m")).toBeTruthy();
     expect(screen.getByText("3h")).toBeTruthy();
-    expect(screen.getByLabelText(/wx: in Ordnung, geladen vor 4 min/)).toBeTruthy();
+    expect(screen.getByLabelText(/wx: in Ordnung, geladen vor 4 Minuten/)).toBeTruthy();
   });
 
   it("nennt eine Quelle ohne Daten ausdrücklich", () => {
@@ -27,6 +27,40 @@ describe("StatusLine", () => {
       <StatusLine mode="NORMAL" panes={panes} sources={[{ label: "cal", state: "ok" }]} clock="23:42" />,
     );
     expect(screen.getByLabelText("cal: in Ordnung, noch nicht geladen")).toBeTruthy();
+  });
+
+  it("zeigt die Alarmzahl der Quelle, auch wenn das Pane ausgeblendet ist", () => {
+    render(
+      <StatusLine
+        mode="NORMAL"
+        panes={[{ n: 1, label: "clock", active: true }]}
+        sources={[{ label: "pve", state: "ok", updatedAt: Date.now(), alerts: { count: 2, level: "crit" } }]}
+        clock="23:42"
+      />,
+    );
+    const marker = screen.getByText("!2");
+    expect(marker.className).toBe("crit");
+    expect(screen.getByLabelText(/pve: in Ordnung.*, 2 Alarme/)).toBeTruthy();
+  });
+
+  it("nennt einen einzelnen Alarm im Singular", () => {
+    render(
+      <StatusLine
+        mode="NORMAL"
+        panes={panes}
+        sources={[{ label: "pve", state: "ok", updatedAt: Date.now(), alerts: { count: 1, level: "warn" } }]}
+        clock="23:42"
+      />,
+    );
+    expect(screen.getByText("!1").className).toBe("warn");
+    expect(screen.getByLabelText(/, 1 Alarm$/)).toBeTruthy();
+  });
+
+  it("zeigt ohne Alarme kein Ausrufezeichen", () => {
+    render(
+      <StatusLine mode="NORMAL" panes={panes} sources={[{ label: "pve", state: "ok" }]} clock="23:42" />,
+    );
+    expect(screen.queryByText(/^!\d/)).toBeNull();
   });
 
   it("schreibt den Grund aus, statt nur rot zu leuchten", () => {

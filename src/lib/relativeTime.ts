@@ -11,16 +11,39 @@ export function relativeTime(d: Date, now = new Date()): string {
   return span(Math.round(h / 24), "d");
 }
 
-// Kompakte Altersangabe für die Statusline: 45s, 12m, 3h, 2d.
+type AgeUnit = "s" | "m" | "h" | "d";
+
 // Abgerundet, damit „12m" heißt: mindestens zwölf Minuten alt.
-export function shortAge(from: Date, now = new Date()): string {
+function agePart(from: Date, now: Date): { value: number; unit: AgeUnit } {
   const s = Math.max(0, Math.floor((now.getTime() - from.getTime()) / 1000));
-  if (s < 60) return `${s}s`;
+  if (s < 60) return { value: s, unit: "s" };
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return { value: m, unit: "m" };
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
+  if (h < 24) return { value: h, unit: "h" };
+  return { value: Math.floor(h / 24), unit: "d" };
+}
+
+// Kompakte Altersangabe für die Statusline: 45s, 12m, 3h, 2d.
+export function shortAge(from: Date, now = new Date()): string {
+  const { value, unit } = agePart(from, now);
+  return `${value}${unit}`;
+}
+
+const UNIT_WORDS: Record<AgeUnit, [string, string]> = {
+  s: ["Sekunde", "Sekunden"],
+  m: ["Minute", "Minuten"],
+  h: ["Stunde", "Stunden"],
+  d: ["Tag", "Tagen"],
+};
+
+// Dieselbe Rechnung wie shortAge, nur ausgeschrieben — sonst stünde in der Anzeige „6m"
+// und im Vorlesetext „vor 7 min".
+export function spokenAge(from: Date, now = new Date()): string {
+  const { value, unit } = agePart(from, now);
+  if (value === 0) return "gerade eben";
+  const words = UNIT_WORDS[unit];
+  return `vor ${value} ${value === 1 ? words[0] : words[1]}`;
 }
 
 export function isSameDay(a: Date, b: Date): boolean {
