@@ -21,6 +21,7 @@ import { fetchEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, News } from "./widgets/News";
 import type { SourceState } from "./shell/StatusLine";
 import { fetchHomelab, Homelab } from "./widgets/Homelab";
+import { SettingsPane } from "./shell/SettingsPane";
 
 type RowInfo = { url?: string };
 
@@ -48,6 +49,7 @@ export default function App() {
   const [ui, dispatch] = useReducer(uiReducer, initialUiState);
   const [seed, setSeed] = useState<string | null>(null);
   const [message, setMessage] = useState<string | undefined>(undefined);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const now = useNow();
   const paneRefs = useRef<Partial<Record<PaneId, HTMLElement | null>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
@@ -122,7 +124,10 @@ export default function App() {
     if (ui.mode === "NORMAL") setSeed(null);
   }, [ui.mode]);
 
-  useKeymap({ state: ui, dispatch, hints: hintMap, rowCount, selectedUrl, onSeed });
+  useKeymap({
+    state: ui, dispatch, hints: hintMap, rowCount, selectedUrl, onSeed,
+    overlayOpen: settingsOpen, onOverlayEscape: () => setSettingsOpen(false),
+  });
 
   useEffect(() => {
     if (ui.mode !== "NORMAL" || !ui.pane) return;
@@ -163,7 +168,7 @@ export default function App() {
         break;
       }
       case "settings":
-        setMessage("Einstellungen sind noch nicht eingebaut.");
+        setSettingsOpen(true);
         break;
       default:
         setMessage(`Unbekanntes Kommando: :${cmd}`);
@@ -188,6 +193,13 @@ export default function App() {
   const queryState = (q: { isError: boolean; isStale: boolean }): SourceState =>
     q.isError ? "crit" : q.isStale ? "warn" : "ok";
 
+  const layoutById = useMemo(
+    () => Object.fromEntries(config.layout.map((l) => [l.id, l])),
+    [config.layout],
+  );
+  const paneVisible = (id: PaneId) => layoutById[id]?.visible ?? true;
+  const paneSpan = (id: PaneId): 1 | 2 => layoutById[id]?.span ?? 1;
+
   let linkRow = -1;
 
   return (
@@ -202,8 +214,10 @@ export default function App() {
         </header>
 
         <PaneGrid>
+          {paneVisible("clock") && (
           <Pane
             title="Clock"
+            span={paneSpan("clock")}
             id="pane-1"
             ref={(el: HTMLElement | null) => { paneRefs.current.clock = el; }}
           >
@@ -220,52 +234,65 @@ export default function App() {
               ))}
             </div>
           </Pane>
+          )}
 
-          <Pane title="Weather" subtitle={config.location.label} span={2} id="pane-2"
+          {paneVisible("weather") && (
+          <Pane title="Weather" subtitle={config.location.label} span={paneSpan("weather")} id="pane-2"
             ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
           >
             <Weather data={wxQuery.data} selIndex={selIndex("weather")} />
           </Pane>
+          )}
 
-          <Pane title="Links" tall id="pane-3"
+          {paneVisible("links") && (
+          <Pane title="Links" span={paneSpan("links")} tall id="pane-3"
             ref={(el: HTMLElement | null) => { paneRefs.current.links = el; }}
           >
-            {config.linkGroups.map((g) => (
-              <div key={g.title}>
-                <div className="group-label">{g.title}</div>
-                <ul>
-                  {g.links.map((l) => {
-                    linkRow += 1;
-                    const i = linkRow;
-                    return (
-                      <li key={l.url} className={`row${isSel("links", i) ? " is-sel" : ""}`} data-row>
-                        <span className="hint">{l.hint ?? ""}</span>
-                        <span>{l.label}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
+            <nav aria-label="Links">
+              {config.linkGroups.map((g) => (
+                <div key={g.title}>
+                  <div className="group-label">{g.title}</div>
+                  <ul>
+                    {g.links.map((l) => {
+                      linkRow += 1;
+                      const i = linkRow;
+                      return (
+                        <li key={l.url} className={`row${isSel("links", i) ? " is-sel" : ""}`} data-row>
+                          <span className="hint">{l.hint ?? ""}</span>
+                          <span>{l.label}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </nav>
           </Pane>
+          )}
 
-          <Pane title="Agenda" id="pane-4"
+          {paneVisible("agenda") && (
+          <Pane title="Agenda" span={paneSpan("agenda")} id="pane-4"
             ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
           >
             <Agenda events={calQuery.data} selIndex={selIndex("agenda")} />
           </Pane>
+          )}
 
-          <Pane title="News" id="pane-5"
+          {paneVisible("news") && (
+          <Pane title="News" span={paneSpan("news")} id="pane-5"
             ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
           >
             <News items={newsQuery.data} selIndex={selIndex("news")} />
           </Pane>
+          )}
 
+          {paneVisible("homelab") && (
           <Pane title="Homelab" subtitle={config.homelab.node} span="full" id="pane-6"
             ref={(el: HTMLElement | null) => { paneRefs.current.homelab = el; }}
           >
             <Homelab data={labQuery.data} selIndex={selIndex("homelab")} />
           </Pane>
+          )}
 
           <CommandBar
             mode={ui.mode}
@@ -293,6 +320,17 @@ export default function App() {
       </div>
 
       <KeymapOverlay open={ui.showHelp} />
+      <SettingsPane
+        open={settingsOpen}
+        config={config}
+        guests={labQuery.data?.guests ?? []}
+        onClose={() => setSettingsOpen(false)}
+        onSave={(cfg) => {
+          updateConfig(cfg);
+          setSettingsOpen(false);
+          setMessage("Konfiguration gespeichert.");
+        }}
+      />
       <input
         ref={fileRef}
         type="file"

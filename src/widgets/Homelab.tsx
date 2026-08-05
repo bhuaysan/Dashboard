@@ -49,26 +49,34 @@ export function Homelab({ data, selIndex }: { data?: HomelabData; selIndex: numb
       <div className="lab-store">
         {data.storage.map((s) => <Bar key={s.name} name={s.name} pct={s.pct} />)}
       </div>
-      <div className="lab-guests">
-        {data.guests.map((g, i) => (
-          <div key={g.vmid} className={`guest${i === selIndex ? " is-sel" : ""}`} data-row>
-            {g.running ? (
-              <>
-                <span className="ok">●</span><span className="num">{g.vmid}</span>
-                <span className="name">{g.name}</span><span className="dim">run</span>
-                <span className="val">{g.cpu} %</span>
-                <span className="val">{g.mem} %</span>
-              </>
-            ) : (
-              <>
-                <span className="dim">○</span><span className="num">{g.vmid}</span>
-                <span className="name dim">{g.name}</span><span className="dim">stop</span>
-                <span className="val dim">–</span><span className="val dim">–</span>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
+      <table className="lab-guests">
+        <thead>
+          <tr>
+            <th scope="col">Zustand</th><th scope="col">VMID</th><th scope="col">Name</th>
+            <th scope="col">Status</th><th scope="col">CPU</th><th scope="col">Speicher</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.guests.map((g, i) => (
+            <tr key={g.vmid} className={`guest${i === selIndex ? " is-sel" : ""}`} data-row>
+              {g.running ? (
+                <>
+                  <td className="ok">●</td><td className="num">{g.vmid}</td>
+                  <td className="name">{g.name}</td><td className="dim">run</td>
+                  <td className="val">{g.cpu} %</td>
+                  <td className="val">{g.mem} %</td>
+                </>
+              ) : (
+                <>
+                  <td className="dim">○</td><td className="num">{g.vmid}</td>
+                  <td className="name dim">{g.name}</td><td className="dim">stop</td>
+                  <td className="val dim">–</td><td className="val dim">–</td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {data.alerts.length > 0 && (
         <div className="lab-alerts">
           {data.alerts.map((a, i) => (

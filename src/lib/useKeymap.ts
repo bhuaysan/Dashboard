@@ -63,6 +63,8 @@ type Params = {
   rowCount: number;
   selectedUrl: string | undefined;
   onSeed: (seed: string, mode: Mode) => void;
+  overlayOpen: boolean;
+  onOverlayEscape: () => void;
 };
 
 export function openUrl(url: string, newTab: boolean): void {
@@ -70,13 +72,17 @@ export function openUrl(url: string, newTab: boolean): void {
   else window.location.assign(url);
 }
 
-export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed }: Params): void {
+export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape }: Params): void {
   useEffect(() => {
     function onKeydown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        dispatch({ type: "reset" });
+        if (overlayOpen) onOverlayEscape();
+        else dispatch({ type: "reset" });
         return;
       }
+      // Solange ein Overlay offen ist, gilt keine andere globale Taste —
+      // sonst würde jeder Tastendruck im Formular als Kommando gedeutet.
+      if (overlayOpen) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (state.mode !== "NORMAL") return;
@@ -145,5 +151,5 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
     }
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [state, dispatch, hints, rowCount, selectedUrl, onSeed]);
+  }, [state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape]);
 }

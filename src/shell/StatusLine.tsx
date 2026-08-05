@@ -8,6 +8,12 @@ type Props = {
   note?: string;
 };
 
+const STATE_TEXT: Record<SourceState, string> = {
+  ok: "in Ordnung",
+  warn: "veraltet",
+  crit: "Fehler",
+};
+
 export function StatusLine({ mode, panes, sources, clock, note }: Props) {
   return (
     <footer className="statusline">
@@ -22,8 +28,8 @@ export function StatusLine({ mode, panes, sources, clock, note }: Props) {
       </span>
       <span className="sl-right">
         {sources.map((s) => (
-          <span key={s.label} className="sl-src">
-            <span className={s.state}>●</span> {s.label}
+          <span key={s.label} className="sl-src" aria-label={`${s.label}: ${STATE_TEXT[s.state]}`}>
+            <span className={s.state} aria-hidden="true">●</span> {s.label}
           </span>
         ))}
         <span className="dim">? keys</span>
