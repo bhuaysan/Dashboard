@@ -247,7 +247,7 @@ export default function App() {
           )}
 
           {paneVisible("links") && (
-          <Pane title="Links" span={paneSpan("links")} tall id="pane-3"
+          <Pane title="Links" span={paneSpan("links")} tall clip id="pane-3"
             ref={(el: HTMLElement | null) => { paneRefs.current.links = el; }}
           >
             <nav aria-label="Links">
@@ -273,7 +273,7 @@ export default function App() {
           )}
 
           {paneVisible("agenda") && (
-          <Pane title="Agenda" span={paneSpan("agenda")} id="pane-4"
+          <Pane title="Agenda" span={paneSpan("agenda")} clip id="pane-4"
             ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
           >
             <Agenda events={calQuery.data} selIndex={selIndex("agenda")} />
@@ -281,7 +281,7 @@ export default function App() {
           )}
 
           {paneVisible("news") && (
-          <Pane title="News" span={paneSpan("news")} id="pane-5"
+          <Pane title="News" span={paneSpan("news")} clip id="pane-5"
             ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
           >
             <News items={newsQuery.data} selIndex={selIndex("news")} />
