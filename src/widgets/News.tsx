@@ -1,6 +1,6 @@
 import type { Config } from "../config/schema";
 import { parseFeed, type NewsItem } from "../lib/rss";
-import { isSameDay, relativeTime } from "../lib/relativeTime";
+import { isSameDay } from "../lib/relativeTime";
 
 export type { NewsItem };
 
@@ -25,11 +25,16 @@ export function News({ items, selIndex }: { items?: NewsItem[]; selIndex: number
   if (items.length === 0) return <div className="dim">keine Feeds eingetragen</div>;
   const now = new Date();
   const fmtTime = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const stamp = (d: Date) => {
+    if (isSameDay(d, now)) return fmtTime.format(d);
+    const days = Math.max(1, Math.round((now.getTime() - d.getTime()) / 86400000));
+    return `${days} d`;
+  };
   return (
     <>
       {items.map((n, i) => (
         <div key={`${n.url}-${i}`} className={`news-row${i === selIndex ? " is-sel" : ""}`} data-row>
-          <span className="dim">{isSameDay(n.date, now) ? fmtTime.format(n.date) : relativeTime(n.date, now)}</span>
+          <span className="dim">{stamp(n.date)}</span>
           <span className="src">{n.source}</span>
           <span className="headline">{n.title}</span>
         </div>
