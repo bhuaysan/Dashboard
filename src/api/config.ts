@@ -22,6 +22,9 @@ export function useConfig() {
     },
     initialData: () => readLocalConfig() ?? defaultConfig,
     staleTime: 30_000,
+    refetchInterval: 15_000,              // Sync zwischen Geräten
+    refetchIntervalInBackground: false,   // pausiert im versteckten Tab
+    refetchOnWindowFocus: "always",
     retry: 1,
   });
 }
