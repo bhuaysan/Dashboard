@@ -25,7 +25,7 @@ export function Pane({ title, subtitle, span = 1, tall = false, clip = false, id
         {title}
         {subtitle ? <span className="sub">— {subtitle}</span> : null}
       </h2>
-      {children}
+      {clip ? <div className="pane-body">{children}</div> : children}
     </section>
   );
 }

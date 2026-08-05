@@ -80,7 +80,7 @@
 .pane:focus-within { border-color: var(--color-accent); }
 .pane:focus-within > .pane-title { color: var(--color-accent); }
 
-.pane--clip {
+.pane--clip > .pane-body {
   max-height: 24rem;
   overflow-y: auto;
   scrollbar-width: thin;
