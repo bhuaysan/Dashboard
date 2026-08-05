@@ -228,10 +228,10 @@ export default function App() {
               {new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(now)}
             </div>
             <div className="clock-zones">
-              {config.clock.secondary.map((z) => (
+              {config.clock.secondary.map((z, i) => (
                 <span key={z.label}>
+                  {i > 0 && "  ·  "}
                   {z.label} {new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: z.tz }).format(now)}
-                  {"  ·  "}
                 </span>
               ))}
             </div>
