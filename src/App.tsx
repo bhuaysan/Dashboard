@@ -15,47 +15,13 @@ import {
 import { exportConfig, importConfig } from "./config/io";
 import type { Config } from "./config/schema";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
+import { useCachedQuery } from "./api/useCachedQuery";
+import { fetchWeather, Weather } from "./widgets/Weather";
+import { fetchEvents, Agenda } from "./widgets/Agenda";
+import { fetchNews, News } from "./widgets/News";
+import type { SourceState } from "./shell/StatusLine";
 
 type RowInfo = { url?: string };
-
-const WX_DAYS = [
-  { d: "Do", hi: "32°", lo: "19°", text: "sonnig" },
-  { d: "Fr", hi: "29°", lo: "18°", text: "leicht bewölkt" },
-  { d: "Sa", hi: "24°", lo: "16°", text: "Regenschauer" },
-  { d: "So", hi: "22°", lo: "15°", text: "Regen mäßig" },
-  { d: "Mo", hi: "25°", lo: "14°", text: "bedeckt" },
-];
-
-const AGENDA: { day: string; events: { time: string; title: string; state?: "past" | "now" }[] }[] = [
-  {
-    day: "heute",
-    events: [
-      { time: "09:00 10:00", title: "Daily BDC-Team", state: "past" },
-      { time: "11:00 11:30", title: "1:1 mit Teamlead", state: "past" },
-      { time: "14:00 15:00", title: "Kunde XY — Workshop Datenmodell", state: "now" },
-      { time: "16:00 16:30", title: "Review Replication Flows" },
-    ],
-  },
-  {
-    day: "morgen",
-    events: [
-      { time: "ganztägig", title: "Brückentag Kollegin" },
-      { time: "08:30 09:15", title: "Sprint Planning" },
-      { time: "13:00 14:00", title: "Abstimmung Analytic Model" },
-    ],
-  },
-  { day: "Freitag", events: [{ time: "10:00 12:00", title: "Schulung SQLScript" }] },
-];
-
-const NEWS = [
-  { time: "14:02", src: "heise", title: "Neues Release-Modell für Cloud-Dienste angekündigt" },
-  { time: "13:47", src: "tagessch", title: "Wirtschaftsdaten des Quartals veröffentlicht" },
-  { time: "12:20", src: "heise", title: "Sicherheitsupdate für weit verbreitete Bibliothek" },
-  { time: "11:05", src: "golem", title: "Rechenzentrumsausbau in Süddeutschland" },
-  { time: "09:58", src: "tagessch", title: "Tarifverhandlungen gehen in die nächste Runde" },
-  { time: "08:31", src: "golem", title: "Neue Generation von Netzwerkkarten vorgestellt" },
-  { time: "07:12", src: "heise", title: "Open-Source-Projekt wechselt die Lizenz" },
-];
 
 const GUESTS = [
   { vmid: 100, name: "caddy", run: true, cpu: "0 %", mem: "8 %" },
@@ -113,6 +79,22 @@ export default function App() {
     return () => clearTimeout(t);
   }, [message]);
 
+  const wxQuery = useCachedQuery(
+    `wx:${config.location.lat},${config.location.lon}`,
+    () => fetchWeather(config.location),
+    600_000,
+  );
+  const calQuery = useCachedQuery(
+    `cal:${JSON.stringify(config.calendars)}`,
+    () => fetchEvents(config.calendars),
+    900_000,
+  );
+  const newsQuery = useCachedQuery(
+    `news:${JSON.stringify(config.feeds)}`,
+    () => fetchNews(config.feeds),
+    900_000,
+  );
+
   const flatLinks = useMemo<FlatLink[]>(
     () =>
       config.linkGroups.flatMap((g) =>
@@ -131,10 +113,10 @@ export default function App() {
     clock: [],
     weather: [],
     links: flatLinks.map((l) => ({ url: l.url })),
-    agenda: AGENDA.flatMap((d) => d.events.map(() => ({}))),
-    news: NEWS.map(() => ({})),
+    agenda: (calQuery.data ?? []).map(() => ({})),
+    news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
     homelab: GUESTS.map(() => ({})),
-  }), [flatLinks]);
+  }), [flatLinks, calQuery.data, newsQuery.data]);
 
   const hintMap = hints;
 
@@ -213,9 +195,12 @@ export default function App() {
 
   const timeFmt = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
   const isSel = (pane: PaneId, i: number) => ui.mode === "NORMAL" && ui.pane === pane && ui.row === i;
+  const selIndex = (pane: PaneId) => (ui.mode === "NORMAL" && ui.pane === pane ? ui.row : -1);
+
+  const queryState = (q: { isError: boolean; isStale: boolean }): SourceState =>
+    q.isError ? "crit" : q.isStale ? "warn" : "ok";
 
   let linkRow = -1;
-  let evRow = -1;
 
   return (
     <>
@@ -251,33 +236,7 @@ export default function App() {
           <Pane title="Weather" subtitle={config.location.label} span={2} id="pane-2"
             ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
           >
-            <div className="wx">
-              <div className="wx-main">
-                <div className="wx-now">
-                  <span className="wx-temp">24°</span>
-                  <span className="dim">gefühlt 26°</span>
-                  <span>leicht bewölkt</span>
-                </div>
-                <div className="wx-line">
-                  <span className="spark">▂▃▄▆▇▇▆▅▃▃▂▁</span>
-                  <span className="dim">nächste 12 h</span>
-                  <span className="dim">Regen 10 %</span>
-                </div>
-                <div className="wx-line dim">
-                  <span>↑ 05:58</span><span>↓ 21:04</span><span>Wind 11 km/h SW</span>
-                </div>
-              </div>
-              <div className="wx-days">
-                {WX_DAYS.map((d) => (
-                  <div className="wx-day" key={d.d}>
-                    <span className="dim">{d.d}</span>
-                    <span className="hi">{d.hi}</span>
-                    <span className="lo">{d.lo}</span>
-                    <span className="dim">{d.text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Weather data={wxQuery.data} selIndex={selIndex("weather")} />
           </Pane>
 
           <Pane title="Links" tall id="pane-3"
@@ -305,39 +264,13 @@ export default function App() {
           <Pane title="Agenda" id="pane-4"
             ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
           >
-            {AGENDA.map((d) => (
-              <div key={d.day}>
-                <div className="group-label">{d.day}</div>
-                {d.events.map((ev) => {
-                  evRow += 1;
-                  const i = evRow;
-                  const cls = [
-                    "ev",
-                    ev.state === "past" ? "is-past" : "",
-                    ev.state === "now" ? "is-now" : "",
-                    isSel("agenda", i) ? "is-sel" : "",
-                  ].filter(Boolean).join(" ");
-                  return (
-                    <div key={ev.title} className={cls} data-row>
-                      <span className="ev-time">{ev.time}</span>
-                      <span className="ev-title">{ev.title}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
+            <Agenda events={calQuery.data} selIndex={selIndex("agenda")} />
           </Pane>
 
           <Pane title="News" id="pane-5"
             ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
           >
-            {NEWS.map((n, i) => (
-              <div key={n.title} className={`news-row${isSel("news", i) ? " is-sel" : ""}`} data-row>
-                <span className="dim">{n.time}</span>
-                <span className="src">{n.src}</span>
-                <span className="headline">{n.title}</span>
-              </div>
-            ))}
+            <News items={newsQuery.data} selIndex={selIndex("news")} />
           </Pane>
 
           <Pane title="Homelab" subtitle={config.homelab.node} span="full" id="pane-6"
@@ -397,11 +330,11 @@ export default function App() {
           mode={ui.mode}
           panes={PANE_ORDER.map((p, i) => ({ n: i + 1, label: p.label, active: ui.pane === p.id }))}
           sources={[
-            { label: "wx", state: "ok" },
-            { label: "news", state: "ok" },
-            { label: "cal", state: "ok" },
+            { label: "wx", state: queryState(wxQuery) },
+            { label: "news", state: queryState(newsQuery) },
+            { label: "cal", state: queryState(calQuery) },
             { label: "pve", state: "ok" },
-            { label: "cfg", state: "ok" },
+            { label: "cfg", state: queryState(configQuery) },
           ]}
           clock={timeFmt.format(now)}
           note={message}

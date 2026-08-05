@@ -1,4 +1,7 @@
 import { lookup } from "node:dns/promises";
+import { Agent, fetch as undiciFetch } from "undici";
+
+const ipv4Agent = new Agent({ connect: { family: 4 } });
 
 export function isBlockedIp(ip: string): boolean {
   if (ip.includes(":")) return true;              // IPv6: pauschal ablehnen, nicht gebraucht
@@ -16,7 +19,7 @@ export function isBlockedIp(ip: string): boolean {
 export async function assertAllowed(url: URL, allowlist: string[]): Promise<void> {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Schema");
   if (!allowlist.includes(url.hostname)) throw new Error("Host nicht erlaubt");
-  const { address } = await lookup(url.hostname);
+  const { address } = await lookup(url.hostname, { family: 4 });
   if (isBlockedIp(address)) throw new Error("Private Adresse");
 }
 
@@ -62,7 +65,11 @@ export async function proxyFetch(rawUrl: string, allowlist: string[]): Promise<P
   let res: Response | undefined;
   for (let redirects = 0; redirects <= 3; redirects++) {
     await assertAllowed(url, allowlist);    // jedes Ziel erneut prüfen
-    res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(5000) });
+    res = await undiciFetch(url, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(5000),
+      dispatcher: ipv4Agent,
+    });
     const location = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && location && redirects < 3) {
       await res.body?.cancel();
