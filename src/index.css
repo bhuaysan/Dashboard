@@ -88,7 +88,7 @@
 .pane--clip > .pane-body {
   flex: 1;
   min-height: 0;
-  max-height: 24rem;
+  height: 24rem;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--color-border-strong) transparent;

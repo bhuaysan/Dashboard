@@ -247,7 +247,7 @@ export default function App() {
           )}
 
           {paneVisible("links") && (
-          <Pane title="Links" span={paneSpan("links")} tall clip id="pane-3"
+          <Pane title="Links" span={paneSpan("links")} tall={paneVisible("agenda") && paneVisible("news")} clip id="pane-3"
             ref={(el: HTMLElement | null) => { paneRefs.current.links = el; }}
           >
             <nav aria-label="Links">
