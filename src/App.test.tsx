@@ -57,6 +57,19 @@ describe("App", () => {
     }
   });
 
+  it("nimmt ein Kommando auch mit doppeltem Doppelpunkt an", () => {
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+    typeCommand("::refresh");
+    expect(invalidate).toHaveBeenCalled();
+    expect(screen.getByText("Quellen werden neu geladen.")).toBeTruthy();
+  });
+
   it("meldet ein unbekanntes Kommando, statt es stillschweigend zu schlucken", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>

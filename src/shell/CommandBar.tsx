@@ -39,7 +39,9 @@ export function CommandBar({ mode, seed, links, search, onModeChange, onCommand 
   function onEnter() {
     const v = value.trim();
     if (v.startsWith(":")) {
-      const cmd = v.slice(1);
+      // Mehrere Doppelpunkte sind kein Fehler: die Zeile öffnet sich bereits mit einem,
+      // und wer ihn aus Gewohnheit noch einmal tippt, meint dasselbe Kommando.
+      const cmd = v.replace(/^:+\s*/, "");
       close();
       if (cmd !== "") onCommand(cmd);
       return;

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export type Mode = "NORMAL" | "INSERT" | "COMMAND";
 export type PaneId = "clock" | "weather" | "links" | "agenda" | "news" | "homelab";
@@ -83,11 +83,23 @@ export function openUrl(url: string, newTab: boolean): void {
 }
 
 export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
+  // Der Handler kennt nur den Zustand aus dem letzten Render. Kommen zwei Tasten an,
+  // bevor React neu gerendert hat, sähe die zweite noch den alten Modus und würde ihn
+  // überschreiben — aus ":s" wurde so eine Suche nach "s" statt eines Kommandos.
+  // Deshalb werden Modus und Kürzelpuffer hier sofort mitgeführt.
+  const live = useRef({ mode: state.mode, hintBuffer: state.hintBuffer });
+  useEffect(() => {
+    live.current = { mode: state.mode, hintBuffer: state.hintBuffer };
+  }, [state.mode, state.hintBuffer]);
+
   useEffect(() => {
     function onKeydown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         if (overlayOpen) onOverlayEscape();
-        else dispatch({ type: "reset" });
+        else {
+          live.current = { mode: "NORMAL", hintBuffer: "" };
+          dispatch({ type: "reset" });
+        }
         return;
       }
       // Solange ein Overlay offen ist, gilt keine andere globale Taste —
@@ -95,7 +107,7 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
       if (overlayOpen) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (state.mode !== "NORMAL") return;
+      if (live.current.mode !== "NORMAL") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (state.showHelp) {
@@ -109,27 +121,33 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
         return;
       }
       if (e.key === "/" || e.key === ":") {
-        onSeed(e.key === ":" ? ":" : "", e.key === ":" ? "COMMAND" : "INSERT");
+        const mode: Mode = e.key === ":" ? "COMMAND" : "INSERT";
+        live.current.mode = mode;
+        onSeed(e.key === ":" ? ":" : "", mode);
         e.preventDefault();
         return;
       }
       // Nur solange kein Kürzel angefangen ist — sonst wäre das zweite Zeichen von "gg"
       // nicht erreichbar.
-      if (e.key === "g" && state.hintBuffer === "") {
+      if (e.key === "g" && live.current.hintBuffer === "") {
+        live.current.hintBuffer = "g";
         dispatch({ type: "hint", buffer: "g" });
         e.preventDefault();
         return;
       }
-      if (state.hintBuffer !== "") {
+      if (live.current.hintBuffer !== "") {
         if (e.key.length !== 1) return;
-        const buf = state.hintBuffer + e.key;
+        const buf = live.current.hintBuffer + e.key;
         const url = hints[buf];
         if (url) {
           openUrl(url, e.shiftKey);
+          live.current.hintBuffer = "";
           dispatch({ type: "hint", buffer: "" });
         } else {
           // Kürzel sind genau zwei Zeichen: nach dem zweiten steht fest, dass keines passt.
-          dispatch({ type: "hint", buffer: buf.length >= 2 ? "" : buf });
+          const next = buf.length >= 2 ? "" : buf;
+          live.current.hintBuffer = next;
+          dispatch({ type: "hint", buffer: next });
         }
         e.preventDefault();
         return;
@@ -157,6 +175,7 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
         return;
       }
       if (/^[a-zA-Z0-9äöüß]$/.test(e.key)) {
+        live.current.mode = "INSERT";
         onSeed(e.key, "INSERT");
         e.preventDefault();
       }

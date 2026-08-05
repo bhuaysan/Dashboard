@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { initialUiState, openUrl, useKeymap, type PaneId, type UiAction, type UiState } from "./useKeymap";
+import { initialUiState, openUrl, useKeymap, type Mode, type PaneId, type UiAction, type UiState } from "./useKeymap";
 
 const ALL_PANES: ReadonlySet<PaneId> = new Set<PaneId>([
   "clock", "weather", "links", "agenda", "news", "homelab",
@@ -11,18 +11,26 @@ function setup(state: Partial<UiState>, options: {
   visiblePanes?: ReadonlySet<PaneId>;
 } = {}) {
   const dispatch = vi.fn<(a: UiAction) => void>();
+  const onSeed = vi.fn<(seed: string, mode: Mode) => void>();
   renderHook(() => useKeymap({
     state: { ...initialUiState, ...state },
     dispatch,
     hints: options.hints ?? {},
     rowCount: 0,
     selectedUrl: undefined,
-    onSeed: () => undefined,
+    onSeed,
     overlayOpen: false,
     onOverlayEscape: () => undefined,
     visiblePanes: options.visiblePanes ?? ALL_PANES,
   }));
-  return dispatch;
+  return Object.assign(dispatch, { onSeed });
+}
+
+// Zwei Tasten im selben Tick, ohne dass React dazwischen rendern kann — fireEvent
+// würde jedes Ereignis einzeln durch act() schleusen und die Lücke gerade zuschütten.
+function pressTwiceInOneTick(first: string, second: string) {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: first }));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: second }));
 }
 
 function press(key: string, init: KeyboardEventInit = {}) {
@@ -46,6 +54,31 @@ describe("Kürzel", () => {
     const dispatch = setup({ hintBuffer: "g" }, { hints: { gd: "https://example.com/" } });
     press("x");
     expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "" });
+  });
+});
+
+describe("Schnelles Tippen", () => {
+  it("behält den Kommandomodus, wenn direkt nach dem : weitergetippt wird", () => {
+    const dispatch = setup({});
+    pressTwiceInOneTick(":", "s");
+    expect(dispatch.onSeed).toHaveBeenCalledTimes(1);
+    expect(dispatch.onSeed).toHaveBeenCalledWith(":", "COMMAND");
+  });
+
+  it("behält den Suchmodus, wenn direkt nach dem ersten Zeichen weitergetippt wird", () => {
+    const dispatch = setup({});
+    pressTwiceInOneTick("d", "a");
+    expect(dispatch.onSeed).toHaveBeenCalledTimes(1);
+    expect(dispatch.onSeed).toHaveBeenCalledWith("d", "INSERT");
+  });
+
+  it("öffnet ein schnell getipptes Kürzel, statt es an die Suche zu verlieren", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const dispatch = setup({}, { hints: { gd: "https://example.com/" } });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "g" }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "d", shiftKey: true }));
+    expect(dispatch.onSeed).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith("https://example.com/", "_blank", "noopener");
   });
 });
 
