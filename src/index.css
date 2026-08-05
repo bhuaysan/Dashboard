@@ -90,6 +90,7 @@
   min-height: 0;
   height: 24rem;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--color-border-strong) transparent;
 }
