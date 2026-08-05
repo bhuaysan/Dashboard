@@ -32,6 +32,13 @@ enthält keine Secrets. Aufbau: `src/config/schema.ts` (Zod). `GET /api/config` 
 `DASHBOARD_WRITE_ALLOW`. Kaputte Dateien landen als `config.json.bak`, es wird auf die Defaults
 zurückgefallen (`src/config/defaults.ts`). Export/Import geht auch über `:export` / `:import`.
 
+Jedes Speichern hebt den vorherigen Stand auf: `config.json.1` ist der jüngste, `config.json.7`
+der älteste. Einen davon zurückholen:
+
+```bash
+ssh root@10.0.10.20 'cd /opt/dashboard && cp config.json.1 config.json && chown dashboard:dashboard config.json && systemctl restart dashboard'
+```
+
 ## .env
 
 Nur auf dem Server, `chmod 600`, nicht in Git. Variablen siehe `.env.example`:

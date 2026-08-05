@@ -15,6 +15,7 @@ dist-ssr
 # Secrets und lokale Dateien
 .env
 config.json
+config.json.*
 pve-ca.pem
 
 # Editor directories and files

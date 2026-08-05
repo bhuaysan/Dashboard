@@ -225,6 +225,16 @@ export default function App() {
   const queryState = (q: { isError: boolean; isStale: boolean }): SourceState =>
     q.isError ? "crit" : q.isStale ? "warn" : "ok";
 
+  // Der erste Fehler wird ausgeschrieben — ein roter Punkt allein sagt nicht, was fehlt.
+  const failed = ([
+    ["wx", wxQuery.error],
+    ["news", newsQuery.error],
+    ["cal", calQuery.error],
+    ["pve", labQuery.error],
+    ["cfg", configQuery.error],
+  ] as const).find(([, err]) => err !== null);
+  const problem = failed && failed[1] ? `${failed[0]}: ${failed[1].message}` : undefined;
+
   let linkRow = -1;
 
   return (
@@ -329,14 +339,19 @@ export default function App() {
             .filter((p) => visiblePanes.has(p.id))
             .map(({ n, label, active }) => ({ n, label, active }))}
           sources={[
-            { label: "wx", state: queryState(wxQuery) },
-            { label: "news", state: queryState(newsQuery) },
-            { label: "cal", state: queryState(calQuery) },
-            { label: "pve", state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery) },
-            { label: "cfg", state: queryState(configQuery) },
+            { label: "wx", state: queryState(wxQuery), updatedAt: wxQuery.dataUpdatedAt },
+            { label: "news", state: queryState(newsQuery), updatedAt: newsQuery.dataUpdatedAt },
+            { label: "cal", state: queryState(calQuery), updatedAt: calQuery.dataUpdatedAt },
+            {
+              label: "pve",
+              state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery),
+              updatedAt: labQuery.dataUpdatedAt,
+            },
+            { label: "cfg", state: queryState(configQuery), updatedAt: configQuery.dataUpdatedAt },
           ]}
           clock={timeFmt.format(now)}
           note={message}
+          problem={problem}
         />
       </div>
 

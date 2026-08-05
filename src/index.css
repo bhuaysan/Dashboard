@@ -234,6 +234,10 @@ body {
 .sl-panes .is-active { color: var(--color-fg); }
 .sl-right { margin-left: auto; display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; }
 .sl-src { display: inline-flex; gap: .3rem; align-items: baseline; }
+.sl-problem {
+  color: var(--color-crit);
+  max-width: 38ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .sl-clock { color: var(--color-fg); }
 
 .overlay {

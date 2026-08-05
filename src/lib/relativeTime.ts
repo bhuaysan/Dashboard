@@ -11,6 +11,18 @@ export function relativeTime(d: Date, now = new Date()): string {
   return span(Math.round(h / 24), "d");
 }
 
+// Kompakte Altersangabe für die Statusline: 45s, 12m, 3h, 2d.
+// Abgerundet, damit „12m" heißt: mindestens zwölf Minuten alt.
+export function shortAge(from: Date, now = new Date()): string {
+  const s = Math.max(0, Math.floor((now.getTime() - from.getTime()) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
 export function isSameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }

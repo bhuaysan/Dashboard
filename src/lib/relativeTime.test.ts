@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { relativeTime } from "./relativeTime";
+import { relativeTime, shortAge } from "./relativeTime";
 
 const now = new Date("2026-08-05T12:00:00Z");
 const minutesAway = (n: number) => new Date(now.getTime() + n * 60_000);
@@ -20,5 +20,18 @@ describe("relativeTime", () => {
   it("nennt den Augenblick gerade eben", () => {
     expect(relativeTime(now, now)).toBe("gerade eben");
     expect(relativeTime(minutesAway(0.4), now)).toBe("gerade eben");
+  });
+});
+
+describe("shortAge", () => {
+  it("rundet ab, damit die Angabe nicht jünger wirkt als die Daten sind", () => {
+    expect(shortAge(minutesAway(-0.5), now)).toBe("30s");
+    expect(shortAge(minutesAway(-1.9), now)).toBe("1m");
+    expect(shortAge(minutesAway(-119), now)).toBe("1h");
+    expect(shortAge(minutesAway(-47 * 60), now)).toBe("1d");
+  });
+
+  it("bleibt bei Uhrenversatz in der Zukunft bei 0s", () => {
+    expect(shortAge(minutesAway(5), now)).toBe("0s");
   });
 });
