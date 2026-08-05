@@ -207,11 +207,6 @@ export default function App() {
   return (
     <>
       <div className="app">
-        <header className="topline">
-          <span>dashboard</span>
-          <span>Alle Systeme laufen. Schnell wegsehen, bevor das auffällt.</span>
-        </header>
-
         <PaneGrid>
           {paneVisible("clock") && (
           <Pane
