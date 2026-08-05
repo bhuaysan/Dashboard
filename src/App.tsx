@@ -17,8 +17,8 @@ import type { Config } from "./config/schema";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
 import { useCachedQuery } from "./api/useCachedQuery";
 import { fetchWeather, Weather } from "./widgets/Weather";
-import { fetchEvents, Agenda } from "./widgets/Agenda";
-import { fetchNews, News } from "./widgets/News";
+import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
+import { fetchNews, reviveNews, News } from "./widgets/News";
 import type { SourceState } from "./shell/StatusLine";
 import { fetchHomelab, Homelab } from "./widgets/Homelab";
 import { SettingsPane } from "./shell/SettingsPane";
@@ -75,13 +75,15 @@ export default function App() {
     `cal:${JSON.stringify(config.calendars)}`,
     () => fetchEvents(config.calendars),
     900_000,
+    { revive: reviveEvents },
   );
   const newsQuery = useCachedQuery(
     `news:${JSON.stringify(config.feeds)}`,
     () => fetchNews(config.feeds),
     900_000,
+    { revive: reviveNews },
   );
-  const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, 60_000);
+  const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, { refetchIntervalMs: 60_000 });
 
   const flatLinks = useMemo<FlatLink[]>(
     () =>

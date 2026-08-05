@@ -3,6 +3,10 @@ import { parseIcs, type CalEvent } from "../lib/ics";
 
 export type { CalEvent };
 
+export function reviveEvents(events: CalEvent[]): CalEvent[] {
+  return events.map((e) => ({ ...e, start: new Date(e.start), end: new Date(e.end) }));
+}
+
 export async function fetchEvents(cals: Config["calendars"]): Promise<CalEvent[]> {
   const from = new Date();
   from.setHours(0, 0, 0, 0);

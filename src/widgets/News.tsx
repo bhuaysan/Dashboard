@@ -4,6 +4,10 @@ import { isSameDay, relativeTime } from "../lib/relativeTime";
 
 export type { NewsItem };
 
+export function reviveNews(items: NewsItem[]): NewsItem[] {
+  return items.map((n) => ({ ...n, date: new Date(n.date) }));
+}
+
 export async function fetchNews(feeds: Config["feeds"]): Promise<NewsItem[]> {
   const all: NewsItem[] = [];
   await Promise.all(feeds.map(async (feed) => {
