@@ -209,10 +209,7 @@ export default function App() {
       <div className="app">
         <header className="topline">
           <span>dashboard</span>
-          <span>
-            <strong>{new Intl.DateTimeFormat("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }).format(now)}</strong>
-            {"  "}KW {isoWeek(now)}
-          </span>
+          <span>Alle Systeme laufen. Schnell wegsehen, bevor das auffällt.</span>
         </header>
 
         <PaneGrid>
@@ -226,6 +223,7 @@ export default function App() {
             <div className="clock-time">{timeFmt.format(now)}</div>
             <div className="clock-date">
               {new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(now)}
+              {"  ·  KW "}{isoWeek(now)}
             </div>
             <div className="clock-zones">
               {config.clock.secondary.map((z, i) => (
