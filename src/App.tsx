@@ -21,7 +21,7 @@ import { useCachedQuery } from "./api/useCachedQuery";
 import { fetchWeather, Weather } from "./widgets/Weather";
 import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, reviveNews, News } from "./widgets/News";
-import type { SourceState } from "./shell/StatusLine";
+import type { Note, SourceState } from "./shell/StatusLine";
 import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
 import { SettingsPane } from "./shell/SettingsPane";
 
@@ -60,7 +60,7 @@ export default function App() {
   const config = configQuery.data;
   const [ui, dispatch] = useReducer(uiReducer, initialUiState);
   const [seed, setSeed] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | undefined>(undefined);
+  const [message, setMessage] = useState<Note | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const now = useNow();
   const paneRefs = useRef<Partial<Record<PaneId, HTMLElement | null>>>({});
@@ -73,7 +73,9 @@ export default function App() {
   }, [config.theme]);
 
   useEffect(() => {
-    if (message === undefined) return;
+    // Eine Fehlermeldung bleibt stehen, bis eine neue Meldung sie ablöst — wer eine
+    // Fehlermeldung nach 2,5 s nicht gelesen hat, hat sie nie gesehen.
+    if (message === undefined || message.level === "error") return;
     const t = setTimeout(() => setMessage(undefined), 2500);
     return () => clearTimeout(t);
   }, [message]);
@@ -182,9 +184,9 @@ export default function App() {
     saveConfig.mutate(next, {
       onError: (err) => {
         if (err instanceof ConfigConflictError) {
-          setMessage("Ein anderes Gerät hat zuerst gespeichert. Seite neu laden.");
+          setMessage({ text: "Ein anderes Gerät hat zuerst gespeichert. Seite neu laden.", level: "error" });
         } else {
-          setMessage("Server nicht erreichbar — Speichern ist gesperrt.");
+          setMessage({ text: "Server nicht erreichbar — Speichern ist gesperrt.", level: "error" });
         }
       },
     });
@@ -194,7 +196,7 @@ export default function App() {
     switch (cmd) {
       case "export":
         exportConfig(config);
-        setMessage("Konfiguration als Datei gesichert.");
+        setMessage({ text: "Konfiguration als Datei gesichert.", level: "info" });
         break;
       case "import":
         fileRef.current?.click();
@@ -202,7 +204,7 @@ export default function App() {
       case "refresh":
         // Nur die Abfragen neu holen — Fokus, Auswahl und Suchzeile bleiben, wie sie sind.
         void queryClient.invalidateQueries();
-        setMessage("Quellen werden neu geladen.");
+        setMessage({ text: "Quellen werden neu geladen.", level: "info" });
         break;
       case "reload":
         window.location.reload();
@@ -211,14 +213,14 @@ export default function App() {
         const effective = document.documentElement.dataset.theme ??
           (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
         updateConfig({ ...config, theme: effective === "dark" ? "light" : "dark" });
-        setMessage(`Theme: ${effective === "dark" ? "light" : "dark"}`);
+        setMessage({ text: `Theme: ${effective === "dark" ? "light" : "dark"}`, level: "info" });
         break;
       }
       case "settings":
         setSettingsOpen(true);
         break;
       default:
-        setMessage(`Unbekanntes Kommando: :${cmd}`);
+        setMessage({ text: `Unbekanntes Kommando: :${cmd}`, level: "error" });
     }
   }
 
@@ -227,9 +229,9 @@ export default function App() {
     const result = await importConfig(file);
     if (result.ok) {
       updateConfig(result.config);
-      setMessage("Konfiguration importiert.");
+      setMessage({ text: "Konfiguration importiert.", level: "info" });
     } else {
-      setMessage(result.message);
+      setMessage({ text: result.message, level: "error" });
     }
   }
 
@@ -397,11 +399,10 @@ export default function App() {
         config={config}
         guests={labQuery.data?.guests ?? []}
         onClose={() => setSettingsOpen(false)}
-        onSave={(cfg) => {
-          updateConfig(cfg);
-          setSettingsOpen(false);
-          setMessage("Konfiguration gespeichert.");
-        }}
+        save={saveConfig}
+        // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
+        // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
+        onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}
       />
       <input
         ref={fileRef}

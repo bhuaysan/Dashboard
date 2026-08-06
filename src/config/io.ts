@@ -1,4 +1,5 @@
 import { configSchema, type Config } from "./schema";
+import { describeIssue } from "./describeIssue";
 
 export function exportConfig(cfg: Config): void {
   const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
@@ -22,8 +23,8 @@ export async function importConfig(file: File): Promise<ImportResult> {
   const parsed = configSchema.safeParse(raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    const path = issue && issue.path.length > 0 ? issue.path.join(".") : "(Wurzel)";
-    return { ok: false, message: `Konfiguration ungültig: Fehler bei ${path}.` };
+    const detail = issue ? describeIssue(issue) : "Die Struktur passt nicht.";
+    return { ok: false, message: `Konfiguration ungültig: ${detail}` };
   }
   return { ok: true, config: parsed.data };
 }

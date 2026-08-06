@@ -67,12 +67,17 @@ describe("/api/config", () => {
     expect(onDisk.theme).toBe("light");
   });
 
-  it("PUT mit altem If-Match liefert 409", async () => {
+  it("PUT mit altem If-Match liefert 409 und den aktuellen Stand", async () => {
     const before = await getConfig();
     const first = await putConfig({ ...before, theme: "dark" as const }, before.updatedAt);
     expect(first.status).toBe(200);
+    const firstSaved = (await first.json()) as Config;
     const second = await putConfig({ ...before, theme: "light" as const }, before.updatedAt);
     expect(second.status).toBe(409);
+    // Der Client braucht diesen Stempel, um einen erneuten Versuch erfolgreich zu
+    // wiederholen — ohne ihn würde er mit demselben veralteten If-Match wieder scheitern.
+    const body = (await second.json()) as { current?: string };
+    expect(body.current).toBe(firstSaved.updatedAt);
   });
 
   it("PUT mit ungültigem Body liefert 400", async () => {

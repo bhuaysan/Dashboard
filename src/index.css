@@ -322,6 +322,11 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
   max-width: 38ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sl-clock { color: var(--color-fg); }
+.sl-note {
+  color: var(--color-fg);
+  max-width: 38ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sl-note.crit { color: var(--color-crit); }
 
 .overlay {
   position: fixed; inset: 0; background: color-mix(in srgb, var(--color-bg-alt) 82%, transparent);
@@ -403,6 +408,12 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 /* Ohne eigene Darstellung sah ein abgeschalteter Pfeil aus wie ein benutzbarer. */
 .rowact:disabled { color: var(--color-border-strong); cursor: default; }
 .rowact:disabled:hover { color: var(--color-border-strong); }
+/* Zweiter Klick löscht: eine ganze Gruppe mit allen Links ist mehr Verlust als ein
+   einzelner Link, und ✕ sitzt direkt neben harmlosen Änderungen wie dem Gruppennamen.
+   crit auf bg ist bereits gegen WCAG AA nachgerechnet — hier nur seitenverkehrt. */
+.rowact--del.is-confirm, .rowact--del.is-confirm:hover {
+  background: var(--color-crit); color: var(--color-bg); padding: 0 .35rem;
+}
 .grouprow { margin: .8rem 0 .3rem; display: flex; gap: .5rem; align-items: baseline; }
 .grouprow:first-child { margin-top: 0; }
 .addline { margin-top: .5rem; }

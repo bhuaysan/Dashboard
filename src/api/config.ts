@@ -4,9 +4,13 @@ import { readLocalConfig, writeLocalConfig } from "../config/local";
 import { defaultConfig } from "../config/defaults";
 
 export class ConfigConflictError extends Error {
-  constructor() {
+  // Der Stand, den der Server tatsächlich hat — ohne ihn würde ein erneuter Versuch mit
+  // demselben veralteten If-Match immer wieder an genau demselben 409 scheitern.
+  readonly current: string | undefined;
+  constructor(current: string | undefined) {
     super("conflict");
     this.name = "ConfigConflictError";
+    this.current = current;
   }
 }
 
@@ -38,7 +42,10 @@ export function useSaveConfig() {
         headers: { "content-type": "application/json", "If-Match": next.updatedAt },
         body: JSON.stringify(next),
       });
-      if (res.status === 409) throw new ConfigConflictError();
+      if (res.status === 409) {
+        const body = await res.json().catch(() => undefined) as { current?: unknown } | undefined;
+        throw new ConfigConflictError(typeof body?.current === "string" ? body.current : undefined);
+      }
       if (!res.ok) throw new Error("Speichern fehlgeschlagen");
       return configSchema.parse(await res.json());
     },

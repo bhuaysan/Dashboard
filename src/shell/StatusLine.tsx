@@ -9,12 +9,17 @@ type Source = {
   alerts?: { count: number; level: "warn" | "crit" };
 };
 
+// info verschwindet von selbst; error bleibt stehen, bis eine neue Meldung sie ablöst —
+// eine Fehlermeldung, die nach 2,5 s verschwindet, ist gelesen worden oder nicht, und der
+// Nutzer erfährt nie, welches der beiden es war.
+export type Note = { text: string; level: "info" | "error" };
+
 type Props = {
   mode: string;
   panes: { n: number; label: string; active: boolean }[];
   sources: Source[];
   clock: string;
-  note?: string;
+  note?: Note;
   problem?: string;
 };
 
@@ -71,7 +76,20 @@ export function StatusLine({ mode, panes, sources, clock, note, problem }: Props
         {problem
           ? <span className="sl-problem" role="status">! {problem}</span>
           : <span className="dim">? keys</span>}
-        <span className="sl-clock">{note ?? clock}</span>
+        {/* Ein frischer Knoten mit Text statt eines leeren, dauerhaft montierten — beide
+            role-Varianten sind gängige, gut unterstützte Screenreader-Muster, aber nur
+            wenn wirklich etwas zu sagen ist: sonst würde die tickende Uhr jede Minute
+            als "Status" angesagt. */}
+        {note
+          ? (
+            <span
+              className={`sl-note${note.level === "error" ? " crit" : ""}`}
+              role={note.level === "error" ? "alert" : "status"}
+            >
+              {note.text}
+            </span>
+          )
+          : <span className="sl-clock">{clock}</span>}
       </span>
     </footer>
   );

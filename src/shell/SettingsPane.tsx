@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { configSchema, type Config } from "../config/schema";
+import { describeIssue, issueRootKey } from "../config/describeIssue";
+import { ConfigConflictError, type useSaveConfig } from "../api/config";
 
 type Guest = { vmid: number; name: string };
+export type SaveConfig = ReturnType<typeof useSaveConfig>;
 
 type Props = {
   open: boolean;
   config: Config;
   guests: Guest[];
   onClose: () => void;
-  onSave: (cfg: Config) => void;
+  save: SaveConfig;
+  /** Ausschließlich die Erfolgsmeldung außerhalb des Dialogs — Schließen und Fehlerfall
+      übernimmt der Dialog selbst, weil nur er weiß, ob der Entwurf erhalten bleiben muss. */
+  onSaved: () => void;
 };
 
 const SECTIONS = [
@@ -22,6 +28,19 @@ const SECTIONS = [
   ["proxy", "Proxy"],
 ] as const;
 type Sec = (typeof SECTIONS)[number][0];
+
+// Ordnet einen Zod-Pfad seinem Abschnitt zu, damit ein Fehler tief in der Konfiguration
+// den Nutzer auch zu dem Reiter bringt, der das Feld tatsächlich zeigt.
+const SECTION_BY_ROOT: Record<string, Sec> = {
+  theme: "layout", layout: "layout",
+  clock: "place", location: "place",
+  linkGroups: "links",
+  feeds: "feeds",
+  calendars: "cal",
+  search: "search",
+  proxyAllowlist: "proxy",
+  homelab: "lab",
+};
 
 function RowActs({ first, last, onMove, onDel }: {
   first: boolean; last: boolean; onMove: (delta: number) => void; onDel: () => void;
@@ -78,26 +97,35 @@ function move<T>(arr: T[], i: number, delta: number): T[] {
 
 type BangRow = { key: string; tpl: string };
 
-export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
+export function SettingsPane({ open, config, guests, onClose, save, onSaved }: Props) {
   const [draft, setDraft] = useState<Config>(config);
   const [sec, setSec] = useState<Sec>("links");
   const [error, setError] = useState<string | undefined>(undefined);
   const [placeQuery, setPlaceQuery] = useState(config.location.label);
   const [searching, setSearching] = useState(false);
+  // Index der Gruppe, deren ✕ schon einmal geklickt wurde. Nur eine gleichzeitig — ein
+  // zweiter Klick woanders meint eine neue Absicht, keine Bestätigung der ersten.
+  const [confirmDelGroup, setConfirmDelGroup] = useState<number | null>(null);
   // Bangs sind in der Config ein Objekt. Beim Umbenennen im Objekt frisst ein bereits
   // vergebener Schlüssel den anderen Eintrag stillschweigend auf — also wird hier eine
   // Liste bearbeitet und erst beim Speichern wieder zum Objekt gefaltet.
   const [bangs, setBangs] = useState<BangRow[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
 
+  // Nur beim Öffnen selbst aus config neu befüllen — config pollt alle 15 s vom Server
+  // nach, und ein Effekt auf [open, config] würde bei jeder echten Änderung während
+  // einer laufenden Bearbeitung den halb fertigen Entwurf stillschweigend überschreiben.
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       setDraft(config);
       setPlaceQuery(config.location.label);
       setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
       setError(undefined);
+      setConfirmDelGroup(null);
     }
+    wasOpen.current = open;
   }, [open, config]);
 
   // Fokus in den Dialog und beim Schließen zurück auf die Stelle, von der er kam.
@@ -151,7 +179,7 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
     }
   }
 
-  function save() {
+  function handleSave() {
     const hints = draft.linkGroups.flatMap((g) => g.links.map((l) => l.hint)).filter((h): h is string => !!h);
     if (new Set(hints).size !== hints.length) {
       setError("Doppelte Link-Kürzel — jedes Kürzel darf nur einmal vorkommen.");
@@ -208,11 +236,35 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
     const parsed = configSchema.safeParse(candidate);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
-      const path = issue && issue.path.length > 0 ? ` bei ${issue.path.join(".")}` : "";
-      setError(`Ungültiger Wert${path}.`);
+      if (issue === undefined) {
+        setError("Ungültige Konfiguration.");
+        return;
+      }
+      // Statt des rohen Zod-Pfads eine lesbare Beschreibung — und gleich zu dem
+      // Abschnitt springen, der das betroffene Feld tatsächlich zeigt.
+      setError(describeIssue(issue));
+      const target = SECTION_BY_ROOT[issueRootKey(issue) ?? ""];
+      if (target) setSec(target);
       return;
     }
-    onSave(parsed.data);
+    setError(undefined);
+    save.mutate(parsed.data, {
+      onSuccess: () => {
+        onSaved();
+        onClose();
+      },
+      onError: (err) => {
+        if (err instanceof ConfigConflictError) {
+          setError("Ein anderes Gerät hat zwischenzeitlich gespeichert. Erneut speichern übernimmt deinen Stand hier.");
+          // Ohne den frischen Stempel würde ein erneuter Versuch mit demselben If-Match
+          // immer wieder an genau demselben 409 scheitern — der Entwurf selbst bleibt,
+          // wie er ist.
+          if (err.current) setDraft((d) => ({ ...d, updatedAt: err.current as string }));
+        } else {
+          setError("Server nicht erreichbar — Speichern ist gesperrt. Der Entwurf bleibt in diesem Fenster erhalten.");
+        }
+      },
+    });
   }
 
   if (!open) return null;
@@ -281,8 +333,37 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
                         }))}
                       />
                       <span className="rowacts">
-                        <button type="button" className="rowact rowact--del" aria-label="Gruppe löschen"
-                          onClick={() => upd((d) => ({ ...d, linkGroups: d.linkGroups.filter((_, i) => i !== gi) }))}>✕</button>
+                        {(() => {
+                          const armed = confirmDelGroup === gi;
+                          const n = g.links.length;
+                          const del = () => {
+                            upd((d) => ({ ...d, linkGroups: d.linkGroups.filter((_, i) => i !== gi) }));
+                            setConfirmDelGroup(null);
+                          };
+                          return (
+                            <button
+                              type="button"
+                              className={`rowact rowact--del${armed ? " is-confirm" : ""}`}
+                              aria-label={
+                                armed
+                                  ? `„${g.title}" mit ${n} ${n === 1 ? "Link" : "Links"} endgültig löschen — noch einmal klicken zum Bestätigen`
+                                  : `Gruppe „${g.title}" löschen`
+                              }
+                              // Nichts zu verlieren: eine leere Gruppe löscht sofort, ohne den
+                              // Zwischenschritt, der nur für echten Inhalt lohnt.
+                              onClick={n === 0 ? del : armed ? del : () => setConfirmDelGroup(gi)}
+                              onBlur={() => setConfirmDelGroup((cur) => (cur === gi ? null : cur))}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape" && armed) {
+                                  setConfirmDelGroup(null);
+                                  e.stopPropagation();
+                                }
+                              }}
+                            >
+                              {armed ? "löschen?" : "✕"}
+                            </button>
+                          );
+                        })()}
                       </span>
                     </div>
                     <div className="tbl tbl--links">
@@ -608,7 +689,9 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
         </div>
 
         <div className="set-foot">
-          <button type="button" className="btn btn--primary" onClick={save}>Speichern</button>
+          <button type="button" className="btn btn--primary" onClick={handleSave} disabled={save.isPending}>
+            {save.isPending ? "speichert…" : "Speichern"}
+          </button>
           <button type="button" className="btn" onClick={onClose}>Abbrechen</button>
           <span className="note">Esc verlässt das Feld, noch einmal Esc verwirft</span>
           {error && <span className="set-error" role="alert">{error}</span>}
