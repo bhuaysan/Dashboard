@@ -167,6 +167,7 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .row.is-sel { background: var(--color-bg-sel); }
+.music-cmd { cursor: pointer; }
 
 /* Zeilen sind echte Links. Sie sollen weiter aussehen wie Text im Terminal — keine
    Unterstreichung, keine Linkfarbe —, aber unter der Maus reagieren und die ganze

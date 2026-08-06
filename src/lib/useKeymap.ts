@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 export type Mode = "NORMAL" | "INSERT" | "COMMAND";
-export type PaneId = "clock" | "weather" | "links" | "agenda" | "news" | "homelab";
+export type PaneId = "clock" | "weather" | "music" | "links" | "agenda" | "news" | "homelab";
 
 export type UiState = {
   mode: Mode;
@@ -22,6 +22,7 @@ export type UiAction =
 export const PANE_ORDER: { id: PaneId; label: string }[] = [
   { id: "clock", label: "clock" },
   { id: "weather", label: "weather" },
+  { id: "music", label: "music" },
   { id: "links", label: "links" },
   { id: "agenda", label: "agenda" },
   { id: "news", label: "news" },
@@ -62,6 +63,9 @@ type Params = {
   hints: Record<string, string>;
   rowCount: number;
   selectedUrl: string | undefined;
+  /** Zeilen ohne URL (z.B. Steuerbefehle) — Enter löst dann diese Aktion aus. */
+  selectedAction?: string | undefined;
+  onAction?: (action: string) => void;
   onSeed: (seed: string, mode: Mode) => void;
   overlayOpen: boolean;
   onOverlayEscape: () => void;
@@ -90,7 +94,7 @@ export function openUrl(url: string, newTab: boolean): void {
   else window.location.assign(href);
 }
 
-export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
+export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, selectedAction, onAction, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
   // Der Handler kennt nur den Zustand aus dem letzten Render. Kommen zwei Tasten an,
   // bevor React neu gerendert hat, sähe die zweite noch den alten Modus und würde ihn
   // überschreiben — aus ":s" wurde so eine Suche nach "s" statt eines Kommandos.
@@ -176,7 +180,7 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
         e.preventDefault();
         return;
       }
-      if (e.key >= "1" && e.key <= "6") {
+      if (e.key >= "1" && e.key <= String(PANE_ORDER.length)) {
         const entry = PANE_ORDER[Number(e.key) - 1];
         // Ausgeblendete Panes lassen sich nicht fokussieren — die Auswahl wäre unsichtbar.
         if (entry && visiblePanes.has(entry.id)) dispatch({ type: "focusPane", pane: entry.id });
@@ -195,6 +199,7 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
       }
       if (e.key === "Enter") {
         if (selectedUrl) openUrl(selectedUrl, e.shiftKey);
+        else if (selectedAction !== undefined) onAction?.(selectedAction);
         e.preventDefault();
         return;
       }
@@ -206,5 +211,5 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
     }
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape, visiblePanes]);
+  }, [state, dispatch, hints, rowCount, selectedUrl, selectedAction, onAction, onSeed, overlayOpen, onOverlayEscape, visiblePanes]);
 }

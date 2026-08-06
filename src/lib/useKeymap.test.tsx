@@ -3,7 +3,7 @@ import { renderHook } from "@testing-library/react";
 import { initialUiState, openUrl, useKeymap, type Mode, type PaneId, type UiAction, type UiState } from "./useKeymap";
 
 const ALL_PANES: ReadonlySet<PaneId> = new Set<PaneId>([
-  "clock", "weather", "links", "agenda", "news", "homelab",
+  "clock", "weather", "music", "links", "agenda", "news", "homelab",
 ]);
 
 function setup(state: Partial<UiState>, options: {
@@ -85,14 +85,14 @@ describe("Schnelles Tippen", () => {
 describe("Pane-Tasten", () => {
   it("fokussiert ein sichtbares Pane", () => {
     const dispatch = setup({});
-    press("4");
+    press("5");
     expect(dispatch).toHaveBeenCalledWith({ type: "focusPane", pane: "agenda" });
   });
 
   it("fokussiert kein ausgeblendetes Pane", () => {
     const visible = new Set<PaneId>(["clock", "weather", "links", "news", "homelab"]);
     const dispatch = setup({}, { visiblePanes: visible });
-    press("4");
+    press("3");
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

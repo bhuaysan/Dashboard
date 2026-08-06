@@ -68,6 +68,7 @@ export const defaultConfig: Config = {
   layout: [
     { id: "clock", visible: true, span: 1 },
     { id: "weather", visible: true, span: 2 },
+    { id: "music", visible: true, span: 1 },
     { id: "links", visible: true, span: 1 },
     { id: "agenda", visible: true, span: 1 },
     { id: "news", visible: true, span: 1 },
@@ -79,6 +80,7 @@ export const defaultConfig: Config = {
     "www.heise.de",
     "www.tagesschau.de",
   ],
+  music: { enabled: true, source: "spotify" },
   homelab: {
     node: "pve",
     uiUrl: "https://10.0.10.10:8006",

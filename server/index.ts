@@ -12,6 +12,7 @@ import { writeGuard } from "./write-guard.ts";
 import { proxyFetch } from "./proxy.ts";
 import { configSchema } from "../src/config/schema.ts";
 import { fetchHomelab, type HomelabData } from "./pve.ts";
+import { fetchMusic, sendMusicCommand, emptyMusic, MUSIC_COMMANDS, type MusicCommand, type MusicData } from "./spotify.ts";
 
 export const app = new Hono();
 
@@ -73,6 +74,49 @@ app.get("/api/homelab", async (c) => {
     return c.json(data);
   } catch {
     return c.json({ error: "Homelab nicht erreichbar" }, 502);
+  }
+});
+
+let musicCache: { t: number; data: MusicData } | undefined;
+
+app.get("/api/music", async (c) => {
+  const cfg = await readConfig();
+  if (!cfg.music.enabled || cfg.music.source !== "spotify") {
+    return c.json(emptyMusic);
+  }
+  if (musicCache && Date.now() - musicCache.t < 5_000) {
+    return c.json(musicCache.data);
+  }
+  try {
+    const data = await fetchMusic();
+    musicCache = { t: Date.now(), data };
+    return c.json(data);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Musik nicht erreichbar";
+    return c.json({ error: msg }, 502);
+  }
+});
+
+// Steuerung ist ein schreibender Zugriff aufs Konto — dieselbe Absender-Sperre wie
+// beim Config-PUT.
+app.post("/api/music/command", writeGuard, async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid" }, 400);
+  }
+  const cmd = (body as { cmd?: string }).cmd;
+  if (!MUSIC_COMMANDS.includes(cmd as MusicCommand)) {
+    return c.json({ error: "unbekanntes Kommando" }, 400);
+  }
+  try {
+    await sendMusicCommand(cmd as MusicCommand);
+    musicCache = undefined;   // naechstes GET zeigt sofort den neuen Zustand
+    return c.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Kommando fehlgeschlagen";
+    return c.json({ error: msg }, 502);
   }
 });
 

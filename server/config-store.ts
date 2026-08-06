@@ -14,7 +14,17 @@ export async function writeAtomic(path: string, data: string): Promise<void> {
 export async function readConfig(): Promise<Config> {
   try {
     const parsed = configSchema.safeParse(JSON.parse(await readFile(configPath, "utf8")));
-    if (parsed.success) return parsed.data;
+    // Neue Panes fehlen in einer älteren config.json — ohne sie könnte man die Pane
+    // in den Einstellungen weder sehen noch schalten. Anhängen, nicht umsortieren:
+    // die Reihenfolge im Raster gibt ohnehin App.tsx vor.
+    if (parsed.success) {
+      for (const entry of defaultConfig.layout) {
+        if (!parsed.data.layout.some((l) => l.id === entry.id)) {
+          parsed.data.layout.push(entry);
+        }
+      }
+      return parsed.data;
+    }
     await copyFile(configPath, `${configPath}.bak`);   // kaputte Datei aufbewahren
   } catch { /* Datei fehlt: Defaults */ }
   return defaultConfig;
