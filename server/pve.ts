@@ -5,22 +5,42 @@ import { checkReachability, type ReachResult } from "./reachability.ts";
 import { relativeTime } from "../src/lib/relativeTime.ts";
 import type { Config } from "../src/config/schema.ts";
 
+export type Level = "ok" | "warn" | "crit";
+
 export type HomelabData = {
   node: { cpu: number; mem: number; root: number; uptimeDays: number;
-          cpuSpark: number[]; memSpark: number[] };
-  guests: { vmid: number; name: string; running: boolean; cpu: number; mem: number }[];
-  storage: { name: string; pct: number }[];
+          cpuSpark: number[]; memSpark: number[];
+          cpuLevel: Level; memLevel: Level; rootLevel: Level };
+  guests: { vmid: number; name: string; running: boolean; cpu: number; mem: number;
+            cpuLevel: Level; memLevel: Level }[];
+  storage: { name: string; pct: number; level: Level }[];
   alerts: { level: "warn" | "crit"; text: string }[];
   configured: boolean;    // false, wenn env.pve undefined ist
 };
 
 export const emptyHomelab: HomelabData = {
   configured: false,
-  node: { cpu: 0, mem: 0, root: 0, uptimeDays: 0, cpuSpark: [], memSpark: [] },
+  node: { cpu: 0, mem: 0, root: 0, uptimeDays: 0, cpuSpark: [], memSpark: [],
+          cpuLevel: "ok", memLevel: "ok", rootLevel: "ok" },
   guests: [],
   storage: [],
   alerts: [],
 };
+
+/**
+ * Warnung oberhalb der eingestellten Schwelle, kritisch auf halbem Weg von dort nach
+ * 100 %. Bei mem: 85 heißt das warn über 85, krit über 92,5. Ein zweiter Schwellwert in
+ * der Config wäre ein weiteres Feld, das gepflegt werden will; so folgt die kritische
+ * Marke automatisch der eingestellten.
+ *
+ * Echt größer, nicht größer-gleich: so gilt für Storage weiter genau die Grenze, die die
+ * Regel vorher hatte. Ein gestoppter Gast hat keine Last und damit keinen Pegel.
+ */
+export function levelFor(pct: number, threshold: number): Level {
+  if (pct > threshold + (100 - threshold) / 2) return "crit";
+  if (pct > threshold) return "warn";
+  return "ok";
+}
 
 type NodeStatus = {
   cpu: number;
@@ -80,18 +100,28 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
 
   const guests = raw.resources
     .filter((r) => r.template !== 1)
-    .map((r) => ({
-      vmid: r.vmid,
-      name: r.name ?? `vmid ${r.vmid}`,
-      running: r.status === "running",
-      cpu: Math.round((r.cpu ?? 0) * 100),
-      mem: r.maxmem ? pct(r.mem ?? 0, r.maxmem) : 0,
-    }))
+    .map((r) => {
+      const running = r.status === "running";
+      const cpu = Math.round((r.cpu ?? 0) * 100);
+      const mem = r.maxmem ? pct(r.mem ?? 0, r.maxmem) : 0;
+      return {
+        vmid: r.vmid,
+        name: r.name ?? `vmid ${r.vmid}`,
+        running,
+        cpu,
+        mem,
+        cpuLevel: running ? levelFor(cpu, cfg.thresholds.cpu) : ("ok" as Level),
+        memLevel: running ? levelFor(mem, cfg.thresholds.mem) : ("ok" as Level),
+      };
+    })
     .sort((a, b) => a.vmid - b.vmid);
 
   const storage = raw.storages
     .filter((s) => s.active === 1 && s.total > 0)
-    .map((s) => ({ name: s.storage, pct: pct(s.used, s.total) }));
+    .map((s) => {
+      const p = pct(s.used, s.total);
+      return { name: s.storage, pct: p, level: levelFor(p, cfg.thresholds.storage) };
+    });
 
   const nameOf = (vmid: number) => guests.find((g) => g.vmid === vmid)?.name ?? `vmid ${vmid}`;
   const alerts: HomelabData["alerts"] = [];
@@ -128,8 +158,28 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
   }
 
   for (const s of storage) {
-    if (s.pct > cfg.thresholds.storage) {
-      alerts.push({ level: "warn", text: `storage ${s.name} zu ${s.pct}% voll` });
+    if (s.level !== "ok") {
+      alerts.push({ level: s.level, text: `storage ${s.name} zu ${s.pct}% voll` });
+    }
+  }
+
+  // Nur der kritische Pegel bekommt eine Zeile. Die Warnstufe steht schon farbig in der
+  // Tabelle, und bei vierzehn Gästen wäre eine Zeile je Warnung wieder die Alarmflut,
+  // die die leere vzdump-Liste einmal erzeugt hat.
+  //
+  // Und nur Speicher, nicht CPU: die Auslastung ist ein einzelner Messwert. Ein Gast,
+  // der gerade rechnet, ist kein Alarm — voller Speicher dagegen ist einer.
+  const nodeMemLevel = levelFor(pct(raw.status.memory.used, raw.status.memory.total),
+                                cfg.thresholds.mem);
+  if (nodeMemLevel === "crit") {
+    alerts.push({
+      level: "crit",
+      text: `node speicher zu ${pct(raw.status.memory.used, raw.status.memory.total)}% belegt`,
+    });
+  }
+  for (const g of guests) {
+    if (g.memLevel === "crit") {
+      alerts.push({ level: "crit", text: `gast ${g.name} speicher zu ${g.mem}% belegt` });
     }
   }
 
@@ -146,6 +196,11 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
       uptimeDays: Math.floor(raw.status.uptime / 86400),
       cpuSpark,
       memSpark,
+      cpuLevel: levelFor(Math.round(raw.status.cpu * 100), cfg.thresholds.cpu),
+      memLevel: nodeMemLevel,
+      // root ist ein Dateisystem und richtet sich nach der Storage-Schwelle.
+      rootLevel: levelFor(pct(raw.status.rootfs.used, raw.status.rootfs.total),
+                          cfg.thresholds.storage),
     },
     guests,
     storage,

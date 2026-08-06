@@ -1,6 +1,6 @@
 import { sparkline } from "../lib/sparkline";
 import { safeHref } from "../lib/useKeymap";
-import type { HomelabData } from "../../server/pve";
+import type { HomelabData, Level } from "../../server/pve";
 
 export type { HomelabData };
 
@@ -10,17 +10,50 @@ export async function fetchHomelab(): Promise<HomelabData> {
   return (await res.json()) as HomelabData;
 }
 
-function Bar({ name, pct }: { name: string; pct: number }) {
+function asLevel(v: unknown): Level {
+  return v === "warn" || v === "crit" ? v : "ok";
+}
+
+/**
+ * Im localStorage liegt nach einem Deploy noch die Antwortform von vorher. Die Pegel
+ * kamen erst später dazu — ohne diese Auffrischung rendert die erste Darstellung aus
+ * dem Cache, bevor der erste Fetch zurück ist, mit fehlenden Feldern. Dasselbe Ventil,
+ * das reviveEvents und reviveNews für ihre Date-Felder benutzen.
+ */
+export function reviveHomelab(d: HomelabData): HomelabData {
+  return {
+    ...d,
+    node: {
+      ...d.node,
+      cpuLevel: asLevel(d.node?.cpuLevel),
+      memLevel: asLevel(d.node?.memLevel),
+      rootLevel: asLevel(d.node?.rootLevel),
+    },
+    guests: (d.guests ?? []).map((g) => ({
+      ...g, cpuLevel: asLevel(g.cpuLevel), memLevel: asLevel(g.memLevel),
+    })),
+    storage: (d.storage ?? []).map((s) => ({ ...s, level: asLevel(s.level) })),
+  };
+}
+
+// Nur warn und crit bekommen Farbe. Wäre auch der Normalfall eingefärbt, hätte die Farbe
+// nichts mehr zu sagen — sie wirkt hier gerade dadurch, dass sie selten ist.
+const LEVEL_CLASS: Record<Level, string> = { ok: "", warn: " warn", crit: " crit" };
+const LEVEL_WORD: Record<Level, string> = { ok: "", warn: "Warnung: ", crit: "kritisch: " };
+// Über asLevel, damit auch eine unerwartete Antwort eine Zeile ergibt statt einer leeren Seite.
+const cls = (level: Level) => LEVEL_CLASS[asLevel(level)];
+
+function Bar({ name, pct, level }: { name: string; pct: number; level: Level }) {
   const width = 13;
   const filled = Math.round((Math.max(0, Math.min(100, pct)) / 100) * width);
   return (
     <span>
       {name}{" "}
-      <span className="bar" aria-label={`${name} zu ${pct} Prozent belegt`}>
-        <span className="bar-on">{"━".repeat(filled)}</span>
+      <span className="bar" aria-label={`${LEVEL_WORD[asLevel(level)]}${name} zu ${pct} Prozent belegt`}>
+        <span className={`bar-on${cls(level)}`}>{"━".repeat(filled)}</span>
         <span className="bar-off">{"─".repeat(width - filled)}</span>
       </span>{" "}
-      <span className="dim">{pct} %</span>
+      <span className={`dim${cls(level)}`}>{pct} %</span>
     </span>
   );
 }
@@ -40,22 +73,27 @@ export function Homelab({ data, selIndex, consoleUrl }: HomelabProps) {
     <>
       <div className="lab-node">
         <span className="metric">
-          <span className="dim">cpu</span><span>{n.cpu} %</span>
+          <span className="dim">cpu</span>
+          <span className={cls(n.cpuLevel).trim() || undefined}>{n.cpu} %</span>
           <span className="spark" aria-label={`CPU-Auslastung der letzten 30 Minuten: ${n.cpuSpark.join(", ")} Prozent`}>
             {sparkline(n.cpuSpark)}
           </span>
         </span>
         <span className="metric">
-          <span className="dim">mem</span><span>{n.mem} %</span>
+          <span className="dim">mem</span>
+          <span className={cls(n.memLevel).trim() || undefined}>{n.mem} %</span>
           <span className="spark" aria-label={`Speicherauslastung der letzten 30 Minuten: ${n.memSpark.join(", ")} Prozent`}>
             {sparkline(n.memSpark)}
           </span>
         </span>
-        <span className="metric"><span className="dim">root</span><span>{n.root} %</span></span>
+        <span className="metric">
+          <span className="dim">root</span>
+          <span className={cls(n.rootLevel).trim() || undefined}>{n.root} %</span>
+        </span>
         <span className="metric"><span className="dim">up</span><span>{n.uptimeDays} d</span></span>
       </div>
       <div className="lab-store">
-        {data.storage.map((s) => <Bar key={s.name} name={s.name} pct={s.pct} />)}
+        {data.storage.map((s) => <Bar key={s.name} name={s.name} pct={s.pct} level={s.level} />)}
       </div>
       <table className="lab-guests">
         <thead>
@@ -79,8 +117,8 @@ export function Homelab({ data, selIndex, consoleUrl }: HomelabProps) {
                         : <a href={href} title={`Konsole von ${g.name} öffnen`}>{g.name}</a>}
                     </td>
                     <td className="dim">run</td>
-                    <td className="val">{g.cpu} %</td>
-                    <td className="val">{g.mem} %</td>
+                    <td className={`val${cls(g.cpuLevel)}`}>{g.cpu} %</td>
+                    <td className={`val${cls(g.memLevel)}`}>{g.mem} %</td>
                   </>
                 ) : (
                   <>
@@ -97,8 +135,11 @@ export function Homelab({ data, selIndex, consoleUrl }: HomelabProps) {
       {data.alerts.length > 0 && (
         <div className="lab-alerts">
           {data.alerts.map((a, i) => (
+            // Ein Ausrufezeichen für warn, zwei für krit: der Schweregrad steht sonst
+            // nur in der Farbe, und Rot und Gelb liegen bei Rotgrünblindheit nah beieinander.
             <div key={i} className={`alert ${a.level}`}>
-              <span className="mark">!</span><span>{a.text}</span>
+              <span className="mark" aria-hidden="true">{a.level === "crit" ? "!!" : "!"}</span>
+              <span><span className="sr-only">{LEVEL_WORD[a.level]}</span>{a.text}</span>
             </div>
           ))}
         </div>

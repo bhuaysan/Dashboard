@@ -24,6 +24,15 @@ const STATE_TEXT: Record<SourceState, string> = {
   crit: "Fehler",
 };
 
+// Bisher stand für alle drei Zustände dasselbe ● da — der Unterschied lag allein in der
+// Farbe, und Grün und Gelb fallen bei Rotgrünblindheit zusammen. Jetzt trägt schon die
+// Form die Aussage: voller Punkt heißt frisch, kleiner Punkt veraltet, ! Fehler.
+const STATE_MARK: Record<SourceState, string> = {
+  ok: "●",
+  warn: "·",
+  crit: "!",
+};
+
 export function StatusLine({ mode, panes, sources, clock, note, problem }: Props) {
   const now = new Date();
   return (
@@ -48,9 +57,13 @@ export function StatusLine({ mode, panes, sources, clock, note, problem }: Props
             : "";
           return (
             <span key={s.label} className="sl-src" aria-label={`${s.label}: ${STATE_TEXT[s.state]}${spoken}${alarm}`}>
-              <span className={s.state} aria-hidden="true">●</span> {s.label}
+              <span className={`sl-mark ${s.state}`} aria-hidden="true">{STATE_MARK[s.state]}</span> {s.label}
               {stamp ? <span className="dim" aria-hidden="true">{shortAge(stamp, now)}</span> : null}
-              {s.alerts ? <span className={s.alerts.level} aria-hidden="true">!{s.alerts.count}</span> : null}
+              {s.alerts
+                ? <span className={s.alerts.level} aria-hidden="true">
+                    {s.alerts.level === "crit" ? "!!" : "!"}{s.alerts.count}
+                  </span>
+                : null}
             </span>
           );
         })}

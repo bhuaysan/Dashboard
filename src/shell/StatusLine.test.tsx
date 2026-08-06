@@ -38,7 +38,9 @@ describe("StatusLine", () => {
         clock="23:42"
       />,
     );
-    const marker = screen.getByText("!2");
+    // Zwei Ausrufezeichen heißen krit, eines warn — der Schweregrad darf nicht nur
+    // in der Farbe stehen.
+    const marker = screen.getByText("!!2");
     expect(marker.className).toBe("crit");
     expect(screen.getByLabelText(/pve: in Ordnung.*, 2 Alarme/)).toBeTruthy();
   });

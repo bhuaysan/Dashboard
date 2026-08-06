@@ -22,7 +22,7 @@ import { fetchWeather, Weather } from "./widgets/Weather";
 import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, reviveNews, News } from "./widgets/News";
 import type { SourceState } from "./shell/StatusLine";
-import { fetchHomelab, Homelab } from "./widgets/Homelab";
+import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
 import { SettingsPane } from "./shell/SettingsPane";
 
 type RowInfo = { url?: string };
@@ -98,7 +98,9 @@ export default function App() {
     900_000,
     { revive: reviveNews, refetchIntervalMs: 900_000 },
   );
-  const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, { refetchIntervalMs: 60_000 });
+  const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, {
+    revive: reviveHomelab, refetchIntervalMs: 60_000,
+  });
 
   const flatLinks = useMemo<FlatLink[]>(
     () =>

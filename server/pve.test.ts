@@ -113,3 +113,51 @@ describe("buildHomelab · Rest", () => {
     expect(d.alerts).toContainEqual({ level: "crit", text: "pihole nicht erreichbar" });
   });
 });
+
+// thresholds.cpu und thresholds.mem waren einstellbar und wurden nirgends gelesen:
+// ein Gast bei 95 % Speicher sah aus wie einer bei 8 %.
+describe("buildHomelab · Pegel", () => {
+  it("stuft nach der eingestellten Schwelle und auf halbem Weg von dort nach 100", () => {
+    // defaultConfig: mem 85 → warn über 85, krit über 92,5
+    const d = buildHomelab(raw({
+      resources: [
+        guest(100, "running", { mem: 8 }),
+        guest(101, "running", { mem: 86 }),
+        guest(102, "running", { mem: 95 }),
+      ],
+    }), cfg, NOW);
+    expect(d.guests.map((g) => g.memLevel)).toEqual(["ok", "warn", "crit"]);
+  });
+
+  it("gibt einem gestoppten Gast keinen Pegel", () => {
+    const d = buildHomelab(raw({
+      resources: [guest(101, "stopped", { mem: 99, cpu: 0.99 })],
+    }), cfg, NOW);
+    expect(d.guests[0]?.memLevel).toBe("ok");
+    expect(d.guests[0]?.cpuLevel).toBe("ok");
+  });
+
+  it("meldet nur den kritischen Speicher als Zeile, nicht jede Warnung", () => {
+    const d = buildHomelab(raw({
+      resources: [guest(101, "running", { mem: 86 }), guest(102, "running", { mem: 95 })],
+    }), cfg, NOW);
+    expect(d.alerts).toContainEqual({ level: "crit", text: "gast gast-102 speicher zu 95% belegt" });
+    expect(d.alerts.filter((a) => a.text.includes("speicher"))).toHaveLength(1);
+  });
+
+  it("alarmiert nicht bei hoher CPU — ein Messwert ist keine Last", () => {
+    const d = buildHomelab(raw({
+      resources: [guest(101, "running", { cpu: 0.99 })],
+    }), cfg, NOW);
+    expect(d.guests[0]?.cpuLevel).toBe("crit");
+    expect(d.alerts).toHaveLength(1);   // nur die leere vzdump-Liste
+  });
+
+  it("hebt ein übervolles Storage von warn auf crit", () => {
+    const d = buildHomelab(raw({
+      storages: [{ storage: "tank", total: 100, used: 97, active: 1 }],
+    }), cfg, NOW);
+    expect(d.storage[0]?.level).toBe("crit");
+    expect(d.alerts).toContainEqual({ level: "crit", text: "storage tank zu 97% voll" });
+  });
+});

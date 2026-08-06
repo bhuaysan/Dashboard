@@ -220,6 +220,10 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .bar { letter-spacing: 0; }
 .bar-on  { color: var(--color-accent); }
 .bar-off { color: var(--color-dim); }
+/* Der gefüllte Teil des Balkens trägt den Pegel mit. Zwei Klassen, damit die Regel
+   die spätere .bar-on-Deklaration schlägt, statt von ihr überschrieben zu werden. */
+.bar-on.warn { color: var(--color-warn); }
+.bar-on.crit { color: var(--color-crit); }
 .lab-guests {
   margin-top: .6rem; display: grid; gap: 0 2.5rem;
   grid-template-columns: 1fr; justify-content: start;
@@ -236,7 +240,8 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 #pane-6 [data-row] { scroll-margin-bottom: 7.5rem; }
 .lab-alerts { margin-top: .6rem; display: flex; flex-direction: column; gap: .1rem; }
 .alert { display: flex; gap: .6rem; }
-.alert .mark { flex: none; font-weight: 700; }
+/* Feste Breite, damit „!" und „!!" den Text auf derselben Flucht beginnen lassen. */
+.alert .mark { flex: none; font-weight: 700; width: 2ch; }
 
 .ev { display: grid; grid-template-columns: 11.5ch 1fr; gap: .6rem;
       padding: .05rem .4rem; margin: 0 -.4rem; }
@@ -308,6 +313,8 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .sl-panes .is-active { color: var(--color-fg); }
 .sl-right { margin-left: auto; display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; }
 .sl-src { display: inline-flex; gap: .3rem; align-items: baseline; }
+/* Die drei Zeichen sind verschieden breit — feste Spalte, sonst wackeln die Kürzel. */
+.sl-mark { display: inline-block; width: 1ch; text-align: center; font-weight: 700; }
 .sl-problem {
   color: var(--color-crit);
   max-width: 38ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
