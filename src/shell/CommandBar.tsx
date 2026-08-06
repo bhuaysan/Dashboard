@@ -67,7 +67,7 @@ export function CommandBar({ mode, seed, links, search, onModeChange, onCommand 
   const showResults = value.trim() !== "" && !value.startsWith(":");
 
   return (
-    <div className={`cmd pane--full${mode !== "NORMAL" ? " is-focused" : ""}`}>
+    <div className={`cmd${mode !== "NORMAL" ? " is-focused" : ""}`}>
       <div className="cmd-inner">
         <span className="cmd-prompt">▸</span>
         <input

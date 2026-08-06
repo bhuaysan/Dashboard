@@ -283,7 +283,7 @@ export default function App() {
           )}
 
           {paneVisible("links") && (
-          <Pane title="Links" span={paneSpan("links")} tall={paneVisible("agenda") && paneVisible("news")} clip id="pane-3"
+          <Pane title="Links" span={paneSpan("links")} clip id="pane-3"
             ref={(el: HTMLElement | null) => { paneRefs.current.links = el; }}
           >
             <nav aria-label="Links">
@@ -331,7 +331,11 @@ export default function App() {
             <Homelab data={labQuery.data} selIndex={selIndex("homelab")} />
           </Pane>
           )}
+        </PaneGrid>
 
+        {/* Kommandozeile und Statusline bleiben zusammen am unteren Rand stehen — sie sind
+            die einzige Anzeige für Modus, Alter der Quellen und Fehler. */}
+        <div className="chrome">
           <CommandBar
             mode={ui.mode}
             seed={seed}
@@ -340,32 +344,32 @@ export default function App() {
             onModeChange={(m) => dispatch({ type: "mode", mode: m })}
             onCommand={runCommand}
           />
-        </PaneGrid>
 
-        <StatusLine
-          mode={ui.mode}
-          panes={PANE_ORDER
-            .map((p, i) => ({ id: p.id, n: i + 1, label: p.label, active: ui.pane === p.id }))
-            .filter((p) => visiblePanes.has(p.id))
-            .map(({ n, label, active }) => ({ n, label, active }))}
-          sources={[
-            { label: "wx", state: queryState(wxQuery), updatedAt: wxQuery.dataUpdatedAt },
-            { label: "news", state: queryState(newsQuery), updatedAt: newsQuery.dataUpdatedAt },
-            { label: "cal", state: queryState(calQuery), updatedAt: calQuery.dataUpdatedAt },
-            {
-              label: "pve",
-              state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery),
-              updatedAt: labQuery.dataUpdatedAt,
-              ...(labAlerts.length > 0
-                ? { alerts: { count: labAlerts.length, level: labAlertLevel } }
-                : {}),
-            },
-            { label: "cfg", state: queryState(configQuery), updatedAt: configQuery.dataUpdatedAt },
-          ]}
-          clock={timeFmt.format(now)}
-          note={message}
-          problem={problem}
-        />
+          <StatusLine
+            mode={ui.mode}
+            panes={PANE_ORDER
+              .map((p, i) => ({ id: p.id, n: i + 1, label: p.label, active: ui.pane === p.id }))
+              .filter((p) => visiblePanes.has(p.id))
+              .map(({ n, label, active }) => ({ n, label, active }))}
+            sources={[
+              { label: "wx", state: queryState(wxQuery), updatedAt: wxQuery.dataUpdatedAt },
+              { label: "news", state: queryState(newsQuery), updatedAt: newsQuery.dataUpdatedAt },
+              { label: "cal", state: queryState(calQuery), updatedAt: calQuery.dataUpdatedAt },
+              {
+                label: "pve",
+                state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery),
+                updatedAt: labQuery.dataUpdatedAt,
+                ...(labAlerts.length > 0
+                  ? { alerts: { count: labAlerts.length, level: labAlertLevel } }
+                  : {}),
+              },
+              { label: "cfg", state: queryState(configQuery), updatedAt: configQuery.dataUpdatedAt },
+            ]}
+            clock={timeFmt.format(now)}
+            note={message}
+            problem={problem}
+          />
+        </div>
       </div>
 
       <KeymapOverlay open={ui.showHelp} />

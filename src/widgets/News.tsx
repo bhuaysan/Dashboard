@@ -39,7 +39,7 @@ export function News({ items, selIndex, feedCount }: { items?: NewsItem[]; selIn
     return `${days} d`;
   };
   return (
-    <>
+    <div className="news">
       {items.map((n, i) => (
         <div key={`${n.url}-${i}`} className={`news-row${i === selIndex ? " is-sel" : ""}`} data-row>
           <span className="dim">{stamp(n.date)}</span>
@@ -47,6 +47,6 @@ export function News({ items, selIndex, feedCount }: { items?: NewsItem[]; selIn
           <span className="headline">{n.title}</span>
         </div>
       ))}
-    </>
+    </div>
   );
 }

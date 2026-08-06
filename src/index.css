@@ -88,13 +88,23 @@
 .pane--clip > .pane-body {
   flex: 1;
   min-height: 0;
-  height: 24rem;
+  /* Deckel für die Zeile aus Links, Agenda und News: die drei teilen sich eine Grid-Zeile,
+     also bestimmt der längste Inhalt ihre Höhe. Anteil der Fensterhöhe statt fester Zahl —
+     auf einem hohen Schirm wachsen die Panes mit, statt Leerraum zu lassen. Der Wert ist
+     eine Notbremse gegen einen Feed mit hundert Meldungen, nicht das Normalmaß: die
+     Linkliste passt bei 1280×800 vollständig darunter. */
+  max-height: 58vh;
   margin: 0 -.4rem;
   padding: 0 .4rem;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--color-border-strong) transparent;
+}
+/* Einspaltig scrollt die Seite ohnehin — ein Scrollfeld im Scrollfeld wäre auf dem
+   Telefon nur im Weg. */
+@media (max-width: 819px) {
+  .pane--clip > .pane-body { max-height: none; overflow: visible; }
 }
 
 body {
@@ -104,7 +114,9 @@ body {
   font-size: 14px;
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
-  padding: 10px;
+  /* Unten kein Polster: den Rand setzt .chrome selbst, damit die angeheftete Leiste
+     bis zur Fensterkante deckt. */
+  padding: 10px 10px 0;
   margin: 0;
 }
 .pane-title .sub { font-weight: 400; letter-spacing: 0.04em; }
@@ -114,13 +126,39 @@ body {
 
 .grid { display: grid; gap: 10px; grid-template-columns: 1fr; }
 @media (min-width: 820px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1240px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* Drei Spalten, aber keine drei gleichen: links stehen kurze Beschriftungen (längster
+   Eintrag 192 px), rechts Schlagzeilen von 300 bis 700 px. Die Untergrenze der ersten
+   Spalte ist die Zeitzonenzeile der Uhr — die darf nicht umbrechen. */
+@media (min-width: 1240px) {
+  .grid { grid-template-columns: minmax(22rem, .86fr) minmax(0, .97fr) minmax(0, 1.17fr); }
+}
 @media (min-width: 820px) {
   .pane--wide { grid-column: span 2; }
   .pane--full { grid-column: 1 / -1; }
 }
-@media (min-width: 1240px) {
-  .pane--tall { grid-row: span 2; }
+/* Bei nur zwei Spalten heißt „span 2" volle Breite — und lässt die Uhr allein in der
+   ersten Zeile stehen, also eine halbe Zeile leer. In diesem Bereich zählt span 2 als eins. */
+@media (min-width: 820px) and (max-width: 1239px) {
+  .pane--wide { grid-column: span 1; }
+}
+
+/* Kommandozeile und Statusline sind die untersten zwei Zeilen des Terminals: immer sichtbar,
+   auch wenn die Homelab-Pane die Seite länger macht als das Fenster. */
+.chrome {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--color-bg-alt);
+  /* Das Polster oben schließt den Grid-Abstand, das unten den Body-Rand — angeheftet
+     deckt die Leiste damit bis zur Fensterkante ab, statt Text darunter durchscheinen
+     zu lassen, und steht im Ruhezustand trotzdem an derselben Stelle wie vorher. */
+  padding: 10px 0;
+  margin-top: -10px;
+}
+/* Angeheftet nur dort, wo die Leiste schmal bleibt. Einspaltig bricht die Statusline auf
+   vier Zeilen um — ein halber Bildschirm Fußleiste wäre schlimmer als Scrollen. */
+@media (min-width: 820px) {
+  .chrome { position: sticky; bottom: 0; z-index: 5; }
 }
 
 .row {
@@ -176,6 +214,9 @@ body {
 .guest .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .guest.is-sel { background: var(--color-bg-sel); }
 .guest .num, .guest .val { text-align: right; }
+/* Die Homelab-Pane hat kein eigenes Scrollfeld, ihre Zeilen scrollen die Seite. Ohne den
+   Abstand landet die angesprungene Zeile unter der angehefteten Kommandozeile. */
+#pane-6 [data-row] { scroll-margin-bottom: 7.5rem; }
 .lab-alerts { margin-top: .6rem; display: flex; flex-direction: column; gap: .1rem; }
 .alert { display: flex; gap: .6rem; }
 .alert .mark { flex: none; font-weight: 700; }
@@ -189,13 +230,26 @@ body {
 .ev-time { color: var(--color-dim); }
 .ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.news-row { display: grid; grid-template-columns: 6ch 8ch 1fr; gap: .6rem;
+/* Die Quellenspalte wächst auf den längsten Namen (gedeckelt), statt „tagesschau" auf
+   „tagess…" zu stutzen — subgrid hält sie über alle Zeilen hinweg auf einer Flucht.
+   Die Schlagzeile darf bis zu drei Zeilen umbrechen: eine Zeile reicht für keine echte
+   Meldung, drei fassen die längsten vollständig, und die Höhe dafür ist jetzt da. */
+.news { display: grid; grid-template-columns: 5.5ch fit-content(11ch) minmax(0, 1fr);
+        gap: .35rem .6rem; }
+.news-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;
+            gap: 0 .6rem; align-items: baseline;
             padding: .05rem .4rem; margin: 0 -.4rem; }
 .news-row.is-sel { background: var(--color-bg-sel); }
-.news-row .src { color: var(--color-dim); overflow: hidden; text-overflow: ellipsis; }
-.news-row .headline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.news-row .src { color: var(--color-dim); overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; }
+.news-row .headline {
+  overflow: hidden; overflow-wrap: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+}
 
-.cmd { position: relative; }
+/* Umgekehrte Richtung: die Trefferliste steht über der Eingabe. Am unteren Rand angeheftet
+   wäre eine Liste darunter außerhalb des Fensters — fzf klappt aus demselben Grund nach oben. */
+.cmd { display: flex; flex-direction: column-reverse; }
 .cmd-inner { display: flex; gap: .6rem; align-items: center;
              border: 1px solid var(--color-border-strong); background: var(--color-bg);
              padding: .45rem .85rem; }
@@ -213,8 +267,11 @@ body {
 @media (prefers-reduced-motion: reduce) { .cmd.is-focused .caret { animation: none; } }
 
 .results {
-  border: 1px solid var(--color-accent); border-top: 0;
+  border: 1px solid var(--color-accent); border-bottom: 0;
   background: var(--color-bg); padding: .35rem 0;
+  max-height: 40vh; overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
 }
 .results[hidden] { display: none; }
 .res-row { display: flex; gap: .6rem; padding: .05rem .85rem; }
