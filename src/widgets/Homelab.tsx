@@ -1,4 +1,5 @@
 import { sparkline } from "../lib/sparkline";
+import { safeHref } from "../lib/useKeymap";
 import type { HomelabData } from "../../server/pve";
 
 export type { HomelabData };
@@ -24,7 +25,14 @@ function Bar({ name, pct }: { name: string; pct: number }) {
   );
 }
 
-export function Homelab({ data, selIndex }: { data?: HomelabData; selIndex: number }) {
+type HomelabProps = {
+  data?: HomelabData;
+  selIndex: number;
+  /** Konsolen-Adresse für einen laufenden Gast. Gestoppte bekommen keine. */
+  consoleUrl: (vmid: number) => string;
+};
+
+export function Homelab({ data, selIndex, consoleUrl }: HomelabProps) {
   if (!data) return <div className="dim">noch keine Homelab-Daten</div>;
   if (!data.configured) return <div className="dim">Homelab nicht konfiguriert</div>;
   const n = data.node;
@@ -57,24 +65,33 @@ export function Homelab({ data, selIndex }: { data?: HomelabData; selIndex: numb
           </tr>
         </thead>
         <tbody>
-          {data.guests.map((g, i) => (
-            <tr key={g.vmid} className={`guest${i === selIndex ? " is-sel" : ""}`} data-row>
-              {g.running ? (
-                <>
-                  <td className="ok">●</td><td className="num">{g.vmid}</td>
-                  <td className="name">{g.name}</td><td className="dim">run</td>
-                  <td className="val">{g.cpu} %</td>
-                  <td className="val">{g.mem} %</td>
-                </>
-              ) : (
-                <>
-                  <td className="dim">○</td><td className="num">{g.vmid}</td>
-                  <td className="name dim">{g.name}</td><td className="dim">stop</td>
-                  <td className="val dim">–</td><td className="val dim">–</td>
-                </>
-              )}
-            </tr>
-          ))}
+          {data.guests.map((g, i) => {
+            // Eine Konsole zu einem gestoppten Gast öffnet ein leeres noVNC-Fenster.
+            const href = g.running ? safeHref(consoleUrl(g.vmid)) : undefined;
+            return (
+              <tr key={g.vmid} className={`guest${i === selIndex ? " is-sel" : ""}`} data-row>
+                {g.running ? (
+                  <>
+                    <td className="ok">●</td><td className="num">{g.vmid}</td>
+                    <td className="name">
+                      {href === undefined
+                        ? g.name
+                        : <a href={href} title={`Konsole von ${g.name} öffnen`}>{g.name}</a>}
+                    </td>
+                    <td className="dim">run</td>
+                    <td className="val">{g.cpu} %</td>
+                    <td className="val">{g.mem} %</td>
+                  </>
+                ) : (
+                  <>
+                    <td className="dim">○</td><td className="num">{g.vmid}</td>
+                    <td className="name dim">{g.name}</td><td className="dim">stop</td>
+                    <td className="val dim">–</td><td className="val dim">–</td>
+                  </>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {data.alerts.length > 0 && (

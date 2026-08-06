@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchNews } from "./News";
+import { render, screen } from "@testing-library/react";
+import { fetchNews, News } from "./News";
 
 const FEED = `<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -41,5 +42,20 @@ describe("fetchNews", () => {
   it("bleibt ohne eingetragene Feeds leer statt zu scheitern", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 502 })));
     await expect(fetchNews([])).resolves.toEqual([]);
+  });
+});
+
+describe("News", () => {
+  const items = [
+    { title: "Echte Meldung", url: "https://example.com/1", source: "eins", date: new Date() },
+    { title: "Vergiftete Meldung", url: "javascript:alert(1)", source: "zwei", date: new Date() },
+  ];
+
+  it("verlinkt Meldungen, aber nur über http und https", () => {
+    render(<News items={items} selIndex={-1} feedCount={2} />);
+    expect(screen.getByText("Echte Meldung").closest("a")?.getAttribute("href"))
+      .toBe("https://example.com/1");
+    // Die Adresse kommt aus einem fremden Feed — javascript: darf nie ein href werden.
+    expect(screen.getByText("Vergiftete Meldung").closest("a")).toBeNull();
   });
 });

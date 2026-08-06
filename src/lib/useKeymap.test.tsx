@@ -116,3 +116,48 @@ describe("openUrl", () => {
     expect(open).not.toHaveBeenCalled();
   });
 });
+
+describe("Esc im Einstellungsdialog", () => {
+  function setupOverlay() {
+    const onOverlayEscape = vi.fn();
+    renderHook(() => useKeymap({
+      state: initialUiState,
+      dispatch: vi.fn(),
+      hints: {},
+      rowCount: 0,
+      selectedUrl: undefined,
+      onSeed: vi.fn(),
+      overlayOpen: true,
+      onOverlayEscape,
+      visiblePanes: ALL_PANES,
+    }));
+    return onOverlayEscape;
+  }
+
+  it("gibt bei offenem Dialog nur das Feld frei, statt den Entwurf zu verwerfen", () => {
+    const onOverlayEscape = setupOverlay();
+    const field = document.createElement("input");
+    document.body.appendChild(field);
+    field.focus();
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.activeElement).not.toBe(field);
+    expect(onOverlayEscape).not.toHaveBeenCalled();
+    field.remove();
+  });
+
+  it("schließt den Dialog, sobald der Fokus nicht mehr in einem Feld steht", () => {
+    const onOverlayEscape = setupOverlay();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onOverlayEscape).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Tastenübersicht", () => {
+  it("schließt bei einem druckbaren Zeichen, aber nicht bei Tab", () => {
+    const dispatch = setup({ showHelp: true });
+    press("Tab");
+    expect(dispatch).not.toHaveBeenCalled();
+    press("x");
+    expect(dispatch).toHaveBeenCalledWith({ type: "help", show: false });
+  });
+});

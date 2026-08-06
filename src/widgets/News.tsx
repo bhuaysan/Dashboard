@@ -1,6 +1,7 @@
 import type { Config } from "../config/schema";
 import { parseFeed, type NewsItem } from "../lib/rss";
 import { isSameDay } from "../lib/relativeTime";
+import { safeHref } from "../lib/useKeymap";
 
 export type { NewsItem };
 
@@ -40,13 +41,21 @@ export function News({ items, selIndex, feedCount }: { items?: NewsItem[]; selIn
   };
   return (
     <div className="news">
-      {items.map((n, i) => (
-        <div key={`${n.url}-${i}`} className={`news-row${i === selIndex ? " is-sel" : ""}`} data-row>
-          <span className="dim">{stamp(n.date)}</span>
-          <span className="src">{n.source}</span>
-          <span className="headline">{n.title}</span>
-        </div>
-      ))}
+      {items.map((n, i) => {
+        const href = safeHref(n.url);
+        const cls = `news-row${i === selIndex ? " is-sel" : ""}`;
+        const inner = (
+          <>
+            <span className="dim">{stamp(n.date)}</span>
+            <span className="src">{n.source}</span>
+            <span className="headline">{n.title}</span>
+          </>
+        );
+        // Eine Meldung ohne brauchbare Adresse bleibt Text — ein toter Link wäre schlimmer.
+        return href === undefined
+          ? <div key={`${n.url}-${i}`} className={cls} data-row>{inner}</div>
+          : <a key={`${n.url}-${i}`} className={cls} href={href} data-row>{inner}</a>;
+      })}
     </div>
   );
 }

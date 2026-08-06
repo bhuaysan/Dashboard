@@ -8,6 +8,7 @@ import { KeymapOverlay } from "./shell/KeymapOverlay";
 import {
   initialUiState,
   PANE_ORDER,
+  safeHref,
   uiReducer,
   useKeymap,
   type Mode,
@@ -125,6 +126,10 @@ export default function App() {
   );
 
   const consoleBase = config.homelab.uiUrl.replace(/\/+$/, "");
+  const consoleUrl = useCallback(
+    (vmid: number) => `${consoleBase}/?console=kvm&novnc=1&vmid=${vmid}&node=${config.homelab.node}`,
+    [consoleBase, config.homelab.node],
+  );
   const rowsByPane = useMemo<Record<PaneId, RowInfo[]>>(() => {
     const rows: Record<PaneId, RowInfo[]> = {
       clock: [],
@@ -132,14 +137,15 @@ export default function App() {
       links: flatLinks.map((l) => ({ url: l.url })),
       agenda: (calQuery.data ?? []).map(() => ({})),
       news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
-      homelab: (labQuery.data?.guests ?? []).map((g) => ({
-        url: `${consoleBase}/?console=kvm&novnc=1&vmid=${g.vmid}&node=${config.homelab.node}`,
-      })),
+      // Gestoppte Gäste haben keine Konsole — Enter darf dort kein leeres noVNC öffnen.
+      homelab: (labQuery.data?.guests ?? []).map((g) => (
+        g.running ? { url: consoleUrl(g.vmid) } : {}
+      )),
     };
     // Ausgeblendete Panes haben keine Zeilen — sonst wandert die Auswahl unsichtbar weiter.
     for (const id of PANE_ORDER.map((p) => p.id)) if (!visiblePanes.has(id)) rows[id] = [];
     return rows;
-  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, config.homelab.node, consoleBase, visiblePanes]);
+  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, consoleUrl, visiblePanes]);
 
   const hintMap = hints;
 
@@ -250,10 +256,12 @@ export default function App() {
   return (
     <>
       <div className="app">
+        <h1 className="sr-only">Dashboard</h1>
         <PaneGrid>
           {paneVisible("clock") && (
           <Pane
             title="Clock"
+            label="Uhr"
             span={paneSpan("clock")}
             id="pane-1"
             ref={(el: HTMLElement | null) => { paneRefs.current.clock = el; }}
@@ -275,7 +283,7 @@ export default function App() {
           )}
 
           {paneVisible("weather") && (
-          <Pane title="Weather" subtitle={config.location.label} span={paneSpan("weather")} id="pane-2"
+          <Pane title="Weather" label="Wetter" subtitle={config.location.label} span={paneSpan("weather")} id="pane-2"
             ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
           >
             <Weather data={wxQuery.data} selIndex={selIndex("weather")} />
@@ -283,7 +291,7 @@ export default function App() {
           )}
 
           {paneVisible("links") && (
-          <Pane title="Links" span={paneSpan("links")} clip id="pane-3"
+          <Pane title="Links" label="Links" span={paneSpan("links")} clip id="pane-3"
             ref={(el: HTMLElement | null) => { paneRefs.current.links = el; }}
           >
             <nav aria-label="Links">
@@ -294,10 +302,19 @@ export default function App() {
                     {g.links.map((l) => {
                       linkRow += 1;
                       const i = linkRow;
+                      const href = safeHref(l.url);
                       return (
-                        <li key={l.url} className={`row${isSel("links", i) ? " is-sel" : ""}`} data-row>
-                          <span className="hint">{l.hint ?? ""}</span>
-                          <span>{l.label}</span>
+                        <li key={l.url}>
+                          {/* Die Zeile ist der Link, nicht nur der Text darin: so trifft die
+                              Maus die ganze Breite und Mittelklick öffnet einen neuen Tab. */}
+                          <a
+                            className={`row${isSel("links", i) ? " is-sel" : ""}`}
+                            href={href ?? undefined}
+                            data-row
+                          >
+                            <span className="hint">{l.hint ?? ""}</span>
+                            <span>{l.label}</span>
+                          </a>
                         </li>
                       );
                     })}
@@ -309,7 +326,7 @@ export default function App() {
           )}
 
           {paneVisible("agenda") && (
-          <Pane title="Agenda" span={paneSpan("agenda")} clip id="pane-4"
+          <Pane title="Agenda" label="Termine" span={paneSpan("agenda")} clip id="pane-4"
             ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
           >
             <Agenda events={calQuery.data} selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
@@ -317,7 +334,7 @@ export default function App() {
           )}
 
           {paneVisible("news") && (
-          <Pane title="News" span={paneSpan("news")} clip id="pane-5"
+          <Pane title="News" label="Nachrichten" span={paneSpan("news")} clip id="pane-5"
             ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
           >
             <News items={newsQuery.data} selIndex={selIndex("news")} feedCount={config.feeds.length} />
@@ -325,10 +342,10 @@ export default function App() {
           )}
 
           {paneVisible("homelab") && (
-          <Pane title="Homelab" subtitle={config.homelab.node} span="full" id="pane-6"
+          <Pane title="Homelab" label="Homelab" subtitle={config.homelab.node} span="full" id="pane-6"
             ref={(el: HTMLElement | null) => { paneRefs.current.homelab = el; }}
           >
-            <Homelab data={labQuery.data} selIndex={selIndex("homelab")} />
+            <Homelab data={labQuery.data} selIndex={selIndex("homelab")} consoleUrl={consoleUrl} />
           </Pane>
           )}
         </PaneGrid>

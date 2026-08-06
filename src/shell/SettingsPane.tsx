@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { configSchema, type Config } from "../config/schema";
 
 type Guest = { vmid: number; name: string };
@@ -35,6 +35,38 @@ function RowActs({ first, last, onMove, onDel }: {
   );
 }
 
+/**
+ * Zahlenfeld, das den Tippzustand aushält. Vorher machte `Number("") || 0` aus einem
+ * geleerten Schwellwert sofort eine 0 — und eine 0 als Storage-Schwelle heißt: jedes
+ * Storage schlägt Alarm. Der Text bleibt hier stehen, nach außen geht nur eine gültige
+ * Zahl; beim Verlassen springt das Feld auf den letzten gültigen Wert zurück.
+ */
+function NumInput({ value, min, onCommit, className, ...rest }: {
+  value: number;
+  min: number;
+  onCommit: (n: number) => void;
+  className?: string;
+  id?: string;
+  "aria-label"?: string;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+  return (
+    <input
+      {...rest}
+      className={className}
+      inputMode="numeric"
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        const n = Number(e.target.value);
+        if (e.target.value.trim() !== "" && Number.isFinite(n) && n >= min) onCommit(n);
+      }}
+      onBlur={() => setText(String(value))}
+    />
+  );
+}
+
 function move<T>(arr: T[], i: number, delta: number): T[] {
   const j = i + delta;
   if (j < 0 || j >= arr.length) return arr;
@@ -44,20 +76,58 @@ function move<T>(arr: T[], i: number, delta: number): T[] {
   return next;
 }
 
+type BangRow = { key: string; tpl: string };
+
 export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
   const [draft, setDraft] = useState<Config>(config);
   const [sec, setSec] = useState<Sec>("links");
   const [error, setError] = useState<string | undefined>(undefined);
   const [placeQuery, setPlaceQuery] = useState(config.location.label);
   const [searching, setSearching] = useState(false);
+  // Bangs sind in der Config ein Objekt. Beim Umbenennen im Objekt frisst ein bereits
+  // vergebener Schlüssel den anderen Eintrag stillschweigend auf — also wird hier eine
+  // Liste bearbeitet und erst beim Speichern wieder zum Objekt gefaltet.
+  const [bangs, setBangs] = useState<BangRow[]>([]);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (open) {
       setDraft(config);
       setPlaceQuery(config.location.label);
+      setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
       setError(undefined);
     }
   }, [open, config]);
+
+  // Fokus in den Dialog und beim Schließen zurück auf die Stelle, von der er kam.
+  useEffect(() => {
+    if (!open) return;
+    restoreRef.current = document.activeElement as HTMLElement | null;
+    boxRef.current?.focus();
+    return () => restoreRef.current?.focus({ preventScroll: true });
+  }, [open]);
+
+  // Tab darf den Dialog nicht verlassen: dahinter liegt die ganze Seite, und wer
+  // hinausfällt, tippt unsichtbar weiter, während der Dialog noch offen ist.
+  function trapTab(e: React.KeyboardEvent) {
+    if (e.key !== "Tab") return;
+    const box = boxRef.current;
+    if (!box) return;
+    const focusable = [...box.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((el) => el.offsetParent !== null);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (e.shiftKey && document.activeElement === first) {
+      last.focus();
+      e.preventDefault();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      first.focus();
+      e.preventDefault();
+    }
+  }
 
   const upd = (fn: (d: Config) => Config) => setDraft((d) => fn(d));
 
@@ -100,9 +170,20 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
       setError(`Adresse von „${badUrl.label}" muss mit http:// oder https:// beginnen.`);
       return;
     }
+    const emptyBang = bangs.find((b) => b.key.trim() === "");
+    if (emptyBang !== undefined) {
+      setError("Ein Bang ohne Kürzel lässt sich nicht tippen — Kürzel eintragen oder Zeile löschen.");
+      return;
+    }
+    const bangKeys = bangs.map((b) => b.key.trim());
+    const dupBang = bangKeys.find((k, i) => bangKeys.indexOf(k) !== i);
+    if (dupBang !== undefined) {
+      setError(`Bang „!${dupBang}" ist doppelt vergeben — jedes Kürzel darf nur einmal vorkommen.`);
+      return;
+    }
     for (const [label, tpl] of [
       ["Standardsuche", draft.search.default] as const,
-      ...Object.entries(draft.search.bangs).map(([k, v]) => [`Bang !${k}`, v] as const),
+      ...bangs.map((b) => [`Bang !${b.key.trim()}`, b.tpl] as const),
     ]) {
       if (!/^https?:\/\//i.test(tpl)) {
         setError(`${label} muss mit http:// oder https:// beginnen.`);
@@ -117,7 +198,14 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
         return;
       }
     }
-    const parsed = configSchema.safeParse(draft);
+    const candidate: Config = {
+      ...draft,
+      search: {
+        ...draft.search,
+        bangs: Object.fromEntries(bangs.map((b) => [b.key.trim(), b.tpl])),
+      },
+    };
+    const parsed = configSchema.safeParse(candidate);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const path = issue && issue.path.length > 0 ? ` bei ${issue.path.join(".")}` : "";
@@ -131,30 +219,51 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
 
   return (
     <div className="overlay">
-      <div className="overlay-box set-box">
+      <div
+        className="overlay-box set-box"
+        ref={boxRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="set-title"
+        onKeyDown={trapTab}
+      >
         <div className="set-head">
-          <h2>Einstellungen</h2>
+          <h2 id="set-title">Einstellungen</h2>
           <span className="path">config.json auf dem Server — gilt nach dem Speichern auf allen Geräten</span>
         </div>
 
         <div className="set-layout">
-          <nav className="set-nav">
-            <ul>
-              {SECTIONS.map(([id, label]) => (
-                <li
-                  key={id}
-                  className={sec === id ? "is-active" : undefined}
-                  tabIndex={0}
-                  onClick={() => setSec(id)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSec(id); }}
-                >
-                  {label}
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <div className="set-nav" role="tablist" aria-orientation="vertical" aria-label="Abschnitte">
+            {SECTIONS.map(([id, label], i) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                id={`set-tab-${id}`}
+                aria-selected={sec === id}
+                aria-controls="set-panel"
+                // Rovender Tabindex: die Liste ist ein Tabstopp, innerhalb wird mit
+                // den Pfeiltasten gewechselt — so wie Tabs es überall tun.
+                tabIndex={sec === id ? 0 : -1}
+                className={sec === id ? "is-active" : undefined}
+                onClick={() => setSec(id)}
+                onKeyDown={(e) => {
+                  const delta = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+                  if (delta === 0) return;
+                  const next = SECTIONS[(i + delta + SECTIONS.length) % SECTIONS.length];
+                  if (!next) return;
+                  setSec(next[0]);
+                  document.getElementById(`set-tab-${next[0]}`)?.focus();
+                  e.preventDefault();
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-          <div className="set-body">
+          <div className="set-body" id="set-panel" role="tabpanel" aria-labelledby={`set-tab-${sec}`}>
             {sec === "links" && (
               <section>
                 <p className="set-hint">Kürzel beginnen mit <b>g</b> und sind genau zwei Zeichen lang — <b>gd</b> heißt: erst g, dann d. Doppelte Kürzel werden beim Speichern abgelehnt.</p>
@@ -250,8 +359,8 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
                         onChange={(e) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, label: e.target.value } : x) }))} />
                       <input className="inp" value={f.url} aria-label="URL"
                         onChange={(e) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, url: e.target.value } : x) }))} />
-                      <input className="inp inp--num" value={String(f.limit)} inputMode="numeric" aria-label="Anzahl"
-                        onChange={(e) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, limit: Math.max(1, Number(e.target.value) || 1) } : x) }))} />
+                      <NumInput className="inp inp--num" value={f.limit} min={1} aria-label="Anzahl"
+                        onCommit={(n) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, limit: n } : x) }))} />
                       <RowActs first={i === 0} last={i === draft.feeds.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, feeds: move(d.feeds, i, delta) }))}
                         onDel={() => upd((d) => ({ ...d, feeds: d.feeds.filter((_, j) => j !== i) }))} />
@@ -409,13 +518,13 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
                     <label htmlFor={`s-${key}`}>
                       {key === "cpu" ? "CPU" : key === "mem" ? "Speicher" : key === "storage" ? "Storage" : "Backup-Alter"}
                     </label>
-                    <input className="inp inp--num" id={`s-${key}`} inputMode="numeric"
-                      value={String(draft.homelab.thresholds[key])}
-                      onChange={(e) => upd((d) => ({
+                    <NumInput className="inp inp--num" id={`s-${key}`} min={1}
+                      value={draft.homelab.thresholds[key]}
+                      onCommit={(n) => upd((d) => ({
                         ...d,
                         homelab: {
                           ...d.homelab,
-                          thresholds: { ...d.homelab.thresholds, [key]: Math.max(0, Number(e.target.value) || 0) },
+                          thresholds: { ...d.homelab.thresholds, [key]: n },
                         },
                       }))} />
                   </div>
@@ -429,8 +538,8 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
                         onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, label: e.target.value } : x) } }))} />
                       <input className="inp" value={r.host} aria-label="Host"
                         onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, host: e.target.value } : x) } }))} />
-                      <input className="inp inp--num" inputMode="numeric" value={String(r.port)} aria-label="Port"
-                        onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, port: Math.max(1, Number(e.target.value) || 1) } : x) } }))} />
+                      <NumInput className="inp inp--num" value={r.port} min={1} aria-label="Port"
+                        onCommit={(n) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, port: n } : x) } }))} />
                       <RowActs first={i === 0} last={i === draft.homelab.reachability.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: move(d.homelab.reachability, i, delta) } }))}
                         onDel={() => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.filter((_, j) => j !== i) } }))} />
@@ -455,29 +564,21 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
                 <p className="set-hint" style={{ marginTop: "1rem" }}><b>%s</b> wird durch die Eingabe ersetzt. Bang wird als <b>!kürzel suchbegriff</b> getippt.</p>
                 <div className="tbl tbl--bangs">
                   <div className="tbl-head"><span>Bang</span><span>URL-Vorlage</span><span /></div>
-                  {Object.entries(draft.search.bangs).map(([key, tpl], i, arr) => (
-                    <div className="tbl-row" key={key}>
-                      <input className="inp inp--hint" value={key} aria-label="Bang"
-                        onChange={(e) => upd((d) => {
-                          const bangs = Object.fromEntries(Object.entries(d.search.bangs).map(([k, v], j) => [j === i ? e.target.value : k, v]));
-                          return { ...d, search: { ...d.search, bangs } };
-                        })} />
-                      <input className="inp" value={tpl} aria-label="URL-Vorlage"
-                        onChange={(e) => upd((d) => ({ ...d, search: { ...d.search, bangs: { ...d.search.bangs, [key]: e.target.value } } }))} />
-                      <RowActs first={i === 0} last={i === arr.length - 1}
-                        onMove={() => undefined}
-                        onDel={() => upd((d) => {
-                          const bangs = { ...d.search.bangs };
-                          delete bangs[key];
-                          return { ...d, search: { ...d.search, bangs } };
-                        })} />
+                  {bangs.map((b, i) => (
+                    <div className="tbl-row" key={i}>
+                      <input className="inp inp--hint" value={b.key} aria-label="Bang"
+                        onChange={(e) => setBangs((rows) => rows.map((x, j) => j === i ? { ...x, key: e.target.value } : x))} />
+                      <input className="inp" value={b.tpl} aria-label="URL-Vorlage"
+                        onChange={(e) => setBangs((rows) => rows.map((x, j) => j === i ? { ...x, tpl: e.target.value } : x))} />
+                      <RowActs first={i === 0} last={i === bangs.length - 1}
+                        onMove={(delta) => setBangs((rows) => move(rows, i, delta))}
+                        onDel={() => setBangs((rows) => rows.filter((_, j) => j !== i))} />
                     </div>
                   ))}
                 </div>
                 <p className="addline">
-                  <button type="button" className="btn" onClick={() => upd((d) => ({
-                    ...d, search: { ...d.search, bangs: { ...d.search.bangs, neu: "https://" } },
-                  }))}>+ Bang</button>
+                  <button type="button" className="btn"
+                    onClick={() => setBangs((rows) => [...rows, { key: "", tpl: "https://" }])}>+ Bang</button>
                 </p>
               </section>
             )}
@@ -509,7 +610,7 @@ export function SettingsPane({ open, config, guests, onClose, onSave }: Props) {
         <div className="set-foot">
           <button type="button" className="btn btn--primary" onClick={save}>Speichern</button>
           <button type="button" className="btn" onClick={onClose}>Abbrechen</button>
-          <span className="note">Esc verwirft</span>
+          <span className="note">Esc verlässt das Feld, noch einmal Esc verwirft</span>
           {error && <span className="set-error" role="alert">{error}</span>}
           <span className="spacer note">:export sichert als Datei · :import liest sie zurück</span>
         </div>

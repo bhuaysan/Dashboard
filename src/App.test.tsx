@@ -26,6 +26,18 @@ describe("App", () => {
     expect(screen.getByText("Datasphere")).toBeTruthy();
   });
 
+  it("gibt jeder Linkzeile ein echtes href", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+    const link = screen.getByText("Datasphere").closest("a");
+    expect(link?.getAttribute("href")).toMatch(/^https?:\/\//);
+    expect(screen.getByRole("region", { name: "Links" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Dashboard");
+  });
+
   it(":refresh lädt die Quellen neu, ohne die Seite neu zu laden", () => {
     const client = new QueryClient();
     const invalidate = vi.spyOn(client, "invalidateQueries");

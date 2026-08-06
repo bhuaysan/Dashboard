@@ -68,18 +68,26 @@ type Params = {
   visiblePanes: ReadonlySet<PaneId>;
 };
 
-export function openUrl(url: string, newTab: boolean): void {
-  // Nur http und https: die Adressen kommen aus der Config, und javascript: oder data:
-  // würden hier als Skript in der eigenen Seite landen.
+// Nur http und https: die Adressen kommen aus der Config und — bei News — aus fremden
+// Feeds. javascript: oder data: würden als Skript in der eigenen Seite landen.
+// Jedes href im Markup läuft hier durch, nicht nur die Tastatursprünge.
+export function safeHref(url: string | undefined): string | undefined {
+  if (!url) return undefined;
   let target: URL;
   try {
     target = new URL(url, window.location.href);
   } catch {
-    return;
+    return undefined;
   }
-  if (target.protocol !== "http:" && target.protocol !== "https:") return;
-  if (newTab) window.open(target.href, "_blank", "noopener");
-  else window.location.assign(target.href);
+  if (target.protocol !== "http:" && target.protocol !== "https:") return undefined;
+  return target.href;
+}
+
+export function openUrl(url: string, newTab: boolean): void {
+  const href = safeHref(url);
+  if (href === undefined) return;
+  if (newTab) window.open(href, "_blank", "noopener");
+  else window.location.assign(href);
 }
 
 export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
@@ -94,7 +102,20 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
 
   useEffect(() => {
     function onKeydown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const inField = target !== null && (
+        target.tagName === "INPUT" || target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" || target.isContentEditable
+      );
       if (e.key === "Escape") {
+        // Im Einstellungsdialog gibt Esc erst das Feld frei. Vorher hat ein Esc aus
+        // Gewohnheit mitten im Tippen den ganzen Entwurf verworfen. Die Kommandozeile
+        // bleibt davon unberührt — dort schließt Esc weiterhin sofort.
+        if (overlayOpen && inField) {
+          target.blur();
+          e.preventDefault();
+          return;
+        }
         if (overlayOpen) onOverlayEscape();
         else {
           live.current = { mode: "NORMAL", hintBuffer: "" };
@@ -105,14 +126,17 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
       // Solange ein Overlay offen ist, gilt keine andere globale Taste —
       // sonst würde jeder Tastendruck im Formular als Kommando gedeutet.
       if (overlayOpen) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (inField) return;
       if (live.current.mode !== "NORMAL") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (state.showHelp) {
-        dispatch({ type: "help", show: false });
-        e.preventDefault();
+        // Nur druckbare Zeichen schließen die Übersicht. Tab und Pfeile müssen
+        // durchkommen, sonst kann sie mit der Tastatur niemand lesen.
+        if (e.key.length === 1) {
+          dispatch({ type: "help", show: false });
+          e.preventDefault();
+        }
         return;
       }
       if (e.key === "?") {
