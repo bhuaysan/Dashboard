@@ -246,8 +246,10 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .ev { display: grid; grid-template-columns: 11.5ch 1fr; gap: .6rem;
       padding: .05rem .4rem; margin: 0 -.4rem; }
 .ev.is-sel { background: var(--color-bg-sel); }
-.ev.is-now { background: var(--color-bg-sel); }
-.ev.is-now .ev-title { color: var(--color-accent); }
+/* „läuft gerade" trägt den Akzent auf Zeit und Titel, nicht dieselbe Auswahlfläche wie der
+   Cursor — sonst sehen das laufende und das angewählte Ereignis gleich aus. So bleiben beide
+   Zustände unterscheidbar, auch wenn sie auf derselben Zeile zusammentreffen. */
+.ev.is-now .ev-time, .ev.is-now .ev-title { color: var(--color-accent); }
 .ev.is-past .ev-time, .ev.is-past .ev-title { color: var(--color-dim); }
 .ev-time { color: var(--color-dim); }
 .ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
