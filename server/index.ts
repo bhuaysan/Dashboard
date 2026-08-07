@@ -149,4 +149,6 @@ if (isMain) {
   serve({ fetch: app.fetch, port: env.port }, (info) => {
     console.log(`dashboard-server auf Port ${info.port}`);
   });
+  // Ohne dauerhaften Leser bekommt go-librespot ENXIO und die Wiedergabe bricht ab.
+  pcm.start();
 }

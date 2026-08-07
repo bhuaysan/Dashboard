@@ -52,31 +52,35 @@ export class PcmBroadcaster {
     this.path = path;
   }
 
+  /**
+   * Hält die FIFO dauerhaft offen und liest immer — notfalls in den Abfluss.
+   * Ohne Leser bekommt go-librespot beim Öffnen ENXIO und die Wiedergabe
+   * bricht ab, bevor ein Byte durch ist. Das Öffnen blockiert, bis der
+   * Writer da ist; libuv packt das in den Threadpool, der Server wartet nicht.
+   */
+  start(): void {
+    if (this.source !== undefined) return;
+    this.source = createReadStream(this.path, { highWaterMark: 64 * 1024 });
+    this.source.on("data", (chunk: string | Buffer) => {
+      if (this.clients.size === 0) return;   // Abfluss: niemand hört zu
+      const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);
+      for (const client of this.clients) {
+        client.write(bytes).catch(() => this.remove(client));
+      }
+    });
+    this.source.on("error", () => {
+      for (const client of this.clients) client.close();
+      this.clients.clear();
+      this.source = undefined;
+    });
+  }
+
   add(sink: Sink): void {
     this.clients.add(sink);
-    if (this.source === undefined) {
-      // Das Öffnen blockiert, bis go-librespot schreibend öffnet — danach
-      // fließen die Bytes einfach durch.
-      this.source = createReadStream(this.path, { highWaterMark: 64 * 1024 });
-      this.source.on("data", (chunk: string | Buffer) => {
-        const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);
-        for (const client of this.clients) {
-          client.write(bytes).catch(() => this.remove(client));
-        }
-      });
-      this.source.on("error", () => {
-        for (const client of this.clients) client.close();
-        this.clients.clear();
-        this.source = undefined;
-      });
-    }
+    this.start();
   }
 
   remove(sink: Sink): void {
     this.clients.delete(sink);
-    if (this.clients.size === 0 && this.source !== undefined) {
-      this.source.destroy();
-      this.source = undefined;
-    }
   }
 }
