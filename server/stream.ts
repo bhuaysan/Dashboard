@@ -46,8 +46,11 @@ type Sink = { write: (chunk: Uint8Array) => Promise<unknown>; close: () => void 
 export class PcmBroadcaster {
   private source: ReadStream | undefined;
   private clients = new Set<Sink>();
+  private readonly path: string;
 
-  constructor(private readonly path: string) {}
+  constructor(path: string) {
+    this.path = path;
+  }
 
   add(sink: Sink): void {
     this.clients.add(sink);
