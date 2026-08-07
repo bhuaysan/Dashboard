@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { Month } from "./Month";
+import { render } from "@testing-library/react";
+import { Month, monthLabel } from "./Month";
 import type { CalEvent } from "../lib/ics";
 
 function ev(start: Date): CalEvent {
@@ -11,11 +11,15 @@ function ev(start: Date): CalEvent {
 // braucht also eine führende Lücke und sechs Wochen.
 const AUG_7 = new Date(2026, 7, 7, 9, 30);
 
-describe("Month", () => {
+describe("monthLabel", () => {
+  // Der Monatsname steht im Pane-Titel, nicht mehr im Inhalt — sonst stünde eine
+  // Überschrift in Größe und Gewicht der Datenzellen darunter.
   it("nennt Monat und Jahr", () => {
-    render(<Month now={AUG_7} />);
-    expect(screen.getByText("August 2026")).toBeTruthy();
+    expect(monthLabel(AUG_7)).toBe("August 2026");
   });
+});
+
+describe("Month", () => {
 
   it("zeigt jeden Tag des Monats genau einmal und keinen fremden", () => {
     const { container } = render(<Month now={AUG_7} />);
@@ -59,15 +63,27 @@ describe("Month", () => {
     expect(marked.map((el) => el.textContent)).toEqual(["11"]);
   });
 
-  it("kündigt den nächsten Feiertag mit Abstand an", () => {
+  it("listet die nächsten vier Feiertage mit Abstand", () => {
     const { container } = render(<Month now={new Date(2026, 9, 1)} />);
-    const note = container.querySelector(".cal-next")?.textContent ?? "";
-    expect(note).toContain("Tag der Deutschen Einheit");
-    expect(note).toContain("in 2 Tagen");
+    const rows = [...container.querySelectorAll(".cal-hol > li")].map((li) => li.textContent ?? "");
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toContain("Tag der Deutschen Einheit");
+    expect(rows[0]).toContain("in 2 d");
+    expect(rows[1]).toContain("Allerheiligen");
+    expect(rows[2]).toContain("1. Weihnachtstag");
+    expect(rows[3]).toContain("2. Weihnachtstag");
   });
 
   it("sagt heute, wenn heute Feiertag ist", () => {
     const { container } = render(<Month now={new Date(2026, 9, 3, 8, 0)} />);
-    expect(container.querySelector(".cal-next")?.textContent).toContain("heute");
+    expect(container.querySelector(".cal-hol > li")?.textContent).toContain("heute");
+  });
+
+  // August hat in NRW keinen Feiertag — die Liste zeigt trotzdem etwas, weil sie über
+  // den Monat hinausblickt. Genau deshalb steht dort eine Liste und keine Monatsauswahl.
+  it("bleibt in einem Monat ohne Feiertag gefüllt", () => {
+    const { container } = render(<Month now={AUG_7} />);
+    expect(container.querySelectorAll(".cal-hol > li")).toHaveLength(4);
+    expect(container.querySelector(".cal-day.is-holiday")).toBeNull();
   });
 });

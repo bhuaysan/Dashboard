@@ -21,7 +21,7 @@ import { useCachedQuery } from "./api/useCachedQuery";
 import { fetchWeather, Weather } from "./widgets/Weather";
 import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, reviveNews, News } from "./widgets/News";
-import { Month } from "./widgets/Month";
+import { Month, monthLabel } from "./widgets/Month";
 import { addDays, monthGrid, startOfDay } from "./lib/date";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
@@ -315,7 +315,7 @@ export default function App() {
           )}
 
           {paneVisible("month") && (
-          <Pane title="Month" label="Monat" span={paneSpan("month")} id="pane-7"
+          <Pane title="Month" label="Monat" subtitle={monthLabel(now)} span={paneSpan("month")} id="pane-7"
             ref={(el: HTMLElement | null) => { paneRefs.current.month = el; }}
           >
             <Month now={now} events={calQuery.data} />
