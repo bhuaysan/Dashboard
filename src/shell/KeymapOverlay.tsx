@@ -30,8 +30,8 @@ export function KeymapOverlay({ open }: Props) {
           <dt>Zeichen, /</dt><dd>Fokus ins Suchfeld (INSERT)</dd>
           <dt>1 – 7</dt><dd>Pane fokussieren</dd>
           <dt>j / k</dt><dd>Zeile ab / auf im fokussierten Pane</dd>
-          <dt>Enter</dt><dd>ausgewählte Zeile öffnen</dd>
-          <dt>Shift+Enter</dt><dd>in neuem Tab öffnen</dd>
+          <dt>Enter</dt><dd>ausgewählte Zeile öffnen / Musik-Aktion auslösen</dd>
+          <dt>Shift+Enter</dt><dd>in neuem Tab öffnen; in MUSIC die zweite Aktion der Zeile (zurück · leiser)</dd>
           <dt>Tab</dt><dd>Zeile für Zeile ohne Maus — jede Zeile ist ein Link</dd>
           <dt>g, dann Zeichen</dt><dd>Link direkt öffnen — das Kürzel neben dem Link, z. B. gd → Datasphere</dd>
           <dt>:</dt><dd>Kommando — settings, export, import, refresh, reload, theme</dd>

@@ -152,6 +152,45 @@ describe("Esc im Einstellungsdialog", () => {
   });
 });
 
+describe("Aktionszeilen (MUSIC)", () => {
+  function setupAction(altAction?: string) {
+    const onAction = vi.fn<(a: string) => void>();
+    renderHook(() => useKeymap({
+      state: { ...initialUiState, pane: "music", row: 1 },
+      dispatch: vi.fn(),
+      hints: {},
+      rowCount: 3,
+      selectedUrl: undefined,
+      selectedAction: "next",
+      selectedAltAction: altAction,
+      onAction,
+      onSeed: vi.fn(),
+      overlayOpen: false,
+      onOverlayEscape: () => undefined,
+      visiblePanes: ALL_PANES,
+    }));
+    return onAction;
+  }
+
+  it("Enter löst die Aktion der Zeile aus", () => {
+    const onAction = setupAction("prev");
+    press("Enter");
+    expect(onAction).toHaveBeenCalledWith("next");
+  });
+
+  it("Shift+Enter löst die zweite Aktion derselben Zeile aus", () => {
+    const onAction = setupAction("prev");
+    press("Enter", { shiftKey: true });
+    expect(onAction).toHaveBeenCalledWith("prev");
+  });
+
+  it("Shift ohne zweite Aktion fällt auf die erste zurück", () => {
+    const onAction = setupAction(undefined);
+    press("Enter", { shiftKey: true });
+    expect(onAction).toHaveBeenCalledWith("next");
+  });
+});
+
 describe("Tastenübersicht", () => {
   it("schließt bei einem druckbaren Zeichen, aber nicht bei Tab", () => {
     const dispatch = setup({ showHelp: true });

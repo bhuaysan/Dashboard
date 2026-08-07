@@ -65,6 +65,8 @@ type Params = {
   selectedUrl: string | undefined;
   /** Zeilen ohne URL (z.B. Steuerbefehle) — Enter löst dann diese Aktion aus. */
   selectedAction?: string | undefined;
+  /** Zweite Aktion derselben Zeile (Shift+Enter), z.B. "zurück" neben "weiter". */
+  selectedAltAction?: string | undefined;
   onAction?: (action: string) => void;
   onSeed: (seed: string, mode: Mode) => void;
   overlayOpen: boolean;
@@ -94,7 +96,7 @@ export function openUrl(url: string, newTab: boolean): void {
   else window.location.assign(href);
 }
 
-export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, selectedAction, onAction, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
+export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, selectedAction, selectedAltAction, onAction, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
   // Der Handler kennt nur den Zustand aus dem letzten Render. Kommen zwei Tasten an,
   // bevor React neu gerendert hat, sähe die zweite noch den alten Modus und würde ihn
   // überschreiben — aus ":s" wurde so eine Suche nach "s" statt eines Kommandos.
@@ -199,7 +201,10 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, selec
       }
       if (e.key === "Enter") {
         if (selectedUrl) openUrl(selectedUrl, e.shiftKey);
-        else if (selectedAction !== undefined) onAction?.(selectedAction);
+        else if (selectedAction !== undefined) {
+          const alt = e.shiftKey ? selectedAltAction : undefined;
+          onAction?.(alt ?? selectedAction);
+        }
         e.preventDefault();
         return;
       }
@@ -211,5 +216,5 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, selec
     }
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [state, dispatch, hints, rowCount, selectedUrl, selectedAction, onAction, onSeed, overlayOpen, onOverlayEscape, visiblePanes]);
+  }, [state, dispatch, hints, rowCount, selectedUrl, selectedAction, selectedAltAction, onAction, onSeed, overlayOpen, onOverlayEscape, visiblePanes]);
 }

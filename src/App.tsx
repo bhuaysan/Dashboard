@@ -26,7 +26,7 @@ import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
 import { fetchMusic, sendMusicCommand, Music, MUSIC_ROWS, type MusicCommand } from "./widgets/Music";
 import { SettingsPane } from "./shell/SettingsPane";
 
-type RowInfo = { url?: string; action?: MusicCommand };
+type RowInfo = { url?: string; action?: MusicCommand; altAction?: MusicCommand };
 
 function isoWeek(d: Date): number {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -144,7 +144,10 @@ export default function App() {
     const rows: Record<PaneId, RowInfo[]> = {
       clock: [],
       weather: [],
-      music: MUSIC_ROWS.map((r) => ({ action: r.cmd })),
+      music: MUSIC_ROWS.map((r) => ({
+        action: r.cmd,
+        ...(r.altCmd !== undefined ? { altAction: r.altCmd } : {}),
+      })),
       links: flatLinks.map((l) => ({ url: l.url })),
       agenda: (calQuery.data ?? []).map(() => ({})),
       news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
@@ -166,6 +169,9 @@ export default function App() {
     : undefined;
   const selectedAction = ui.pane && ui.mode === "NORMAL"
     ? rowsByPane[ui.pane]?.[ui.row]?.action
+    : undefined;
+  const selectedAltAction = ui.pane && ui.mode === "NORMAL"
+    ? rowsByPane[ui.pane]?.[ui.row]?.altAction
     : undefined;
 
   const onMusicCommand = useCallback((cmd: MusicCommand) => {
@@ -195,7 +201,7 @@ export default function App() {
 
   useKeymap({
     state: ui, dispatch, hints: hintMap, rowCount, selectedUrl,
-    selectedAction, onAction: onRowAction, onSeed,
+    selectedAction, selectedAltAction, onAction: onRowAction, onSeed,
     overlayOpen: settingsOpen, onOverlayEscape: () => setSettingsOpen(false),
     visiblePanes,
   });

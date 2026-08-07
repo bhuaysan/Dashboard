@@ -21,12 +21,12 @@ export async function sendMusicCommand(cmd: MusicCommand): Promise<void> {
   }
 }
 
-export const MUSIC_ROWS: { cmd: MusicCommand; label: string }[] = [
+// Enter löst cmd aus, Shift+Enter altCmd — so bleiben beide Richtungen einer
+// Aktion auf einer Zeile erreichbar, statt je eine eigene Zeile zu belegen.
+export const MUSIC_ROWS: { cmd: MusicCommand; altCmd?: MusicCommand; label: string }[] = [
   { cmd: "toggle", label: "wiedergabe / pause" },
-  { cmd: "next", label: "nächster titel" },
-  { cmd: "prev", label: "vorheriger titel" },
-  { cmd: "volumeUp", label: "lauter" },
-  { cmd: "volumeDown", label: "leiser" },
+  { cmd: "next", altCmd: "prev", label: "weiter · zurück" },
+  { cmd: "volumeUp", altCmd: "volumeDown", label: "lauter · leiser" },
 ];
 
 function msToClock(ms: number): string {
@@ -52,8 +52,9 @@ type MusicProps = {
 };
 
 export function Music({ data, selIndex, onCommand }: MusicProps) {
-  // fetchedAt kommt vom Server; dazwischen läuft der Fortschritt sekündlich weiter,
-  // ohne die API zu treffen. Pause friert den Balken einfach ein.
+  // fetchedAt kommt vom Server; dazwischen läuft der Fortschritt weiter, ohne die
+  // API zu treffen. tick sorgt nur fürs sekündliche Re-Render. Server und Clients
+  // hängen am selben NTP — ein etwaiger Versatz ist kleiner als die Anzeigegenauigkeit.
   const [tick, setTick] = useState(0);
   const playing = data?.playing ?? false;
   useEffect(() => {
@@ -65,9 +66,6 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
   if (!data) return <div className="dim">noch keine Musik-Daten</div>;
   if (!data.configured) return <div className="dim">Musik nicht konfiguriert</div>;
 
-  // fetchedAt kommt vom Server; dazwischen läuft der Fortschritt weiter, ohne die
-  // API zu treffen. tick sorgt nur fürs sekündliche Re-Render. Server und Clients
-  // hängen am selben NTP — ein etwaiger Versatz ist kleiner als die Anzeigegenauigkeit.
   void tick;
   const elapsed = data.active && playing
     ? Math.min(data.elapsedMs + (Date.now() - data.fetchedAt), data.durationMs)
@@ -76,17 +74,19 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
   return (
     <>
       {data.active ? (
-        <div aria-live="off">
+        <div>
           <div>♪ {data.artist} – {data.title}</div>
           <div className="dim">
             {"  "}{[data.album, data.device].filter(Boolean).join("  ·  ")}
           </div>
           <div>
+            <span className="dim">{msToClock(elapsed)}</span>{" "}
             <Bar
               pct={data.durationMs > 0 ? (elapsed / data.durationMs) * 100 : 0}
               ariaLabel={`Fortschritt ${msToClock(elapsed)} von ${msToClock(data.durationMs)}`}
             />{" "}
-            <span className="dim">{msToClock(elapsed)}/{msToClock(data.durationMs)}</span>
+            <span className="dim">{msToClock(data.durationMs)}</span>{" "}
+            <span className="dim">{playing ? "play" : "pause"}</span>
           </div>
           {data.volume >= 0 && (
             <div>
@@ -95,7 +95,6 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
               <span className="dim">{data.volume} %</span>
             </div>
           )}
-          <div className="dim">{playing ? "play" : "pause"}</div>
         </div>
       ) : (
         <div className="dim">kein aktives Gerät — Spotify irgendwo starten</div>
@@ -108,6 +107,7 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
             data-row
             role="button"
             tabIndex={-1}
+            title={r.altCmd ? "Shift: zweite Aktion" : undefined}
             onClick={() => onCommand(r.cmd)}
           >
             {r.label}
