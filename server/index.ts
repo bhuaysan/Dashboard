@@ -13,6 +13,8 @@ import { proxyFetch } from "./proxy.ts";
 import { configSchema } from "../src/config/schema.ts";
 import { fetchHomelab, type HomelabData } from "./pve.ts";
 import { fetchMusic, sendMusicCommand, emptyMusic, MUSIC_COMMANDS, type MusicCommand, type MusicData } from "./spotify.ts";
+import { buildWavHeader, PcmBroadcaster } from "./stream.ts";
+import { stream } from "hono/streaming";
 
 export const app = new Hono();
 
@@ -111,13 +113,32 @@ app.post("/api/music/command", writeGuard, async (c) => {
     return c.json({ error: "unbekanntes Kommando" }, 400);
   }
   try {
-    await sendMusicCommand(cmd as MusicCommand);
+    const cfg = await readConfig();
+    await sendMusicCommand(cmd as MusicCommand, cfg.music.device);
     musicCache = undefined;   // naechstes GET zeigt sofort den neuen Zustand
     return c.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Kommando fehlgeschlagen";
     return c.json({ error: msg }, 502);
   }
+});
+
+// Rohes PCM von go-librespot, mit WAV-Header als audio/wav — das <audio>-Element
+// im Browser spielt es ohne weitere Infrastruktur. Ein Leser auf der FIFO,
+// verteilt auf alle Hörer.
+const pcm = new PcmBroadcaster(env.musicPcmPath);
+
+app.get("/api/music/stream", (c) => {
+  c.header("content-type", "audio/wav");
+  c.header("cache-control", "no-store");
+  return stream(c, async (s) => {
+    await s.write(buildWavHeader());
+    const sink = { write: (chunk: Uint8Array) => s.write(chunk), close: () => void s.close() };
+    pcm.add(sink);
+    await new Promise<void>((resolve) => {
+      s.onAbort(() => { pcm.remove(sink); resolve(); });
+    });
+  });
 });
 
 const isMain = process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false;

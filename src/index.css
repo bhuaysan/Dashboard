@@ -191,6 +191,7 @@ body {
   color: var(--color-accent); }
 .music-skip { color: var(--color-dim); padding: 0 .5ch; }
 .music-skip:hover { color: var(--color-accent); }
+.music-live { color: var(--color-accent); padding: 0 .5ch; }
 
 /* Zeilen sind echte Links. Sie sollen weiter aussehen wie Text im Terminal — keine
    Unterstreichung, keine Linkfarbe —, aber unter der Maus reagieren und die ganze

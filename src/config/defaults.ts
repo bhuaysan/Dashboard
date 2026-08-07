@@ -80,7 +80,7 @@ export const defaultConfig: Config = {
     "www.heise.de",
     "www.tagesschau.de",
   ],
-  music: { enabled: true, source: "spotify" },
+  music: { enabled: true, source: "spotify", device: "Homelab" },
   homelab: {
     node: "pve",
     uiUrl: "https://10.0.10.10:8006",

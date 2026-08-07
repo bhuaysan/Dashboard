@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMusic, clampVolume, emptyMusic, VOLUME_STEP, type SpotifyPlayer } from "./spotify.ts";
+import { buildMusic, clampVolume, emptyMusic, pickDeviceId, VOLUME_STEP, type SpotifyPlayer } from "./spotify.ts";
 
 const NOW = 1_754_500_000_000;
 
@@ -66,6 +66,27 @@ describe("buildMusic", () => {
 
   it("emptyMusic ist der nicht-konfigurierte Zustand", () => {
     expect(emptyMusic).toMatchObject({ configured: false, active: false, playing: false });
+  });
+});
+
+describe("pickDeviceId", () => {
+  const devices = [
+    { id: "aaa", name: "Küche", is_active: false },
+    { id: "bbb", name: "Homelab", is_active: false },
+    { id: null, name: "Kaputt", is_active: false },
+  ];
+
+  it("findet das Gerät zum Namen, Groß-/Kleinschreibung egal", () => {
+    expect(pickDeviceId(devices, "homelab")).toBe("bbb");
+    expect(pickDeviceId(devices, "Homelab")).toBe("bbb");
+  });
+
+  it("unbekannter Name ergibt undefined, nicht das erste Gerät", () => {
+    expect(pickDeviceId(devices, "Wohnzimmer")).toBeUndefined();
+  });
+
+  it("leere Geräteliste ergibt undefined", () => {
+    expect(pickDeviceId([], "Homelab")).toBeUndefined();
   });
 });
 

@@ -33,7 +33,8 @@ export const configSchema = z.object({
   music: z.object({
     enabled: z.boolean().default(true),
     source: z.enum(["spotify", "mpd"]).default("spotify"),
-  }).default({ enabled: true, source: "spotify" }),
+    device: z.string().default("Homelab"),     // Name des librespot-Connect-Geräts
+  }).default({ enabled: true, source: "spotify", device: "Homelab" }),
   homelab: z.object({
     node: z.string().default("pve"),
     uiUrl: z.string().default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links

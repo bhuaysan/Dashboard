@@ -585,7 +585,12 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved }: P
                     </select>
                   </span>
                 </div>
-                <p className="set-hint">Spotify: der Server hält das Token in .env — einmalig einrichten mit scripts/spotify-auth.mjs. Die Daten holt der Server, nicht der Browser. mpd ist als Quelle vorgesehen, aber noch nicht angebunden.</p>
+                <div className="field">
+                  <label htmlFor="s-music-dev">Connect-Gerät</label>
+                  <input className="inp" id="s-music-dev" style={{ maxWidth: "16ch" }} value={draft.music.device}
+                    onChange={(e) => upd((d) => ({ ...d, music: { ...d.music, device: e.target.value } }))} />
+                </div>
+                <p className="set-hint">Name des librespot-Geräts, auf das die Pane die Wiedergabe zieht, wenn kein Gerät aktiv ist. Spotify: der Server hält das Token in .env — einmalig einrichten mit scripts/spotify-auth.mjs. mpd ist als Quelle vorgesehen, aber noch nicht angebunden.</p>
               </section>
             )}
 

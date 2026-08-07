@@ -1,10 +1,10 @@
 import { fetch as undiciFetch } from "undici";
 import { env } from "./env.ts";
 
-export type MusicCommand = "toggle" | "next" | "prev" | "volumeUp" | "volumeDown";
+export type MusicCommand = "toggle" | "next" | "prev" | "volumeUp" | "volumeDown" | "transfer";
 
 export const MUSIC_COMMANDS: readonly MusicCommand[] = [
-  "toggle", "next", "prev", "volumeUp", "volumeDown",
+  "toggle", "next", "prev", "volumeUp", "volumeDown", "transfer",
 ];
 
 export type MusicData = {
@@ -102,24 +102,29 @@ async function accessToken(): Promise<string> {
   return tokenCache.accessToken;
 }
 
-async function spotifyFetch(path: string, method: string, query?: Record<string, string>) {
-  const token = await accessToken();
-  const url = new URL(`https://api.spotify.com/v1${path}`);
-  if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
-  const res = await undiciFetch(url, {
-    method,
-    headers: { authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(5000),
-  });
+async function spotifyFetch(
+  path: string,
+  method: string,
+  options: { query?: Record<string, string>; json?: unknown } = {},
+) {
+  const send = (token: string) => {
+    const url = new URL(`https://api.spotify.com/v1${path}`);
+    if (options.query) for (const [k, v] of Object.entries(options.query)) url.searchParams.set(k, v);
+    return undiciFetch(url, {
+      method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(options.json !== undefined ? { "content-type": "application/json" } : {}),
+      },
+      ...(options.json !== undefined ? { body: JSON.stringify(options.json) } : {}),
+      signal: AbortSignal.timeout(5000),
+    });
+  };
+  const res = await send(await accessToken());
   // Token war doch schon fällig: einmal frisch holen und wiederholen.
   if (res.status === 401) {
     tokenCache = undefined;
-    const fresh = await accessToken();
-    return undiciFetch(url, {
-      method,
-      headers: { authorization: `Bearer ${fresh}` },
-      signal: AbortSignal.timeout(5000),
-    });
+    return send(await accessToken());
   }
   return res;
 }
@@ -132,8 +137,31 @@ export async function fetchMusic(): Promise<MusicData> {
   return buildMusic((await res.json()) as SpotifyPlayer);
 }
 
-export async function sendMusicCommand(cmd: MusicCommand): Promise<void> {
+export type SpotifyDevice = { id: string | null; name: string; is_active: boolean };
+
+// Groß-/Kleinschreibung egal: der Gerätename kommt aus der Config, die Anzeige
+// aus librespot — „homelab" und „Homelab" sollen dasselbe Gerät meinen.
+export function pickDeviceId(devices: SpotifyDevice[], name: string): string | undefined {
+  const wanted = name.toLowerCase();
+  return devices.find((d) => d.name.toLowerCase() === wanted)?.id ?? undefined;
+}
+
+export async function sendMusicCommand(cmd: MusicCommand, deviceName: string): Promise<void> {
   if (!env.spotify) throw new Error("Spotify nicht konfiguriert");
+  if (cmd === "transfer") {
+    const res = await spotifyFetch("/me/player/devices", "GET");
+    if (!res.ok) throw new Error(`Spotify devices: HTTP ${res.status}`);
+    const body = (await res.json()) as { devices: SpotifyDevice[] };
+    const id = pickDeviceId(body.devices, deviceName);
+    if (id === undefined) throw new Error(`Gerät „${deviceName}" nicht gefunden`);
+    const transfer = await spotifyFetch("/me/player", "PUT", {
+      json: { device_ids: [id], play: true },
+    });
+    if (!transfer.ok && transfer.status !== 204) {
+      throw new Error(`Spotify transfer: HTTP ${transfer.status}`);
+    }
+    return;
+  }
   if (cmd === "toggle") {
     const state = await fetchMusic();
     if (!state.active) throw new Error("kein aktives Gerät");
@@ -150,6 +178,6 @@ export async function sendMusicCommand(cmd: MusicCommand): Promise<void> {
   if (!state.active) throw new Error("kein aktives Gerät");
   if (state.volume < 0) throw new Error("Gerät meldet keine Lautstärke");
   const next = clampVolume(state.volume + (cmd === "volumeUp" ? VOLUME_STEP : -VOLUME_STEP));
-  const res = await spotifyFetch("/me/player/volume", "PUT", { volume_percent: String(next) });
+  const res = await spotifyFetch("/me/player/volume", "PUT", { query: { volume_percent: String(next) } });
   if (!res.ok && res.status !== 204) throw new Error(`Spotify volume: HTTP ${res.status}`);
 }

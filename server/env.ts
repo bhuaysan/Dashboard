@@ -16,4 +16,6 @@ export const env = {
   spotify: spotifyClientId && spotifyClientSecret && spotifyRefreshToken
     ? { clientId: spotifyClientId, clientSecret: spotifyClientSecret, refreshToken: spotifyRefreshToken }
     : undefined,     // undefined = Musik nicht konfiguriert, das ist kein Fehler
+  // FIFO, in die go-librespot rohes PCM schreibt (s16le, 44,1 kHz, stereo)
+  musicPcmPath: process.env.MUSIC_PCM_PATH ?? "/run/go-librespot/spotify.pcm",
 };

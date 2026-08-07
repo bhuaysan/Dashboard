@@ -1,7 +1,41 @@
 import { useEffect, useState } from "react";
-import type { MusicCommand, MusicData } from "../../server/spotify";
+import { MUSIC_COMMANDS, type MusicCommand, type MusicData } from "../../server/spotify";
 
 export type { MusicCommand, MusicData };
+export { MUSIC_COMMANDS };
+
+/** „streamToggle" ist ein lokaler Schalter (Audio-Element), kein Server-Kommando. */
+export type MusicRowAction = MusicCommand | "streamToggle";
+
+export type MusicRow = { action: MusicRowAction; altAction?: MusicCommand; aria: string };
+
+/**
+ * Die einzige Stelle, die festlegt, welche Zeilen die Pane hat — App baut daraus
+ * die Tastatur-Zeilen, das Widget rendert genau dieselbe Liste. Reihenfolge und
+ * Anzahl müssen immer übereinstimmen, sonst zeigt die Auswahl ins Leere.
+ */
+export function musicRows(
+  data: MusicData | undefined,
+  streaming: boolean,
+  deviceName: string,
+): MusicRow[] {
+  if (!data?.configured) return [];
+  const streamRow: MusicRow = {
+    action: "streamToggle",
+    aria: streaming ? "Stream stumm schalten" : "Stream anhören",
+  };
+  if (!data.active) {
+    return [{ action: "transfer", aria: `Auf ${deviceName} abspielen` }, streamRow];
+  }
+  const rows: MusicRow[] = [
+    { action: "toggle", altAction: "next", aria: "Wiedergabe / Pause, mit Shift nächster Titel" },
+  ];
+  if (data.volume >= 0) {
+    rows.push({ action: "volumeUp", altAction: "volumeDown", aria: "Lauter, mit Shift leiser" });
+  }
+  rows.push(streamRow);
+  return rows;
+}
 
 export async function fetchMusic(): Promise<MusicData> {
   const res = await fetch("/api/music");
@@ -21,14 +55,6 @@ export async function sendMusicCommand(cmd: MusicCommand): Promise<void> {
   }
 }
 
-// Zwei Zeilen, je zwei Aktionen: Enter löst cmd aus, Shift+Enter altCmd.
-// Sichtbar sind nur die Glyphen; die Bedeutung steht im aria-label und Tooltip.
-// In der Transport-Zeile sind « und » zusätzlich eigene Klickflächen (prev/next).
-export const MUSIC_ROWS: { cmd: MusicCommand; altCmd?: MusicCommand; aria: string }[] = [
-  { cmd: "toggle", altCmd: "next", aria: "Wiedergabe / Pause, mit Shift nächster Titel" },
-  { cmd: "volumeUp", altCmd: "volumeDown", aria: "Lauter, mit Shift leiser" },
-];
-
 function msToClock(ms: number): string {
   const total = Math.floor(ms / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
@@ -44,13 +70,32 @@ function Bar({ pct, width, ariaLabel }: { pct: number; width: number; ariaLabel:
   );
 }
 
+// Ein Segment in einer Steuerzeile, das selbst klickbar ist, ohne die Zeile
+// auszulösen (die per Enter oder Klick ihre eigene Hauptaktion hat).
+function Segment({ glyph, label, onCommand }: {
+  glyph: string; label: string; onCommand: () => void;
+}) {
+  return (
+    <span
+      className="music-skip"
+      role="button"
+      aria-label={label}
+      title={label}
+      onClick={(e) => { e.stopPropagation(); onCommand(); }}
+    >{glyph}</span>
+  );
+}
+
 type MusicProps = {
   data?: MusicData;
   selIndex: number;
+  streaming: boolean;
+  deviceName: string;
   onCommand: (cmd: MusicCommand) => void;
+  onToggleStream: () => void;
 };
 
-export function Music({ data, selIndex, onCommand }: MusicProps) {
+export function Music({ data, selIndex, streaming, deviceName, onCommand, onToggleStream }: MusicProps) {
   // fetchedAt kommt vom Server; dazwischen läuft der Fortschritt weiter, ohne die
   // API zu treffen. tick sorgt nur fürs sekündliche Re-Render. Server und Clients
   // hängen am selben NTP — ein etwaiger Versatz ist kleiner als die Anzeigegenauigkeit.
@@ -62,93 +107,108 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
     return () => clearInterval(interval);
   }, [playing]);
 
-  if (!data) return <div className="music-body"><div className="dim">noch keine Musik-Daten</div></div>;
-  if (!data.configured) return <div className="music-body"><div className="dim">Musik nicht konfiguriert</div></div>;
+  if (!data) return <div className="dim">noch keine Musik-Daten</div>;
+  if (!data.configured) return <div className="dim">Musik nicht konfiguriert</div>;
 
   void tick;
   const elapsed = data.active && playing
     ? Math.min(data.elapsedMs + (Date.now() - data.fetchedAt), data.durationMs)
     : data.elapsedMs;
 
+  const rows = musicRows(data, streaming, deviceName);
+  const rowCls = (i: number, base: string) => `row ${base}${i === selIndex ? " is-sel" : ""}`;
+  const rowAt = (i: number): MusicRow | undefined => rows[i];
+
+  const streamLine = (i: number) => (
+    <div
+      key="stream"
+      className={rowCls(i, "music-transport")}
+      data-row
+      role="button"
+      tabIndex={-1}
+      aria-label={rowAt(i)?.aria}
+      title={rowAt(i)?.aria}
+      onClick={onToggleStream}
+    >
+      <span className={streaming ? "music-live" : "music-skip"} aria-hidden="true">
+        {streaming ? "≋ ●" : "≋ ○"}
+      </span>
+    </div>
+  );
+
   return (
-    <div className="music-body">
-      <div className="music-controls">
-        {data.active ? (
-          <>
-            <div className="music-hero">
-              <div className="music-title">{data.title}</div>
-              <div className="dim music-artist">
-                {[data.artist, data.album].filter(Boolean).join(" · ")}
-              </div>
+    <>
+      {data.active && (
+        <div>
+          <div className="music-hero">
+            <div className="music-title">{data.title}</div>
+            <div className="dim music-artist">
+              {[data.artist, data.album].filter(Boolean).join(" · ")}
             </div>
-            <div className="music-progress">
-              <span className="dim">{msToClock(elapsed)}</span>
-              <Bar
-                pct={data.durationMs > 0 ? (elapsed / data.durationMs) * 100 : 0}
-                width={20}
-                ariaLabel={`Fortschritt ${msToClock(elapsed)} von ${msToClock(data.durationMs)}`}
-              />
-              <span className="dim">{msToClock(data.durationMs)}</span>
-            </div>
-          </>
-        ) : (
-          <div className="dim">kein aktives Gerät — Spotify irgendwo starten</div>
-        )}
-        <div role="group" aria-label="Wiedergabe steuern" className="music-rows">
+          </div>
+          <div className="music-progress">
+            <span className="dim">{msToClock(elapsed)}</span>
+            <Bar
+              pct={data.durationMs > 0 ? (elapsed / data.durationMs) * 100 : 0}
+              width={20}
+              ariaLabel={`Fortschritt ${msToClock(elapsed)} von ${msToClock(data.durationMs)}`}
+            />
+            <span className="dim">{msToClock(data.durationMs)}</span>
+          </div>
+        </div>
+      )}
+      <div role="group" aria-label="Wiedergabe steuern">
+        {!data.active && (
           <div
-            className={`row music-transport${selIndex === 0 ? " is-sel" : ""}`}
+            className={rowCls(0, "music-transport")}
             data-row
             role="button"
             tabIndex={-1}
-            aria-label={MUSIC_ROWS[0]?.aria}
-            title={MUSIC_ROWS[0]?.aria}
+            aria-label={rowAt(0)?.aria}
+            title={rowAt(0)?.aria}
+            onClick={() => onCommand("transfer")}
+          >
+            <span className="music-playbtn" aria-hidden="true">▶ {deviceName}</span>
+          </div>
+        )}
+        {data.active && (
+          <div
+            className={rowCls(0, "music-transport")}
+            data-row
+            role="button"
+            tabIndex={-1}
+            aria-label={rowAt(0)?.aria}
+            title={rowAt(0)?.aria}
             onClick={() => onCommand("toggle")}
           >
-            <span
-              className="music-skip"
-              role="button"
-              aria-label="Vorheriger Titel"
-              title="Vorheriger Titel"
-              onClick={(e) => { e.stopPropagation(); onCommand("prev"); }}
-            >«</span>
+            <Segment glyph="«" label="Vorheriger Titel" onCommand={() => onCommand("prev")} />
             <span className="music-playbtn" aria-hidden="true">{playing ? "▶" : "‖"}</span>
-            <span
-              className="music-skip"
-              role="button"
-              aria-label="Nächster Titel"
-              title="Nächster Titel"
-              onClick={(e) => { e.stopPropagation(); onCommand("next"); }}
-            >»</span>
+            <Segment glyph="»" label="Nächster Titel" onCommand={() => onCommand("next")} />
           </div>
-          {data.volume >= 0 && (
-            <div
-              className={`row music-volrow${selIndex === 1 ? " is-sel" : ""}`}
-              data-row
-              role="button"
-              tabIndex={-1}
-              aria-label={MUSIC_ROWS[1]?.aria}
-              title={MUSIC_ROWS[1]?.aria}
-              onClick={() => onCommand("volumeUp")}
-            >
-              <span
-                className="music-skip"
-                role="button"
-                aria-label="Leiser"
-                title="Leiser"
-                onClick={(e) => { e.stopPropagation(); onCommand("volumeDown"); }}
-              >−</span>
-              <Bar pct={data.volume} width={13} ariaLabel={`Lautstärke ${data.volume} Prozent`} />
-              <span
-                className="music-skip"
-                role="button"
-                aria-label="Lauter"
-                title="Lauter"
-                onClick={(e) => { e.stopPropagation(); onCommand("volumeUp"); }}
-              >+</span>
-            </div>
-          )}
-        </div>
+        )}
+        {data.active && data.volume >= 0 && (
+          <div
+            className={rowCls(1, "music-volrow")}
+            data-row
+            role="button"
+            tabIndex={-1}
+            aria-label={rowAt(1)?.aria}
+            title={rowAt(1)?.aria}
+            onClick={() => onCommand("volumeUp")}
+          >
+            <Segment glyph="−" label="Leiser" onCommand={() => onCommand("volumeDown")} />
+            <Bar pct={data.volume} width={13} ariaLabel={`Lautstärke ${data.volume} Prozent`} />
+            <span className="dim">{data.volume} %</span>
+            <Segment glyph="+" label="Lauter" onCommand={() => onCommand("volumeUp")} />
+          </div>
+        )}
+        {streamLine(rows.length - 1)}
       </div>
-    </div>
+      {!data.active && (
+        <div className="dim music-artist" style={{ textAlign: "center" }}>
+          kein aktives Gerät — oben auf {deviceName} starten
+        </div>
+      )}
+    </>
   );
 }

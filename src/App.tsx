@@ -23,10 +23,10 @@ import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, reviveNews, News } from "./widgets/News";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
-import { fetchMusic, sendMusicCommand, Music, MUSIC_ROWS, type MusicCommand } from "./widgets/Music";
+import { fetchMusic, sendMusicCommand, Music, musicRows, MUSIC_COMMANDS, type MusicCommand } from "./widgets/Music";
 import { SettingsPane } from "./shell/SettingsPane";
 
-type RowInfo = { url?: string; action?: MusicCommand; altAction?: MusicCommand };
+type RowInfo = { url?: string; action?: string; altAction?: string };
 
 function isoWeek(d: Date): number {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -107,6 +107,9 @@ export default function App() {
   const musicQuery = useCachedQuery("music", fetchMusic, 5_000, {
     refetchIntervalMs: 5_000,
   });
+  // Lokaler Schalter für den Audio-Stream — kein Server-Zustand, weil jeder
+  // Browser selbst entscheidet, ob er mithört.
+  const [streaming, setStreaming] = useState(false);
 
   const flatLinks = useMemo<FlatLink[]>(
     () =>
@@ -144,9 +147,9 @@ export default function App() {
     const rows: Record<PaneId, RowInfo[]> = {
       clock: [],
       weather: [],
-      music: MUSIC_ROWS.map((r) => ({
-        action: r.cmd,
-        ...(r.altCmd !== undefined ? { altAction: r.altCmd } : {}),
+      music: musicRows(musicQuery.data, streaming, config.music.device).map((r) => ({
+        action: r.action,
+        ...(r.altAction !== undefined ? { altAction: r.altAction } : {}),
       })),
       links: flatLinks.map((l) => ({ url: l.url })),
       agenda: (calQuery.data ?? []).map(() => ({})),
@@ -159,7 +162,7 @@ export default function App() {
     // Ausgeblendete Panes haben keine Zeilen — sonst wandert die Auswahl unsichtbar weiter.
     for (const id of PANE_ORDER.map((p) => p.id)) if (!visiblePanes.has(id)) rows[id] = [];
     return rows;
-  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, consoleUrl, visiblePanes]);
+  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, musicQuery.data, streaming, config.music.device, consoleUrl, visiblePanes]);
 
   const hintMap = hints;
 
@@ -184,10 +187,15 @@ export default function App() {
   }, [queryClient]);
 
   // Die Keymap kennt keine Pane-Inhalte — sie liefert einen nackten String, den
-  // erst die Tabelle der Musik-Pane wieder als gültiges Kommando bestätigt.
+  // erst die Musik-Pane wieder als gültige Aktion bestätigt. „streamToggle" ist
+  // lokal (Audio-Element), alles andere geht als Kommando an den Server.
   const onRowAction = useCallback((action: string) => {
-    const row = MUSIC_ROWS.find((r) => r.cmd === action);
-    if (row) onMusicCommand(row.cmd);
+    if (action === "streamToggle") {
+      setStreaming((s) => !s);
+      return;
+    }
+    const cmd = MUSIC_COMMANDS.find((c) => c === action);
+    if (cmd) onMusicCommand(cmd);
   }, [onMusicCommand]);
 
   const onSeed = useCallback((s: string, mode: Mode) => {
@@ -332,7 +340,14 @@ export default function App() {
           <Pane title="Music" label="Musik" span={paneSpan("music")} id="pane-music"
             ref={(el: HTMLElement | null) => { paneRefs.current.music = el; }}
           >
-            <Music data={musicQuery.data} selIndex={selIndex("music")} onCommand={onMusicCommand} />
+            <Music
+              data={musicQuery.data}
+              selIndex={selIndex("music")}
+              streaming={streaming}
+              deviceName={config.music.device}
+              onCommand={onMusicCommand}
+              onToggleStream={() => setStreaming((s) => !s)}
+            />
           </Pane>
           )}
 
@@ -441,6 +456,9 @@ export default function App() {
       </div>
 
       <KeymapOverlay open={ui.showHelp} />
+      {/* Der Stream hängt an der Server-FIFO von go-librespot. Beim Abschalten
+          wird das Element ausgehängt — die Verbindung und der Leser schließen. */}
+      {streaming && <audio src="/api/music/stream" autoPlay hidden />}
       <SettingsPane
         open={settingsOpen}
         config={config}
