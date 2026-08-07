@@ -124,7 +124,11 @@ body {
 
 .app { display: flex; flex-direction: column; gap: 10px; max-width: 1600px; margin: 0 auto; }
 
-.grid { display: grid; gap: 10px; grid-template-columns: 1fr; }
+/* Ohne align-items:start streckt Grid jede Pane auf die Höhe der größten Zeilennachbarin —
+   bei sehr unterschiedlich hohem Inhalt (z. B. Music neben Weather mit Fünf-Tage-Vorschau)
+   bleibt dann ein Drittel der kürzeren Pane leerer Balast. Jede Pane wächst jetzt mit ihrem
+   eigenen Inhalt; Zeilen können dadurch uneben enden, das ist der bewusste Trade-off. */
+.grid { display: grid; gap: 10px; grid-template-columns: 1fr; align-items: start; }
 @media (min-width: 820px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Drei Spalten, aber keine drei gleichen: links stehen kurze Beschriftungen (längster
    Eintrag 192 px), rechts Schlagzeilen von 300 bis 700 px. Die Untergrenze der ersten
