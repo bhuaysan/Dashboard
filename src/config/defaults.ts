@@ -67,10 +67,10 @@ export const defaultConfig: Config = {
   },
   layout: [
     { id: "clock", visible: true, span: 1 },
-    { id: "weather", visible: true, span: 1 },
+    { id: "weather", visible: true, span: 2 },
     { id: "links", visible: true, span: 1 },
-    { id: "agenda", visible: true, span: 1 },
     { id: "news", visible: true, span: 1 },
+    { id: "agenda", visible: true, span: 1 },
     { id: "homelab", visible: true, span: 1 },
   ],
   proxyAllowlist: [

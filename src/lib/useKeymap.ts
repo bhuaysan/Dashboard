@@ -23,8 +23,8 @@ export const PANE_ORDER: { id: PaneId; label: string }[] = [
   { id: "clock", label: "clock" },
   { id: "weather", label: "weather" },
   { id: "links", label: "links" },
-  { id: "agenda", label: "agenda" },
   { id: "news", label: "news" },
+  { id: "agenda", label: "agenda" },
   { id: "homelab", label: "lab" },
 ];
 

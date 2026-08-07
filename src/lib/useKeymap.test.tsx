@@ -86,13 +86,13 @@ describe("Pane-Tasten", () => {
   it("fokussiert ein sichtbares Pane", () => {
     const dispatch = setup({});
     press("4");
-    expect(dispatch).toHaveBeenCalledWith({ type: "focusPane", pane: "agenda" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "focusPane", pane: "news" });
   });
 
   it("fokussiert kein ausgeblendetes Pane", () => {
     const visible = new Set<PaneId>(["clock", "weather", "links", "news", "homelab"]);
     const dispatch = setup({}, { visiblePanes: visible });
-    press("4");
+    press("5");
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

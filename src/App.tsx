@@ -329,19 +329,19 @@ export default function App() {
           </Pane>
           )}
 
-          {paneVisible("agenda") && (
-          <Pane title="Agenda" label="Termine" span={paneSpan("agenda")} clip id="pane-4"
-            ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
-          >
-            <Agenda events={calQuery.data} selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
-          </Pane>
-          )}
-
           {paneVisible("news") && (
           <Pane title="News" label="Nachrichten" span={paneSpan("news")} clip id="pane-5"
             ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
           >
             <News items={newsQuery.data} selIndex={selIndex("news")} feedCount={config.feeds.length} />
+          </Pane>
+          )}
+
+          {paneVisible("agenda") && (
+          <Pane title="Agenda" label="Termine" span={paneSpan("agenda")} clip id="pane-4"
+            ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
+          >
+            <Agenda events={calQuery.data} selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
           </Pane>
           )}
 
