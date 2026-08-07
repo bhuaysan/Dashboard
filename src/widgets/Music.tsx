@@ -25,17 +25,26 @@ export async function sendMusicCommand(cmd: MusicCommand): Promise<void> {
 // Aktion auf einer Zeile erreichbar, statt je eine eigene Zeile zu belegen.
 export const MUSIC_ROWS: { cmd: MusicCommand; altCmd?: MusicCommand; label: string }[] = [
   { cmd: "toggle", label: "wiedergabe / pause" },
-  { cmd: "next", altCmd: "prev", label: "weiter · zurück" },
-  { cmd: "volumeUp", altCmd: "volumeDown", label: "lauter · leiser" },
+  { cmd: "next", altCmd: "prev", label: "weiter · « zurück" },
+  { cmd: "volumeUp", altCmd: "volumeDown", label: "lauter · − leiser" },
 ];
+
+// Glyphe je Zeile; die Transport-Zeile zeigt den aktuellen Zustand dynamisch.
+function rowGlyph(cmd: MusicCommand, playing: boolean): string {
+  switch (cmd) {
+    case "toggle": return playing ? "▶" : "‖";
+    case "next": return "»";
+    case "volumeUp": return "+";
+    default: return "·";
+  }
+}
 
 function msToClock(ms: number): string {
   const total = Math.floor(ms / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-function Bar({ pct, ariaLabel }: { pct: number; ariaLabel: string }) {
-  const width = 13;
+function Bar({ pct, width, ariaLabel }: { pct: number; width: number; ariaLabel: string }) {
   const filled = Math.round((Math.max(0, Math.min(100, pct)) / 100) * width);
   return (
     <span className="bar" aria-label={ariaLabel}>
@@ -75,23 +84,22 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
     <>
       {data.active ? (
         <div>
-          <div>♪ {data.artist} – {data.title}</div>
-          <div className="dim">
+          <div className="music-title">♪ {data.artist} – {data.title}</div>
+          <div className="dim music-sub">
             {"  "}{[data.album, data.device].filter(Boolean).join("  ·  ")}
           </div>
           <div>
-            <span className="dim">{msToClock(elapsed)}</span>{" "}
             <Bar
               pct={data.durationMs > 0 ? (elapsed / data.durationMs) * 100 : 0}
+              width={20}
               ariaLabel={`Fortschritt ${msToClock(elapsed)} von ${msToClock(data.durationMs)}`}
             />{" "}
-            <span className="dim">{msToClock(data.durationMs)}</span>{" "}
-            <span className="dim">{playing ? "play" : "pause"}</span>
+            <span className="dim">{msToClock(elapsed)}/{msToClock(data.durationMs)}</span>
           </div>
           {data.volume >= 0 && (
             <div>
               <span className="dim">vol</span>{" "}
-              <Bar pct={data.volume} ariaLabel={`Lautstärke ${data.volume} Prozent`} />{" "}
+              <Bar pct={data.volume} width={13} ariaLabel={`Lautstärke ${data.volume} Prozent`} />{" "}
               <span className="dim">{data.volume} %</span>
             </div>
           )}
@@ -110,6 +118,7 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
             title={r.altCmd ? "Shift: zweite Aktion" : undefined}
             onClick={() => onCommand(r.cmd)}
           >
+            <span className="music-glyph" aria-hidden="true">{rowGlyph(r.cmd, playing)}</span>
             {r.label}
           </div>
         ))}
