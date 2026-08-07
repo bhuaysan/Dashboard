@@ -23,18 +23,19 @@ export async function sendMusicCommand(cmd: MusicCommand): Promise<void> {
 
 // Enter löst cmd aus, Shift+Enter altCmd — so bleiben beide Richtungen einer
 // Aktion auf einer Zeile erreichbar, statt je eine eigene Zeile zu belegen.
-export const MUSIC_ROWS: { cmd: MusicCommand; altCmd?: MusicCommand; label: string }[] = [
-  { cmd: "toggle", label: "wiedergabe / pause" },
-  { cmd: "next", altCmd: "prev", label: "weiter · « zurück" },
-  { cmd: "volumeUp", altCmd: "volumeDown", label: "lauter · − leiser" },
+// Sichtbar sind nur die Glyphen; die Bedeutung steht im aria-label und Tooltip.
+export const MUSIC_ROWS: { cmd: MusicCommand; altCmd?: MusicCommand; aria: string }[] = [
+  { cmd: "toggle", aria: "Wiedergabe / Pause" },
+  { cmd: "next", altCmd: "prev", aria: "Nächster Titel, mit Shift vorheriger" },
+  { cmd: "volumeUp", altCmd: "volumeDown", aria: "Lauter, mit Shift leiser" },
 ];
 
-// Glyphe je Zeile; die Transport-Zeile zeigt den aktuellen Zustand dynamisch.
-function rowGlyph(cmd: MusicCommand, playing: boolean): string {
+// Glyphen je Zeile; die Transport-Zeile zeigt den aktuellen Zustand dynamisch.
+function rowGlyphs(cmd: MusicCommand, playing: boolean): string {
   switch (cmd) {
     case "toggle": return playing ? "▶" : "‖";
-    case "next": return "»";
-    case "volumeUp": return "+";
+    case "next": return "»  «";
+    case "volumeUp": return "+  −";
     default: return "·";
   }
 }
@@ -115,11 +116,11 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
             data-row
             role="button"
             tabIndex={-1}
-            title={r.altCmd ? "Shift: zweite Aktion" : undefined}
+            aria-label={r.aria}
+            title={r.aria}
             onClick={() => onCommand(r.cmd)}
           >
-            <span className="music-glyph" aria-hidden="true">{rowGlyph(r.cmd, playing)}</span>
-            {r.label}
+            <span className="music-glyph" aria-hidden="true">{rowGlyphs(r.cmd, playing)}</span>
           </div>
         ))}
       </div>
