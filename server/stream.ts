@@ -35,6 +35,18 @@ export function buildWavHeader(
   return header;
 }
 
+/** s16le, 44,1 kHz, stereo — so viele Bytes sind eine Sekunde Musik. */
+export const PCM_BYTE_RATE = 44_100 * 2 * 2;
+
+/**
+ * Wie lange ein Chunk Musik dauert. Die Soundkarte, die einen Player sonst auf
+ * Echtzeit bremst, fehlt hier — ohne diese Drossel dekodiert go-librespot den
+ * ganzen Titel sofort in die Pipe und ein Hörer puffert minutenlang alte Musik.
+ */
+export function paceMsForChunk(bytes: number): number {
+  return (bytes / PCM_BYTE_RATE) * 1000;
+}
+
 type Sink = { write: (chunk: Uint8Array) => Promise<unknown>; close: () => void };
 
 /**
@@ -75,6 +87,13 @@ export class PcmBroadcaster {
     }
     this.source = createReadStream(this.path, { fd, highWaterMark: 64 * 1024 });
     this.source.on("data", (chunk: string | Buffer) => {
+      const src = this.source;
+      if (src === undefined) return;
+      // Echtzeit-Drossel: pro Chunk so lange pausieren, wie er Musik enthält.
+      src.pause();
+      setTimeout(() => {
+        if (this.source === src) src.resume();
+      }, paceMsForChunk(chunk.length)).unref();
       if (this.clients.size === 0) return;   // Abfluss: niemand hört zu
       const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);
       for (const client of this.clients) {

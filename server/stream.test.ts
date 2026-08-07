@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildWavHeader } from "./stream.ts";
+import { buildWavHeader, paceMsForChunk, PCM_BYTE_RATE } from "./stream.ts";
 
 function ascii(h: Uint8Array, from: number, len: number): string {
   return String.fromCharCode(...h.slice(from, from + len));
@@ -28,5 +28,15 @@ describe("buildWavHeader", () => {
 
   it("deklariert unbekannte Länge für den Strom", () => {
     expect(view.getUint32(40, true)).toBe(0x7fffffff);
+  });
+});
+
+describe("paceMsForChunk", () => {
+  it("eine Sekunde Musik dauert eine Sekunde", () => {
+    expect(paceMsForChunk(PCM_BYTE_RATE)).toBe(1000);
+  });
+
+  it("ein 64-KB-Chunk bremst knapp 400 ms", () => {
+    expect(paceMsForChunk(64 * 1024)).toBeCloseTo(371, 0);
   });
 });
