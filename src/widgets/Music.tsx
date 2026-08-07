@@ -62,8 +62,8 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
     return () => clearInterval(interval);
   }, [playing]);
 
-  if (!data) return <div className="dim">noch keine Musik-Daten</div>;
-  if (!data.configured) return <div className="dim">Musik nicht konfiguriert</div>;
+  if (!data) return <div className="music-body"><div className="dim">noch keine Musik-Daten</div></div>;
+  if (!data.configured) return <div className="music-body"><div className="dim">Musik nicht konfiguriert</div></div>;
 
   void tick;
   const elapsed = data.active && playing
@@ -71,83 +71,84 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
     : data.elapsedMs;
 
   return (
-    <>
-      {data.active ? (
-        <div>
-          <div className="music-hero">
-            <div className="music-title">{data.title}</div>
-            <div className="dim music-artist">
-              {[data.artist, data.album].filter(Boolean).join(" · ")}
+    <div className="music-body">
+      <div className="music-controls">
+        {data.active ? (
+          <>
+            <div className="music-hero">
+              <div className="music-title">{data.title}</div>
+              <div className="dim music-artist">
+                {[data.artist, data.album].filter(Boolean).join(" · ")}
+              </div>
             </div>
-          </div>
-          <div className="music-progress">
-            <span className="dim">{msToClock(elapsed)}</span>
-            <Bar
-              pct={data.durationMs > 0 ? (elapsed / data.durationMs) * 100 : 0}
-              width={20}
-              ariaLabel={`Fortschritt ${msToClock(elapsed)} von ${msToClock(data.durationMs)}`}
-            />
-            <span className="dim">{msToClock(data.durationMs)}</span>
-          </div>
-        </div>
-      ) : (
-        <div className="dim">kein aktives Gerät — Spotify irgendwo starten</div>
-      )}
-      <div role="group" aria-label="Wiedergabe steuern">
-        <div
-          className={`row music-transport${selIndex === 0 ? " is-sel" : ""}`}
-          data-row
-          role="button"
-          tabIndex={-1}
-          aria-label={MUSIC_ROWS[0]?.aria}
-          title={MUSIC_ROWS[0]?.aria}
-          onClick={() => onCommand("toggle")}
-        >
-          <span
-            className="music-skip"
-            role="button"
-            aria-label="Vorheriger Titel"
-            title="Vorheriger Titel"
-            onClick={(e) => { e.stopPropagation(); onCommand("prev"); }}
-          >«</span>
-          <span className="music-playbtn" aria-hidden="true">{playing ? "▶" : "‖"}</span>
-          <span
-            className="music-skip"
-            role="button"
-            aria-label="Nächster Titel"
-            title="Nächster Titel"
-            onClick={(e) => { e.stopPropagation(); onCommand("next"); }}
-          >»</span>
-        </div>
-        {data.volume >= 0 && (
+            <div className="music-progress">
+              <span className="dim">{msToClock(elapsed)}</span>
+              <Bar
+                pct={data.durationMs > 0 ? (elapsed / data.durationMs) * 100 : 0}
+                width={20}
+                ariaLabel={`Fortschritt ${msToClock(elapsed)} von ${msToClock(data.durationMs)}`}
+              />
+              <span className="dim">{msToClock(data.durationMs)}</span>
+            </div>
+          </>
+        ) : (
+          <div className="dim">kein aktives Gerät — Spotify irgendwo starten</div>
+        )}
+        <div role="group" aria-label="Wiedergabe steuern" className="music-rows">
           <div
-            className={`row music-volrow${selIndex === 1 ? " is-sel" : ""}`}
+            className={`row music-transport${selIndex === 0 ? " is-sel" : ""}`}
             data-row
             role="button"
             tabIndex={-1}
-            aria-label={MUSIC_ROWS[1]?.aria}
-            title={MUSIC_ROWS[1]?.aria}
-            onClick={() => onCommand("volumeUp")}
+            aria-label={MUSIC_ROWS[0]?.aria}
+            title={MUSIC_ROWS[0]?.aria}
+            onClick={() => onCommand("toggle")}
           >
             <span
               className="music-skip"
               role="button"
-              aria-label="Leiser"
-              title="Leiser"
-              onClick={(e) => { e.stopPropagation(); onCommand("volumeDown"); }}
-            >−</span>
-            <Bar pct={data.volume} width={13} ariaLabel={`Lautstärke ${data.volume} Prozent`} />
-            <span className="dim">{data.volume} %</span>
+              aria-label="Vorheriger Titel"
+              title="Vorheriger Titel"
+              onClick={(e) => { e.stopPropagation(); onCommand("prev"); }}
+            >«</span>
+            <span className="music-playbtn" aria-hidden="true">{playing ? "▶" : "‖"}</span>
             <span
               className="music-skip"
               role="button"
-              aria-label="Lauter"
-              title="Lauter"
-              onClick={(e) => { e.stopPropagation(); onCommand("volumeUp"); }}
-            >+</span>
+              aria-label="Nächster Titel"
+              title="Nächster Titel"
+              onClick={(e) => { e.stopPropagation(); onCommand("next"); }}
+            >»</span>
           </div>
-        )}
+          {data.volume >= 0 && (
+            <div
+              className={`row music-volrow${selIndex === 1 ? " is-sel" : ""}`}
+              data-row
+              role="button"
+              tabIndex={-1}
+              aria-label={MUSIC_ROWS[1]?.aria}
+              title={MUSIC_ROWS[1]?.aria}
+              onClick={() => onCommand("volumeUp")}
+            >
+              <span
+                className="music-skip"
+                role="button"
+                aria-label="Leiser"
+                title="Leiser"
+                onClick={(e) => { e.stopPropagation(); onCommand("volumeDown"); }}
+              >−</span>
+              <Bar pct={data.volume} width={13} ariaLabel={`Lautstärke ${data.volume} Prozent`} />
+              <span
+                className="music-skip"
+                role="button"
+                aria-label="Lauter"
+                title="Lauter"
+                onClick={(e) => { e.stopPropagation(); onCommand("volumeUp"); }}
+              >+</span>
+            </div>
+          )}
+        </div>
       </div>
-    </>
+    </div>
   );
 }
