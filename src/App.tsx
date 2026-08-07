@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Pane } from "./shell/Pane";
 import { PaneGrid } from "./shell/PaneGrid";
@@ -22,7 +22,7 @@ import { fetchWeather, Weather } from "./widgets/Weather";
 import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, reviveNews, News } from "./widgets/News";
 import { Month } from "./widgets/Month";
-import { addDays, isoWeek, monthGrid, startOfDay } from "./lib/date";
+import { addDays, monthGrid, startOfDay } from "./lib/date";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
 import { SettingsPane } from "./shell/SettingsPane";
@@ -280,18 +280,28 @@ export default function App() {
             id="pane-1"
             ref={(el: HTMLElement | null) => { paneRefs.current.clock = el; }}
           >
-            <div className="clock-time">{timeFmt.format(now)}</div>
-            <div className="clock-date">
-              {new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(now)}
-              {"  ·  KW "}{isoWeek(now)}
-            </div>
-            <div className="clock-zones">
-              {config.clock.secondary.map((z, i) => (
-                <span key={z.label}>
-                  {i > 0 && "  ·  "}
-                  {z.label} {new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: z.tz }).format(now)}
-                </span>
-              ))}
+            <div className="clock">
+              <div>
+                <div className="clock-time">{timeFmt.format(now)}</div>
+                <div className="clock-date">
+                  {new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(now)}
+                </div>
+              </div>
+              {/* Zwei Spalten statt einer Fließzeile mit Trennpunkten: die Zeiten stehen
+                  untereinander und lassen sich vergleichen, was der Zweck der Liste ist.
+                  Unten verankert, damit die Pane zwei Anker hat statt oben zu kleben. */}
+              {config.clock.secondary.length > 0 && (
+                <dl className="clock-zones">
+                  {config.clock.secondary.map((z) => (
+                    <Fragment key={z.label}>
+                      <dt>{z.label}</dt>
+                      <dd>
+                        {new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: z.tz }).format(now)}
+                      </dd>
+                    </Fragment>
+                  ))}
+                </dl>
+              )}
             </div>
           </Pane>
           )}

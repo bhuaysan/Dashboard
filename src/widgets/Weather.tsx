@@ -100,47 +100,57 @@ export function Weather({ data, selIndex, now }: { data?: WeatherData; selIndex:
   void selIndex;
   if (!data) return <div className="dim">noch keine Wetterdaten</div>;
   const moon = moonPhase(now);
-  // Bei Neu- und Vollmond sagt der Name schon alles; „Vollmond, 100 %" wäre doppelt.
-  const moonText = moon.name === "Neumond" || moon.name === "Vollmond"
-    ? moon.name
-    : `${moon.name}, ${moon.illum} %`;
+  // Ein Raster für alles: Kennwort, zwei Zahlenspalten, Text. Vorher hatte jede der drei
+  // oberen Zeilen eigene Spaltenpositionen und die Tagestabelle wieder andere — zwölf
+  // linke Textkanten in einer Pane. Die Haarlinien trennen die drei Gruppen, damit
+  // „jetzt" nicht als sechster Wochentag gelesen wird.
   return (
     <div className="wx">
-      <div className="wx-main">
-        <div className="wx-now">
-          <span className="wx-temp">{data.temp}°</span>
-          <span className="dim">gefühlt {data.feels}°</span>
-          <span>{weatherText(data.code)}</span>
-        </div>
-        <div className="wx-line">
-          <span
-            className="spark"
-            aria-label={`Temperatur der nächsten 12 Stunden: ${data.hours.map((h) => Math.round(h)).join(", ")} Grad`}
-          >
-            {sparkline(data.hours)}
-          </span>
-          <span className="dim">nächste 12 h</span>
-          <span className="dim">Regen {data.rainPct} %</span>
-        </div>
-        <div className="wx-line dim">
-          <span>↑ {data.sunrise}</span>
-          <span>↓ {data.sunset}</span>
-          {/* Aus einem älteren Zwischenspeicher kommt noch kein daylight_duration —
-              dann bleibt die Zeile eben kürzer, bis der nächste Abruf durch ist. */}
-          {data.daylight > 0 && <span>{hoursMinutes(data.daylight)} h Tageslicht</span>}
-          {data.daylight > 0 && <span>{trendText(data.daylightTrend)}</span>}
-          <span>{moon.glyph} {moonText}</span>
-        </div>
+      <div className="wx-row">
+        <span className="wx-key">jetzt</span>
+        <span className="wx-temp">{data.temp}°</span>
+        <span className="wx-note">{weatherText(data.code)}, gefühlt {data.feels}°</span>
       </div>
-      <div className="wx-days">
-        {data.days.map((d, i) => (
-          <div className="wx-day" key={i}>
-            <span className="dim">{d.label}</span>
-            <span className="hi">{d.hi}°</span>
-            <span className="lo">{d.lo}°</span>
-            <span className="dim">{weatherText(d.code)}</span>
-          </div>
-        ))}
+      <div className="wx-row">
+        <span className="wx-key">12 h</span>
+        <span
+          className="wx-wide spark"
+          aria-label={`Temperatur der nächsten 12 Stunden: ${data.hours.map((h) => Math.round(h)).join(", ")} Grad`}
+        >
+          {sparkline(data.hours)}
+        </span>
+        <span className="wx-note">Regen {data.rainPct} %</span>
+      </div>
+
+      <div className="wx-sep" />
+
+      {data.days.map((d, i) => (
+        <div className="wx-row" key={i}>
+          {/* Der erste Tag der Vorhersage ist derselbe wie die „jetzt"-Zeile darüber.
+              Ausgeschrieben als „heute" liest sich das als Bezug statt als Dopplung. */}
+          <span className="wx-key">{i === 0 ? "heute" : d.label}</span>
+          <span className="wx-val">{d.hi}°</span>
+          <span className="wx-val wx-val--lo">{d.lo}°</span>
+          <span className="wx-note">{weatherText(d.code)}</span>
+        </div>
+      ))}
+
+      <div className="wx-sep" />
+
+      <div className="wx-row">
+        <span className="wx-key">Sonne</span>
+        <span className="wx-val">↑ {data.sunrise}</span>
+        <span className="wx-val">↓ {data.sunset}</span>
+        {/* Aus einem älteren Zwischenspeicher kommt noch kein daylight_duration —
+            dann bleibt die Spalte eben leer, bis der nächste Abruf durch ist. */}
+        <span className="wx-note">
+          {data.daylight > 0 ? `${hoursMinutes(data.daylight)} h hell, ${trendText(data.daylightTrend)}` : ""}
+        </span>
+      </div>
+      <div className="wx-row">
+        <span className="wx-key">Mond</span>
+        <span className="wx-wide">{moon.glyph} {moon.illum} %</span>
+        <span className="wx-note">{moon.name}</span>
       </div>
     </div>
   );
