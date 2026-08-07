@@ -1,11 +1,9 @@
 import { fetch as undiciFetch } from "undici";
 import { env } from "./env.ts";
+import { MUSIC_COMMANDS, type MusicCommand } from "../src/lib/music.ts";
 
-export type MusicCommand = "toggle" | "next" | "prev" | "volumeUp" | "volumeDown" | "transfer";
-
-export const MUSIC_COMMANDS: readonly MusicCommand[] = [
-  "toggle", "next", "prev", "volumeUp", "volumeDown", "transfer",
-];
+export { MUSIC_COMMANDS };
+export type { MusicCommand };
 
 export type MusicData = {
   configured: boolean;   // false, wenn env.spotify undefined ist

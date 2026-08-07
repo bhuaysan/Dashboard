@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { MUSIC_COMMANDS, type MusicCommand, type MusicData } from "../../server/spotify";
+import { MUSIC_COMMANDS, type MusicCommand } from "../lib/music";
+import type { MusicData } from "../../server/spotify";
 
 export type { MusicCommand, MusicData };
 export { MUSIC_COMMANDS };
