@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+// Die Panes in Lesereihenfolge. Diese Liste bestimmt das Layout-Schema und die
+// Zifferntasten (src/lib/useKeymap.ts). Fehlt eine Pane in einer älteren config.json,
+// ergänzt der Server sie beim Lesen aus defaultConfig (server/config-store.ts).
+export const PANE_IDS = ["clock", "weather", "month", "links", "news", "agenda", "homelab"] as const;
+export type PaneId = (typeof PANE_IDS)[number];
+
 export const configSchema = z.object({
   version: z.literal(1),
   updatedAt: z.string(),                       // ISO-8601, wird vom Server gesetzt
@@ -25,7 +31,7 @@ export const configSchema = z.object({
     bangs: z.record(z.string()),               // { "g": "https://www.google.com/search?q=%s" }
   }),
   layout: z.array(z.object({
-    id: z.enum(["clock", "weather", "links", "agenda", "news", "homelab"]),
+    id: z.enum(PANE_IDS),
     visible: z.boolean(),
     span: z.union([z.literal(1), z.literal(2)]),
   })),

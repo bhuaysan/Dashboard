@@ -81,8 +81,11 @@ zurück — das ist kein Fehler, sondern der Zustand „nicht konfiguriert".
 
 **Tastatur.** `src/lib/useKeymap.ts` enthält den reinen Reducer plus einen globalen
 `keydown`-Listener; er kennt keine Pane-Inhalte, sondern bekommt `rowCount` und `selectedUrl` aus
-`App.tsx` (`rowsByPane`). Eine neue Pane anzulegen heißt: Eintrag in `PANE_ORDER`, in `PaneId`, in
-`rowsByPane` und im `layout`-Enum des Schemas.
+`App.tsx` (`rowsByPane`). Eine neue Pane anzulegen heißt: Eintrag in `PANE_IDS`
+(`src/config/schema.ts`, speist zugleich `PaneId` und das `layout`-Enum), in `PANE_ORDER`, in
+`rowsByPane`, in `defaultConfig.layout` und die Pane selbst in `App.tsx`. Eine `config.json`, die
+die neue Pane noch nicht kennt, ergänzt der Server beim Lesen aus `defaultConfig`
+(`server/config-store.ts`) — eine Migration braucht es nicht.
 
 **Farben.** `src/index.css` definiert die Tokens dreimal (Dark als Default, `prefers-color-scheme:
 light`, plus `data-theme`-Overrides für den manuellen Umschalter); `tailwind.config.js` bildet sie

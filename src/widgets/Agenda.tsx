@@ -7,12 +7,12 @@ export function reviveEvents(events: CalEvent[]): CalEvent[] {
   return events.map((e) => ({ ...e, start: new Date(e.start), end: new Date(e.end) }));
 }
 
-export async function fetchEvents(cals: Config["calendars"]): Promise<CalEvent[]> {
+// `to` kommt von außen, weil zwei Panes dieselben Termine brauchen: die Agenda die
+// nächsten Tage, das Monatsraster den ganzen sichtbaren Monat. Zweimal denselben
+// Kalender zu holen wäre die Alternative gewesen.
+export async function fetchEvents(cals: Config["calendars"], to: Date): Promise<CalEvent[]> {
   const from = new Date();
   from.setHours(0, 0, 0, 0);
-  const to = new Date(from);
-  to.setDate(to.getDate() + 4);
-  to.setMilliseconds(-1);
 
   const all: CalEvent[] = [];
   let failed = 0;

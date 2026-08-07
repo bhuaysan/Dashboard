@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
+import type { PaneId } from "../config/schema";
 
 export type Mode = "NORMAL" | "INSERT" | "COMMAND";
-export type PaneId = "clock" | "weather" | "links" | "agenda" | "news" | "homelab";
+export type { PaneId };
 
 export type UiState = {
   mode: Mode;
@@ -19,9 +20,12 @@ export type UiAction =
   | { type: "help"; show: boolean }
   | { type: "reset" };
 
+// Reihenfolge und Kürzel der Statusline. Die Ziffern 1–7 folgen dieser Liste, sie muss
+// deshalb dieselbe Reihenfolge haben wie PANE_IDS und die Panes in App.tsx.
 export const PANE_ORDER: { id: PaneId; label: string }[] = [
   { id: "clock", label: "clock" },
   { id: "weather", label: "weather" },
+  { id: "month", label: "month" },
   { id: "links", label: "links" },
   { id: "news", label: "news" },
   { id: "agenda", label: "agenda" },

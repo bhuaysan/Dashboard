@@ -216,6 +216,24 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .wx-day .hi { text-align: right; }
 .wx-day .lo { text-align: right; color: var(--color-dim); }
 
+/* Monatsraster: feste Zeichenbreiten, damit die Spalten stehen wie im Terminal.
+   Die KW-Spalte links ist schmaler gesetzt als die Tage — sie wird gelesen, nicht gezählt. */
+.cal { display: flex; flex-direction: column; gap: .55rem; }
+.cal-grid {
+  display: grid; grid-template-columns: 3ch repeat(7, 3ch);
+  gap: .1rem .45rem; justify-content: start; font-variant-numeric: tabular-nums;
+}
+.cal-grid > span { text-align: center; padding: .05rem 0; }
+.cal-kw, .cal-head { color: var(--color-dim); font-size: 12px; }
+.cal-kw { text-align: right; }
+.cal-day.is-weekend { color: var(--color-dim); }
+.cal-day.is-holiday { color: var(--color-accent); }
+/* Unterstrichen heißt: an diesem Tag steht etwas im Kalender. Farbe ist schon für den
+   Feiertag vergeben, und beides zugleich muss ein Tag anzeigen können. */
+.cal-day.has-event { text-decoration: underline; text-underline-offset: .18em; }
+.cal-day.is-today { background: var(--color-bg-sel); }
+.cal-next { font-size: 13px; }
+
 .lab-node { display: flex; gap: 1.6rem; flex-wrap: wrap; }
 .lab-node .metric { display: flex; gap: .45rem; align-items: baseline; }
 .lab-store { margin-top: .35rem; display: flex; gap: 1.8rem; flex-wrap: wrap; color: var(--color-dim); }

@@ -21,19 +21,17 @@ import { useCachedQuery } from "./api/useCachedQuery";
 import { fetchWeather, Weather } from "./widgets/Weather";
 import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, reviveNews, News } from "./widgets/News";
+import { Month } from "./widgets/Month";
+import { addDays, isoWeek, monthGrid, startOfDay } from "./lib/date";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
 import { SettingsPane } from "./shell/SettingsPane";
 
 type RowInfo = { url?: string };
 
-function isoWeek(d: Date): number {
-  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-}
+// Die Agenda zeigt heute und die drei folgenden Tage; geholt wird für das Monatsraster
+// mehr. Beide Panes teilen sich eine Abfrage, deshalb wird hier zugeschnitten.
+const AGENDA_DAYS = 4;
 
 function useNow(): Date {
   const [now, setNow] = useState(() => new Date());
@@ -90,7 +88,7 @@ export default function App() {
   );
   const calQuery = useCachedQuery(
     `cal:${JSON.stringify(config.calendars)}`,
-    () => fetchEvents(config.calendars),
+    () => fetchEvents(config.calendars, monthGrid(new Date()).to),
     900_000,
     { revive: reviveEvents, refetchIntervalMs: 900_000 },
   );
@@ -103,6 +101,17 @@ export default function App() {
   const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, {
     revive: reviveHomelab, refetchIntervalMs: 60_000,
   });
+
+  // undefined bleibt undefined: „noch keine Termine" ist ein anderer Zustand als
+  // „keine Termine in den nächsten Tagen", und die Agenda unterscheidet beide.
+  const agendaEvents = useMemo(
+    () => {
+      if (!calQuery.data) return undefined;
+      const limit = addDays(startOfDay(now), AGENDA_DAYS);
+      return calQuery.data.filter((e) => e.start < limit);
+    },
+    [calQuery.data, now],
+  );
 
   const flatLinks = useMemo<FlatLink[]>(
     () =>
@@ -138,8 +147,9 @@ export default function App() {
     const rows: Record<PaneId, RowInfo[]> = {
       clock: [],
       weather: [],
+      month: [],
       links: flatLinks.map((l) => ({ url: l.url })),
-      agenda: (calQuery.data ?? []).map(() => ({})),
+      agenda: (agendaEvents ?? []).map(() => ({})),
       news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
       // Gestoppte Gäste haben keine Konsole — Enter darf dort kein leeres noVNC öffnen.
       homelab: (labQuery.data?.guests ?? []).map((g) => (
@@ -149,7 +159,7 @@ export default function App() {
     // Ausgeblendete Panes haben keine Zeilen — sonst wandert die Auswahl unsichtbar weiter.
     for (const id of PANE_ORDER.map((p) => p.id)) if (!visiblePanes.has(id)) rows[id] = [];
     return rows;
-  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, consoleUrl, visiblePanes]);
+  }, [flatLinks, agendaEvents, newsQuery.data, labQuery.data, consoleUrl, visiblePanes]);
 
   const hintMap = hints;
 
@@ -290,7 +300,15 @@ export default function App() {
           <Pane title="Weather" label="Wetter" subtitle={config.location.label} span={paneSpan("weather")} id="pane-2"
             ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
           >
-            <Weather data={wxQuery.data} selIndex={selIndex("weather")} />
+            <Weather data={wxQuery.data} selIndex={selIndex("weather")} now={now} />
+          </Pane>
+          )}
+
+          {paneVisible("month") && (
+          <Pane title="Month" label="Monat" span={paneSpan("month")} id="pane-7"
+            ref={(el: HTMLElement | null) => { paneRefs.current.month = el; }}
+          >
+            <Month now={now} events={calQuery.data} />
           </Pane>
           )}
 
@@ -341,7 +359,7 @@ export default function App() {
           <Pane title="Agenda" label="Termine" span={paneSpan("agenda")} clip id="pane-4"
             ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
           >
-            <Agenda events={calQuery.data} selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
+            <Agenda events={agendaEvents} selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
           </Pane>
           )}
 

@@ -65,9 +65,12 @@ export const defaultConfig: Config = {
       mdn: "https://developer.mozilla.org/search?q=%s",
     },
   },
+  // Zeile 1: Uhr, Wetter, Monat. Zeile 2: Links, News, Termine. Darunter Homelab
+  // über die volle Breite.
   layout: [
     { id: "clock", visible: true, span: 1 },
-    { id: "weather", visible: true, span: 2 },
+    { id: "weather", visible: true, span: 1 },
+    { id: "month", visible: true, span: 1 },
     { id: "links", visible: true, span: 1 },
     { id: "news", visible: true, span: 1 },
     { id: "agenda", visible: true, span: 1 },
