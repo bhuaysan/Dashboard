@@ -42,6 +42,9 @@ CONF
 # Das config_dir muss dem Dienst gehören: dort landet auch die credentials.json
 # aus der Zeroconf-Kopplung.
 chown -R librespot:librespot /var/lib/go-librespot
+# Der Dashboard-User liest die FIFO — O_RDWR braucht Schreibrecht, deshalb
+# Gruppenmitgliedschaft statt Welt-Lesbarkeit.
+usermod -aG librespot dashboard
 
 cat > /etc/systemd/system/go-librespot.service <<'UNIT'
 [Unit]
@@ -54,7 +57,7 @@ Type=simple
 User=librespot
 WorkingDirectory=/var/lib/go-librespot
 RuntimeDirectory=go-librespot
-ExecStartPre=/bin/sh -c 'test -p /run/go-librespot/spotify.pcm || mkfifo -m 0644 /run/go-librespot/spotify.pcm'
+ExecStartPre=/bin/sh -c 'test -p /run/go-librespot/spotify.pcm || mkfifo -m 0660 /run/go-librespot/spotify.pcm'
 ExecStart=/usr/local/bin/go-librespot --config_dir /var/lib/go-librespot
 Restart=always
 RestartSec=3

@@ -1,5 +1,4 @@
-import { createReadStream, type ReadStream } from "node:fs";
-import { open } from "node:fs/promises";
+import { createReadStream, openSync, type ReadStream } from "node:fs";
 
 /**
  * WAV-Header für einen PCM-Strom unbekannter Länge. go-librespot schreibt
@@ -46,7 +45,6 @@ type Sink = { write: (chunk: Uint8Array) => Promise<unknown>; close: () => void 
  */
 export class PcmBroadcaster {
   private source: ReadStream | undefined;
-  private starting = false;
   private clients = new Set<Sink>();
   private readonly path: string;
 
@@ -62,30 +60,32 @@ export class PcmBroadcaster {
    * beide Seiten und entkommt dem Henne-Ei-Problem.
    */
   start(): void {
-    if (this.source !== undefined || this.starting) return;
-    this.starting = true;
-    open(this.path, "r+")
-      .then((fh) => {
-        this.starting = false;
-        this.source = createReadStream(this.path, { fd: fh.fd, highWaterMark: 64 * 1024 });
-        this.source.on("data", (chunk: string | Buffer) => {
-          if (this.clients.size === 0) return;   // Abfluss: niemand hört zu
-          const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);
-          for (const client of this.clients) {
-            client.write(bytes).catch(() => this.remove(client));
-          }
-        });
-        this.source.on("error", () => {
-          for (const client of this.clients) client.close();
-          this.clients.clear();
-          this.source = undefined;
-        });
-      })
-      .catch(() => {
-        // FIFO (noch) nicht da — go-librespot legt sie beim Start an. Nachfassen.
-        this.starting = false;
-        setTimeout(() => this.start(), 5_000).unref();
-      });
+    if (this.source !== undefined) return;
+    let fd: number;
+    try {
+      // openSync, nicht fs.promises.open: ein FileHandle, dem man den fd entzieht,
+      // wird vom Garbage Collector eingesammelt und schließt den fd dabei mit.
+      // O_RDWR zählt bei einer FIFO als beide Seiten — rein lesend würde blockieren,
+      // und go-librespot öffnet schreibend, sieht keinen Leser und bricht mit ENXIO ab.
+      fd = openSync(this.path, "r+");
+    } catch {
+      // FIFO (noch) nicht da — go-librespot legt sie beim Start an. Nachfassen.
+      setTimeout(() => this.start(), 5_000).unref();
+      return;
+    }
+    this.source = createReadStream(this.path, { fd, highWaterMark: 64 * 1024 });
+    this.source.on("data", (chunk: string | Buffer) => {
+      if (this.clients.size === 0) return;   // Abfluss: niemand hört zu
+      const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);
+      for (const client of this.clients) {
+        client.write(bytes).catch(() => this.remove(client));
+      }
+    });
+    this.source.on("error", () => {
+      for (const client of this.clients) client.close();
+      this.clients.clear();
+      this.source = undefined;
+    });
   }
 
   add(sink: Sink): void {
