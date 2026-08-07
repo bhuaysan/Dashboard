@@ -127,10 +127,13 @@ body {
 .grid { display: grid; gap: 10px; grid-template-columns: 1fr; }
 @media (min-width: 820px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Drei Spalten, aber keine drei gleichen: links stehen kurze Beschriftungen (längster
-   Eintrag 192 px), rechts Schlagzeilen von 300 bis 700 px. Die Untergrenze der ersten
-   Spalte ist die Zeitzonenzeile der Uhr — die darf nicht umbrechen. */
+   Eintrag 192 px). Die Untergrenze der ersten Spalte ist die Zeitzonenzeile der Uhr —
+   die darf nicht umbrechen. Spalte 3 (Music) ist bewusst schmaler als Spalte 2 (Weather) —
+   Music-Inhalt ist eine schmale zentrierte Steuerspalte, Weather braucht die Breite für die
+   Vorschautabelle. Teilen sich News (Spalte 3) oder Agenda (Spalte 2) eine Zeile mit ohne
+   Wide-Span, wandert diese Breite mit. */
 @media (min-width: 1240px) {
-  .grid { grid-template-columns: minmax(22rem, .86fr) minmax(0, .97fr) minmax(0, 1.17fr); }
+  .grid { grid-template-columns: minmax(22rem, .86fr) minmax(0, 1.17fr) minmax(0, .97fr); }
 }
 @media (min-width: 820px) {
   .pane--wide { grid-column: span 2; }
