@@ -57,6 +57,9 @@ Type=simple
 User=librespot
 WorkingDirectory=/var/lib/go-librespot
 RuntimeDirectory=go-librespot
+# Behalten, nicht bei jedem Restart neu anlegen: sonst zeigt der FIFO-FD des
+# Dashboard-Servers auf eine verwaiste Inode und librespot läuft in ENXIO.
+RuntimeDirectoryPreserve=yes
 ExecStartPre=/bin/sh -c 'test -p /run/go-librespot/spotify.pcm || mkfifo -m 0660 /run/go-librespot/spotify.pcm'
 ExecStart=/usr/local/bin/go-librespot --config_dir /var/lib/go-librespot
 Restart=always

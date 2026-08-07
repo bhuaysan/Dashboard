@@ -36,7 +36,7 @@ describe("paceMsForChunk", () => {
     expect(paceMsForChunk(PCM_BYTE_RATE)).toBe(1000);
   });
 
-  it("ein 64-KB-Chunk bremst knapp 400 ms", () => {
-    expect(paceMsForChunk(64 * 1024)).toBeCloseTo(371, 0);
+  it("ein 64-KB-Chunk bremst gut 370 ms", () => {
+    expect(paceMsForChunk(64 * 1024)).toBeCloseTo(371.5, 0);
   });
 });
