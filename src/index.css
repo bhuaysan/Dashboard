@@ -241,12 +241,8 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 
 /* Raster links, kommende Feiertage rechts. Unter rund 46rem Panebreite rutscht die
    Liste unter das Raster, statt auf zwei Zeichen je Zeile zusammenzuschrumpfen. */
-/* flex-start, nicht das voreingestellte stretch: sonst zöge die höhere der beiden
-   Spalten die Zeilen des Rasters auseinander, und der Zeilenabstand des Kalenders
-   hinge davon ab, wie lang gerade ein Feiertagsname ist. */
-.cal { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 1.2rem 1.8rem; }
 .cal-grid {
-  flex: none; display: grid; grid-template-columns: 3ch repeat(7, 3ch);
+  display: grid; grid-template-columns: 3ch repeat(7, 3ch);
   gap: .1rem .45rem; justify-content: start; font-variant-numeric: tabular-nums;
 }
 /* Rechtsbündig wie in cal(1): sonst steht die Einerstelle einstelliger Tage vier Pixel
@@ -254,7 +250,9 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .cal-grid > span { text-align: right; padding: .05rem 0; }
 .cal-kw, .cal-head { color: var(--color-dim); font-size: 12px; }
 .cal-day.is-weekend { color: var(--color-dim); }
-.cal-day.is-holiday { color: var(--color-accent); }
+/* Der Feiertag trägt seinen Namen nur im title-Attribut — im Raster muss die Zahl
+   allein auffallen, deshalb Akzentfarbe und Fettung statt Farbe allein. */
+.cal-day.is-holiday { color: var(--color-accent); font-weight: 700; }
 /* Unterstrichen heißt: an diesem Tag steht etwas im Kalender. Farbe ist schon für den
    Feiertag vergeben, und beides zugleich muss ein Tag anzeigen können. */
 .cal-day.has-event { text-decoration: underline; text-underline-offset: .18em; }
@@ -262,16 +260,6 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
    einem Samstag wäre der wichtigste Tag der Pane der leiseste. */
 .cal-day.is-today { background: var(--color-bg-sel); color: var(--color-fg); }
 .cal-day.is-today.is-holiday { color: var(--color-accent); }
-
-.cal-side { flex: 1 1 10rem; min-width: 0; }
-.cal-hol { list-style: none; margin: 0; padding: 0;
-           display: flex; flex-direction: column; gap: .55rem; }
-/* nowrap auf beiden Hälften: die Spalte ist knapp 23 Zeichen breit, und ohne das hier
-   bricht sie mitten im Datum um — „Sa., 3." über „Okt.". Der Name darüber darf umbrechen,
-   das Datum nicht. */
-.cal-when { display: flex; justify-content: space-between; gap: .6rem;
-            color: var(--color-dim); }
-.cal-when > span { white-space: nowrap; }
 
 .lab-node { display: flex; gap: 1.6rem; flex-wrap: wrap; }
 .lab-node .metric { display: flex; gap: .45rem; align-items: baseline; }

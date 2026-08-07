@@ -63,27 +63,20 @@ describe("Month", () => {
     expect(marked.map((el) => el.textContent)).toEqual(["11"]);
   });
 
-  it("listet die nächsten vier Feiertage mit Abstand", () => {
+  // Die Pane zeigt ausschließlich das Raster: kein Feiertagsname, kein Datum, keine
+  // Fußzeile. Sichtbar ist ein Feiertag allein an der hervorgehobenen Zahl.
+  it("zeigt außer dem Raster keinen Text", () => {
     const { container } = render(<Month now={new Date(2026, 9, 1)} />);
-    const rows = [...container.querySelectorAll(".cal-hol > li")].map((li) => li.textContent ?? "");
-    expect(rows).toHaveLength(4);
-    expect(rows[0]).toContain("Tag der Deutschen Einheit");
-    expect(rows[0]).toContain("in 2 d");
-    expect(rows[1]).toContain("Allerheiligen");
-    expect(rows[2]).toContain("1. Weihnachtstag");
-    expect(rows[3]).toContain("2. Weihnachtstag");
+    const cal = container.querySelector(".cal");
+    const visible = [...(cal?.children ?? [])].filter((el) => !el.classList.contains("sr-only"));
+    expect(visible.map((el) => el.className)).toEqual(["cal-grid"]);
+    // Der Name des Feiertags steht nur im title-Attribut und in der Screenreader-Zeile.
+    expect(cal?.querySelector(".cal-grid")?.textContent).not.toContain("Tag der Deutschen Einheit");
+    expect(cal?.querySelector(".cal-day.is-holiday")?.getAttribute("title")).toBe("Tag der Deutschen Einheit");
   });
 
-  it("sagt heute, wenn heute Feiertag ist", () => {
-    const { container } = render(<Month now={new Date(2026, 9, 3, 8, 0)} />);
-    expect(container.querySelector(".cal-hol > li")?.textContent).toContain("heute");
-  });
-
-  // August hat in NRW keinen Feiertag — die Liste zeigt trotzdem etwas, weil sie über
-  // den Monat hinausblickt. Genau deshalb steht dort eine Liste und keine Monatsauswahl.
-  it("bleibt in einem Monat ohne Feiertag gefüllt", () => {
+  it("hat in einem Monat ohne Feiertag keine hervorgehobene Zahl", () => {
     const { container } = render(<Month now={AUG_7} />);
-    expect(container.querySelectorAll(".cal-hol > li")).toHaveLength(4);
     expect(container.querySelector(".cal-day.is-holiday")).toBeNull();
   });
 });

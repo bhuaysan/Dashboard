@@ -1,4 +1,4 @@
-import { addDays, dayKey, startOfDay } from "./date";
+import { addDays, dayKey } from "./date";
 
 export type Holiday = { date: Date; name: string };
 
@@ -53,14 +53,4 @@ export function holidayNames(years: number[]): Map<string, string> {
     for (const h of holidaysNRW(year)) map.set(dayKey(h.date), h.name);
   }
   return map;
-}
-
-// Der heutige Feiertag zählt als der nächste — an Silvester liegen alle im Folgejahr.
-// Zwei Jahrgänge reichen: drei Feiertage überspannen nie mehr als ein Jahresende.
-export function nextHolidays(from: Date, count: number): Holiday[] {
-  const today = startOfDay(from).getTime();
-  const year = from.getFullYear();
-  return [...holidaysNRW(year), ...holidaysNRW(year + 1)]
-    .filter((h) => h.date.getTime() >= today)
-    .slice(0, count);
 }

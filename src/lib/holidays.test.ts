@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dayKey } from "./date";
-import { easterSunday, holidayNames, holidaysNRW, nextHolidays } from "./holidays";
+import { easterSunday, holidayNames, holidaysNRW } from "./holidays";
 
 describe("easterSunday", () => {
   // Stützstellen aus dem gregorianischen Kalender: früher und später Termin, dazu ein
@@ -55,20 +55,3 @@ describe("holidayNames", () => {
   });
 });
 
-describe("nextHolidays", () => {
-  it("zählt den heutigen Feiertag als den nächsten", () => {
-    expect(nextHolidays(new Date(2026, 9, 3, 14, 0), 1)[0]?.name).toBe("Tag der Deutschen Einheit");
-  });
-
-  it("greift an Silvester ins Folgejahr", () => {
-    const next = nextHolidays(new Date(2026, 11, 31), 3);
-    expect(next.map((h) => h.name)).toEqual(["Neujahr", "Karfreitag", "Ostermontag"]);
-    expect(next[0] && dayKey(next[0].date)).toBe("2027-01-01");
-  });
-
-  it("liefert so viele Termine wie verlangt, aufsteigend", () => {
-    const list = nextHolidays(new Date(2026, 7, 8), 3);
-    expect(list.map((h) => dayKey(h.date)))
-      .toEqual(["2026-10-03", "2026-11-01", "2026-12-25"]);
-  });
-});
