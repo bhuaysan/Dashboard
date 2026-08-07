@@ -33,6 +33,10 @@ audio_output_pipe_format: "s16le"
 bitrate: 320
 zeroconf_enabled: true
 volume_steps: 100
+credentials:
+  type: zeroconf
+  zeroconf:
+    persist_credentials: true
 CONF
 
 # Das config_dir muss dem Dienst gehören: dort landet auch die credentials.json
