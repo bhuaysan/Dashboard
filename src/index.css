@@ -167,9 +167,18 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .row.is-sel { background: var(--color-bg-sel); }
-.music-cmd { cursor: pointer; }
-.music-glyph { display: inline-block; color: var(--color-accent); letter-spacing: .35ch; }
-.music-title, .music-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-hero { text-align: center; }
+.music-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-artist { text-transform: uppercase; letter-spacing: .12ch; font-size: .85em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-progress { display: flex; align-items: baseline; justify-content: space-between; gap: .8ch; }
+.music-transport, .music-volrow { cursor: pointer; display: flex; align-items: center;
+  justify-content: center; gap: 2.2ch; }
+.music-volrow { gap: 1.2ch; }
+.music-playbtn { border: 1px solid var(--color-border-strong); padding: 0 1.2ch;
+  color: var(--color-accent); }
+.music-skip { color: var(--color-dim); padding: 0 .5ch; }
+.music-skip:hover { color: var(--color-accent); }
 
 /* Zeilen sind echte Links. Sie sollen weiter aussehen wie Text im Terminal — keine
    Unterstreichung, keine Linkfarbe —, aber unter der Maus reagieren und die ganze

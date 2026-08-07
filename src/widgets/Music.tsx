@@ -21,24 +21,13 @@ export async function sendMusicCommand(cmd: MusicCommand): Promise<void> {
   }
 }
 
-// Enter löst cmd aus, Shift+Enter altCmd — so bleiben beide Richtungen einer
-// Aktion auf einer Zeile erreichbar, statt je eine eigene Zeile zu belegen.
+// Zwei Zeilen, je zwei Aktionen: Enter löst cmd aus, Shift+Enter altCmd.
 // Sichtbar sind nur die Glyphen; die Bedeutung steht im aria-label und Tooltip.
+// In der Transport-Zeile sind « und » zusätzlich eigene Klickflächen (prev/next).
 export const MUSIC_ROWS: { cmd: MusicCommand; altCmd?: MusicCommand; aria: string }[] = [
-  { cmd: "toggle", aria: "Wiedergabe / Pause" },
-  { cmd: "next", altCmd: "prev", aria: "Nächster Titel, mit Shift vorheriger" },
+  { cmd: "toggle", altCmd: "next", aria: "Wiedergabe / Pause, mit Shift nächster Titel" },
   { cmd: "volumeUp", altCmd: "volumeDown", aria: "Lauter, mit Shift leiser" },
 ];
-
-// Glyphen je Zeile; die Transport-Zeile zeigt den aktuellen Zustand dynamisch.
-function rowGlyphs(cmd: MusicCommand, playing: boolean): string {
-  switch (cmd) {
-    case "toggle": return playing ? "▶" : "‖";
-    case "next": return "»  «";
-    case "volumeUp": return "+  −";
-    default: return "·";
-  }
-}
 
 function msToClock(ms: number): string {
   const total = Math.floor(ms / 1000);
@@ -85,44 +74,79 @@ export function Music({ data, selIndex, onCommand }: MusicProps) {
     <>
       {data.active ? (
         <div>
-          <div className="music-title">♪ {data.artist} – {data.title}</div>
-          <div className="dim music-sub">
-            {"  "}{[data.album, data.device].filter(Boolean).join("  ·  ")}
+          <div className="music-hero">
+            <div className="music-title">{data.title}</div>
+            <div className="dim music-artist">
+              {[data.artist, data.album].filter(Boolean).join(" · ")}
+            </div>
           </div>
-          <div>
+          <div className="music-progress">
+            <span className="dim">{msToClock(elapsed)}</span>
             <Bar
               pct={data.durationMs > 0 ? (elapsed / data.durationMs) * 100 : 0}
               width={20}
               ariaLabel={`Fortschritt ${msToClock(elapsed)} von ${msToClock(data.durationMs)}`}
-            />{" "}
-            <span className="dim">{msToClock(elapsed)}/{msToClock(data.durationMs)}</span>
+            />
+            <span className="dim">{msToClock(data.durationMs)}</span>
           </div>
-          {data.volume >= 0 && (
-            <div>
-              <span className="dim">vol</span>{" "}
-              <Bar pct={data.volume} width={13} ariaLabel={`Lautstärke ${data.volume} Prozent`} />{" "}
-              <span className="dim">{data.volume} %</span>
-            </div>
-          )}
         </div>
       ) : (
         <div className="dim">kein aktives Gerät — Spotify irgendwo starten</div>
       )}
       <div role="group" aria-label="Wiedergabe steuern">
-        {MUSIC_ROWS.map((r, i) => (
+        <div
+          className={`row music-transport${selIndex === 0 ? " is-sel" : ""}`}
+          data-row
+          role="button"
+          tabIndex={-1}
+          aria-label={MUSIC_ROWS[0]?.aria}
+          title={MUSIC_ROWS[0]?.aria}
+          onClick={() => onCommand("toggle")}
+        >
+          <span
+            className="music-skip"
+            role="button"
+            aria-label="Vorheriger Titel"
+            title="Vorheriger Titel"
+            onClick={(e) => { e.stopPropagation(); onCommand("prev"); }}
+          >«</span>
+          <span className="music-playbtn" aria-hidden="true">{playing ? "▶" : "‖"}</span>
+          <span
+            className="music-skip"
+            role="button"
+            aria-label="Nächster Titel"
+            title="Nächster Titel"
+            onClick={(e) => { e.stopPropagation(); onCommand("next"); }}
+          >»</span>
+        </div>
+        {data.volume >= 0 && (
           <div
-            key={r.cmd}
-            className={`row music-cmd${i === selIndex ? " is-sel" : ""}`}
+            className={`row music-volrow${selIndex === 1 ? " is-sel" : ""}`}
             data-row
             role="button"
             tabIndex={-1}
-            aria-label={r.aria}
-            title={r.aria}
-            onClick={() => onCommand(r.cmd)}
+            aria-label={MUSIC_ROWS[1]?.aria}
+            title={MUSIC_ROWS[1]?.aria}
+            onClick={() => onCommand("volumeUp")}
           >
-            <span className="music-glyph" aria-hidden="true">{rowGlyphs(r.cmd, playing)}</span>
+            <span
+              className="music-skip"
+              role="button"
+              aria-label="Leiser"
+              title="Leiser"
+              onClick={(e) => { e.stopPropagation(); onCommand("volumeDown"); }}
+            >−</span>
+            <Bar pct={data.volume} width={13} ariaLabel={`Lautstärke ${data.volume} Prozent`} />
+            <span className="dim">{data.volume} %</span>
+            <span
+              className="music-skip"
+              role="button"
+              aria-label="Lauter"
+              title="Lauter"
+              onClick={(e) => { e.stopPropagation(); onCommand("volumeUp"); }}
+            >+</span>
           </div>
-        ))}
+        )}
       </div>
     </>
   );
