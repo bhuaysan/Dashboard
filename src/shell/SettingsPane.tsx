@@ -23,7 +23,6 @@ const SECTIONS = [
   ["cal", "Kalender"],
   ["place", "Ort & Zeit"],
   ["layout", "Layout"],
-  ["music", "Musik"],
   ["lab", "Homelab"],
   ["search", "Suche"],
   ["proxy", "Proxy"],
@@ -40,7 +39,6 @@ const SECTION_BY_ROOT: Record<string, Sec> = {
   calendars: "cal",
   search: "search",
   proxyAllowlist: "proxy",
-  music: "music",
   homelab: "lab",
 };
 
@@ -561,36 +559,6 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved }: P
                     </div>
                   ))}
                 </div>
-              </section>
-            )}
-
-            {sec === "music" && (
-              <section>
-                <div className="field">
-                  <label htmlFor="s-music-on">Aktiv</label>
-                  <span>
-                    <label className="check">
-                      <input type="checkbox" id="s-music-on" checked={draft.music.enabled}
-                        onChange={(e) => upd((d) => ({ ...d, music: { ...d.music, enabled: e.target.checked } }))} />
-                    </label>
-                  </span>
-                </div>
-                <div className="field">
-                  <label htmlFor="s-music-src">Quelle</label>
-                  <span>
-                    <select className="inp" id="s-music-src" style={{ maxWidth: "16ch" }} value={draft.music.source}
-                      onChange={(e) => upd((d) => ({ ...d, music: { ...d.music, source: e.target.value as Config["music"]["source"] } }))}>
-                      <option value="spotify">spotify</option>
-                      <option value="mpd">mpd</option>
-                    </select>
-                  </span>
-                </div>
-                <div className="field">
-                  <label htmlFor="s-music-dev">Connect-Gerät</label>
-                  <input className="inp" id="s-music-dev" style={{ maxWidth: "16ch" }} value={draft.music.device}
-                    onChange={(e) => upd((d) => ({ ...d, music: { ...d.music, device: e.target.value } }))} />
-                </div>
-                <p className="set-hint">Name des librespot-Geräts, auf das die Pane die Wiedergabe zieht, wenn kein Gerät aktiv ist. Spotify: der Server hält das Token in .env — einmalig einrichten mit scripts/spotify-auth.mjs. mpd ist als Quelle vorgesehen, aber noch nicht angebunden.</p>
               </section>
             )}
 

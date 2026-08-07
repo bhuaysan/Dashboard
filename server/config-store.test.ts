@@ -26,6 +26,16 @@ describe("readConfig", () => {
     const bak = JSON.parse(await readFile(`${configPath}.bak`, "utf8")) as { version: number };
     expect(bak.version).toBe(99);
   });
+
+  it("verwirft eine unbekannte Pane-Id im Layout, statt an der ganzen Config zu scheitern", async () => {
+    await writeFile(configPath, JSON.stringify({
+      ...defaultConfig,
+      layout: [...defaultConfig.layout, { id: "music", visible: true, span: 1 }],
+    }));
+    const cfg = await store.readConfig();
+    expect(cfg.layout.map((l) => l.id)).not.toContain("music");
+    expect(cfg.linkGroups).toEqual(defaultConfig.linkGroups);   // Rest der Config bleibt erhalten
+  });
 });
 
 describe("writeConfig", () => {

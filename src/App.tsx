@@ -23,10 +23,9 @@ import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
 import { fetchNews, reviveNews, News } from "./widgets/News";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
-import { fetchMusic, sendMusicCommand, Music, musicRows, MUSIC_COMMANDS, type MusicCommand } from "./widgets/Music";
 import { SettingsPane } from "./shell/SettingsPane";
 
-type RowInfo = { url?: string; action?: string; altAction?: string };
+type RowInfo = { url?: string };
 
 function isoWeek(d: Date): number {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -104,12 +103,6 @@ export default function App() {
   const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, {
     revive: reviveHomelab, refetchIntervalMs: 60_000,
   });
-  const musicQuery = useCachedQuery("music", fetchMusic, 5_000, {
-    refetchIntervalMs: 5_000,
-  });
-  // Lokaler Schalter für den Audio-Stream — kein Server-Zustand, weil jeder
-  // Browser selbst entscheidet, ob er mithört.
-  const [streaming, setStreaming] = useState(false);
 
   const flatLinks = useMemo<FlatLink[]>(
     () =>
@@ -131,11 +124,9 @@ export default function App() {
   );
   const paneVisible = (id: PaneId) => layoutById[id]?.visible ?? true;
   const paneSpan = (id: PaneId): 1 | 2 => layoutById[id]?.span ?? 1;
-  const musicVisible = paneVisible("music") && config.music.enabled;
   const visiblePanes = useMemo(
-    () => new Set(PANE_ORDER.map((p) => p.id).filter((id) =>
-      (layoutById[id]?.visible ?? true) && (id !== "music" || config.music.enabled))),
-    [layoutById, config.music.enabled],
+    () => new Set(PANE_ORDER.map((p) => p.id).filter((id) => layoutById[id]?.visible ?? true)),
+    [layoutById],
   );
 
   const consoleBase = config.homelab.uiUrl.replace(/\/+$/, "");
@@ -147,10 +138,6 @@ export default function App() {
     const rows: Record<PaneId, RowInfo[]> = {
       clock: [],
       weather: [],
-      music: musicRows(musicQuery.data, streaming, config.music.device).map((r) => ({
-        action: r.action,
-        ...(r.altAction !== undefined ? { altAction: r.altAction } : {}),
-      })),
       links: flatLinks.map((l) => ({ url: l.url })),
       agenda: (calQuery.data ?? []).map(() => ({})),
       news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
@@ -162,7 +149,7 @@ export default function App() {
     // Ausgeblendete Panes haben keine Zeilen — sonst wandert die Auswahl unsichtbar weiter.
     for (const id of PANE_ORDER.map((p) => p.id)) if (!visiblePanes.has(id)) rows[id] = [];
     return rows;
-  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, musicQuery.data, streaming, config.music.device, consoleUrl, visiblePanes]);
+  }, [flatLinks, calQuery.data, newsQuery.data, labQuery.data, consoleUrl, visiblePanes]);
 
   const hintMap = hints;
 
@@ -170,33 +157,6 @@ export default function App() {
   const selectedUrl = ui.pane && ui.mode === "NORMAL"
     ? rowsByPane[ui.pane]?.[ui.row]?.url
     : undefined;
-  const selectedAction = ui.pane && ui.mode === "NORMAL"
-    ? rowsByPane[ui.pane]?.[ui.row]?.action
-    : undefined;
-  const selectedAltAction = ui.pane && ui.mode === "NORMAL"
-    ? rowsByPane[ui.pane]?.[ui.row]?.altAction
-    : undefined;
-
-  const onMusicCommand = useCallback((cmd: MusicCommand) => {
-    sendMusicCommand(cmd)
-      .then(() => queryClient.invalidateQueries({ queryKey: ["music"] }))
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : "Kommando fehlgeschlagen";
-        setMessage({ text: `Musik: ${msg}`, level: "error" });
-      });
-  }, [queryClient]);
-
-  // Die Keymap kennt keine Pane-Inhalte — sie liefert einen nackten String, den
-  // erst die Musik-Pane wieder als gültige Aktion bestätigt. „streamToggle" ist
-  // lokal (Audio-Element), alles andere geht als Kommando an den Server.
-  const onRowAction = useCallback((action: string) => {
-    if (action === "streamToggle") {
-      setStreaming((s) => !s);
-      return;
-    }
-    const cmd = MUSIC_COMMANDS.find((c) => c === action);
-    if (cmd) onMusicCommand(cmd);
-  }, [onMusicCommand]);
 
   const onSeed = useCallback((s: string, mode: Mode) => {
     setSeed(s);
@@ -208,8 +168,7 @@ export default function App() {
   }, [ui.mode]);
 
   useKeymap({
-    state: ui, dispatch, hints: hintMap, rowCount, selectedUrl,
-    selectedAction, selectedAltAction, onAction: onRowAction, onSeed,
+    state: ui, dispatch, hints: hintMap, rowCount, selectedUrl, onSeed,
     overlayOpen: settingsOpen, onOverlayEscape: () => setSettingsOpen(false),
     visiblePanes,
   });
@@ -292,7 +251,6 @@ export default function App() {
     ["news", newsQuery.error],
     ["cal", calQuery.error],
     ["pve", labQuery.error],
-    ["sp", musicQuery.error],
     ["cfg", configQuery.error],
   ] as const).find(([, err]) => err !== null);
   const problem = failed && failed[1] ? `${failed[0]}: ${failed[1].message}` : undefined;
@@ -333,21 +291,6 @@ export default function App() {
             ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
           >
             <Weather data={wxQuery.data} selIndex={selIndex("weather")} />
-          </Pane>
-          )}
-
-          {musicVisible && (
-          <Pane title="Music" label="Musik" span={paneSpan("music")} id="pane-music"
-            ref={(el: HTMLElement | null) => { paneRefs.current.music = el; }}
-          >
-            <Music
-              data={musicQuery.data}
-              selIndex={selIndex("music")}
-              streaming={streaming}
-              deviceName={config.music.device}
-              onCommand={onMusicCommand}
-              onToggleStream={() => setStreaming((s) => !s)}
-            />
           </Pane>
           )}
 
@@ -441,11 +384,6 @@ export default function App() {
                   ? { alerts: { count: labAlerts.length, level: labAlertLevel } }
                   : {}),
               },
-              {
-                label: "sp",
-                state: musicQuery.data && !musicQuery.data.configured ? "warn" : queryState(musicQuery),
-                updatedAt: musicQuery.dataUpdatedAt,
-              },
               { label: "cfg", state: queryState(configQuery), updatedAt: configQuery.dataUpdatedAt },
             ]}
             clock={timeFmt.format(now)}
@@ -456,9 +394,6 @@ export default function App() {
       </div>
 
       <KeymapOverlay open={ui.showHelp} />
-      {/* Der Stream hängt an der Server-FIFO von go-librespot. Beim Abschalten
-          wird das Element ausgehängt — die Verbindung und der Leser schließen. */}
-      {streaming && <audio src="/api/music/stream" autoPlay hidden />}
       <SettingsPane
         open={settingsOpen}
         config={config}

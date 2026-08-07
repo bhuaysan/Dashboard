@@ -5,6 +5,22 @@ import { env } from "./env.ts";
 
 const configPath = env.configPath;
 
+// Panes, die das Schema nicht mehr kennt (z. B. "music" nach dessen Entfernung), lässt das
+// enum in configSchema sonst am ganzen layout-Array scheitern — nicht nur an dem einen
+// veralteten Eintrag. Deshalb hier herausfiltern, bevor die Live-Config überhaupt geparst wird.
+const KNOWN_PANE_IDS = new Set<string>(configSchema.shape.layout.element.shape.id.options);
+
+function dropUnknownPanes(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null || !("layout" in raw)) return raw;
+  const layout = (raw as { layout: unknown }).layout;
+  if (!Array.isArray(layout)) return raw;
+  return {
+    ...raw,
+    layout: layout.filter((l) =>
+      typeof l === "object" && l !== null && KNOWN_PANE_IDS.has((l as { id?: unknown }).id as string)),
+  };
+}
+
 export async function writeAtomic(path: string, data: string): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}`;
   await writeFile(tmp, data, { mode: 0o600 });
@@ -13,7 +29,8 @@ export async function writeAtomic(path: string, data: string): Promise<void> {
 
 export async function readConfig(): Promise<Config> {
   try {
-    const parsed = configSchema.safeParse(JSON.parse(await readFile(configPath, "utf8")));
+    const raw = dropUnknownPanes(JSON.parse(await readFile(configPath, "utf8")));
+    const parsed = configSchema.safeParse(raw);
     // Neue Panes fehlen in einer älteren config.json — ohne sie könnte man die Pane
     // in den Einstellungen weder sehen noch schalten. Anhängen, nicht umsortieren:
     // die Reihenfolge im Raster gibt ohnehin App.tsx vor.

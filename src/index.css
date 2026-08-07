@@ -128,10 +128,9 @@ body {
 @media (min-width: 820px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Drei Spalten, aber keine drei gleichen: links stehen kurze Beschriftungen (längster
    Eintrag 192 px). Die Untergrenze der ersten Spalte ist die Zeitzonenzeile der Uhr —
-   die darf nicht umbrechen. Spalte 3 (Music) ist bewusst schmaler als Spalte 2 (Weather) —
-   Music-Inhalt ist eine schmale zentrierte Steuerspalte, Weather braucht die Breite für die
-   Vorschautabelle. Teilen sich News (Spalte 3) oder Agenda (Spalte 2) eine Zeile mit ohne
-   Wide-Span, wandert diese Breite mit. */
+   die darf nicht umbrechen. Spalte 2 ist breiter als Spalte 3 — Weather (Spalte 2) braucht
+   die Breite für die Vorschautabelle. Teilen sich News oder Agenda ohne Wide-Span eine
+   Zeile mit Spalte 2 oder 3, wandert diese Breite mit. */
 @media (min-width: 1240px) {
   .grid { grid-template-columns: minmax(22rem, .86fr) minmax(0, 1.17fr) minmax(0, .97fr); }
 }
@@ -170,28 +169,6 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .row.is-sel { background: var(--color-bg-sel); }
-/* Pane-Höhe kommt vom Grid (Music teilt sich die Zeile mit Links) und ist meist größer
-   als der Inhalt — statt oben anzudocken, zentriert der Block sich in der Fläche. */
-.music-body { height: 100%; display: flex; flex-direction: column; justify-content: center; }
-.music-controls { display: flex; flex-direction: column; gap: .5rem; }
-.music-rows { display: flex; flex-direction: column; gap: .3rem; }
-.music-hero { text-align: center; }
-.music-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.music-artist { text-transform: uppercase; letter-spacing: .12ch; font-size: .85em;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Zeit, Balken und Lautstärke bilden eine Spalte: alle drei Zeilen sind so breit wie ihr
-   Inhalt und zentriert, statt über die volle Pane-Breite zu spreizen — sonst reißt es die
-   Zeitangaben an die Kanten und der Balken schwebt allein in der Mitte. */
-.music-progress { display: flex; align-items: baseline; justify-content: center; gap: .8ch;
-  width: fit-content; margin: 0 auto; }
-.music-transport, .music-volrow { cursor: pointer; display: flex; align-items: center;
-  justify-content: center; gap: 2.2ch; width: fit-content; margin: 0 auto; }
-.music-volrow { gap: 1.2ch; }
-.music-playbtn { border: 1px solid var(--color-border-strong); padding: 0 1.2ch;
-  color: var(--color-accent); }
-.music-skip { color: var(--color-dim); padding: 0 .5ch; }
-.music-skip:hover { color: var(--color-accent); }
-.music-live { color: var(--color-accent); padding: 0 .5ch; }
 
 /* Zeilen sind echte Links. Sie sollen weiter aussehen wie Text im Terminal — keine
    Unterstreichung, keine Linkfarbe —, aber unter der Maus reagieren und die ganze

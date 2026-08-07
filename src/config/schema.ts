@@ -25,16 +25,11 @@ export const configSchema = z.object({
     bangs: z.record(z.string()),               // { "g": "https://www.google.com/search?q=%s" }
   }),
   layout: z.array(z.object({
-    id: z.enum(["clock", "weather", "music", "links", "agenda", "news", "homelab"]),
+    id: z.enum(["clock", "weather", "links", "agenda", "news", "homelab"]),
     visible: z.boolean(),
     span: z.union([z.literal(1), z.literal(2)]),
   })),
   proxyAllowlist: z.array(z.string()),         // Hostnamen, z.B. "api.open-meteo.com"
-  music: z.object({
-    enabled: z.boolean().default(true),
-    source: z.enum(["spotify", "mpd"]).default("spotify"),
-    device: z.string().default("Homelab"),     // Name des librespot-Connect-Geräts
-  }).default({ enabled: true, source: "spotify", device: "Homelab" }),
   homelab: z.object({
     node: z.string().default("pve"),
     uiUrl: z.string().default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links

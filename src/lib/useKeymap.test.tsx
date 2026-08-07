@@ -3,7 +3,7 @@ import { renderHook } from "@testing-library/react";
 import { initialUiState, openUrl, useKeymap, type Mode, type PaneId, type UiAction, type UiState } from "./useKeymap";
 
 const ALL_PANES: ReadonlySet<PaneId> = new Set<PaneId>([
-  "clock", "weather", "music", "links", "agenda", "news", "homelab",
+  "clock", "weather", "links", "agenda", "news", "homelab",
 ]);
 
 function setup(state: Partial<UiState>, options: {
@@ -85,14 +85,14 @@ describe("Schnelles Tippen", () => {
 describe("Pane-Tasten", () => {
   it("fokussiert ein sichtbares Pane", () => {
     const dispatch = setup({});
-    press("5");
+    press("4");
     expect(dispatch).toHaveBeenCalledWith({ type: "focusPane", pane: "agenda" });
   });
 
   it("fokussiert kein ausgeblendetes Pane", () => {
     const visible = new Set<PaneId>(["clock", "weather", "links", "news", "homelab"]);
     const dispatch = setup({}, { visiblePanes: visible });
-    press("3");
+    press("4");
     expect(dispatch).not.toHaveBeenCalled();
   });
 });
@@ -149,45 +149,6 @@ describe("Esc im Einstellungsdialog", () => {
     const onOverlayEscape = setupOverlay();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(onOverlayEscape).toHaveBeenCalledOnce();
-  });
-});
-
-describe("Aktionszeilen (MUSIC)", () => {
-  function setupAction(altAction?: string) {
-    const onAction = vi.fn<(a: string) => void>();
-    renderHook(() => useKeymap({
-      state: { ...initialUiState, pane: "music", row: 1 },
-      dispatch: vi.fn(),
-      hints: {},
-      rowCount: 3,
-      selectedUrl: undefined,
-      selectedAction: "next",
-      selectedAltAction: altAction,
-      onAction,
-      onSeed: vi.fn(),
-      overlayOpen: false,
-      onOverlayEscape: () => undefined,
-      visiblePanes: ALL_PANES,
-    }));
-    return onAction;
-  }
-
-  it("Enter löst die Aktion der Zeile aus", () => {
-    const onAction = setupAction("prev");
-    press("Enter");
-    expect(onAction).toHaveBeenCalledWith("next");
-  });
-
-  it("Shift+Enter löst die zweite Aktion derselben Zeile aus", () => {
-    const onAction = setupAction("prev");
-    press("Enter", { shiftKey: true });
-    expect(onAction).toHaveBeenCalledWith("prev");
-  });
-
-  it("Shift ohne zweite Aktion fällt auf die erste zurück", () => {
-    const onAction = setupAction(undefined);
-    press("Enter", { shiftKey: true });
-    expect(onAction).toHaveBeenCalledWith("next");
   });
 });
 
