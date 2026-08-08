@@ -96,17 +96,24 @@
     grid-template-columns: 1fr;
   }
   @media (min-width: 820px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (min-width: 1240px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  /* Keine drei gleichen Spalten: links stehen kurze Beschriftungen, die Untergrenze der
+     ersten Spalte ist die Zeitzonenzeile der Uhr. */
+  @media (min-width: 1240px) {
+    .grid { grid-template-columns: minmax(22rem, .86fr) minmax(0, 1.17fr) minmax(0, .97fr); }
+  }
 
   .pane {
     position: relative;
     border: 1px solid var(--color-border);
     background: var(--color-bg);
-    padding: 1.35rem .85rem .85rem;
+    padding: 1.25rem .75rem .75rem;
     min-width: 0;
   }
   .pane-title {
-    position: absolute; top: 0; left: .75rem;
+    /* .25rem, nicht .75rem: der Titel trägt .5rem eigene Innenpolsterung, damit der
+       Rahmen hinter ihm verschwindet. Ohne den Abzug begänne er 8 px rechts der
+       Inhaltskante der Pane. */
+    position: absolute; top: 0; left: .25rem;
     transform: translateY(-50%);
     background: var(--color-bg);
     padding: 0 .5rem;
@@ -122,8 +129,10 @@
     .pane--wide { grid-column: span 2; }
     .pane--full { grid-column: 1 / -1; }
   }
-  @media (min-width: 1240px) {
-    .pane--tall { grid-row: span 2; }
+  /* Bei nur zwei Spalten hieße „span 2" volle Breite — und ließe die Uhr allein in der
+     ersten Zeile stehen. In diesem Bereich zählt span 2 als eins. */
+  @media (min-width: 820px) and (max-width: 1239px) {
+    .pane--wide { grid-column: span 1; }
   }
 
   /* ── Zeilen ───────────────────────────────────────────────────────────── */
@@ -134,41 +143,100 @@
   }
   .row.is-sel { background: var(--color-bg-sel); }
   .hint { color: var(--color-accent); width: 2.2ch; flex: none; }
+  /* Nur für Screenreader: „Zustand" über einer Spalte aus ● und ○ wäre sichtbar Ballast. */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap;
+  }
   .dim { color: var(--color-dim); }
   .ok { color: var(--color-ok); }
   .warn { color: var(--color-warn); }
   .crit { color: var(--color-crit); }
   .group-label {
-    margin-top: .55rem; font-size: 12px; letter-spacing: .08em;
+    font-size: 12px; letter-spacing: .08em;
     text-transform: uppercase; color: var(--color-dim);
   }
-  .group-label:first-child { margin-top: 0; }
+  /* Der Abstand gehört zwischen die Gruppen, nicht über jede Beschriftung — sonst hebt
+     ihn eine :first-child-Ausnahme in jeder Gruppe wieder auf. */
+  .link-group + .link-group { margin-top: 1.1rem; }
 
   /* ── Uhr ──────────────────────────────────────────────────────────────── */
+  /* Die Zeilenhöhe gibt die höchste Pane der Reihe vor. Statt den Überschuss unten leer
+     zu lassen, bekommt die Uhr zwei Anker: Zeit oben, Zonen an der Unterkante. */
+  .clock { display: flex; flex-direction: column; justify-content: space-between;
+           height: 100%; gap: 1.2rem; }
   .clock-time {
     font-size: clamp(2.75rem, 6vw, 4.5rem); line-height: 1.05;
     font-weight: 700; letter-spacing: .02em; color: var(--color-fg);
   }
   .clock-date { margin-top: .35rem; }
-  .clock-zones { margin-top: .5rem; font-size: 13px; color: var(--color-dim); }
+  /* Zwei Spalten statt einer Fließzeile mit Trennpunkten: die Zeiten stehen untereinander
+     und lassen sich vergleichen, was der Zweck der Liste ist. */
+  .clock-zones {
+    display: grid; grid-template-columns: max-content max-content;
+    gap: .1rem 1.5rem; margin: 0; padding-top: .6rem;
+    border-top: 1px solid var(--color-border);
+    font-size: 12px; color: var(--color-dim);
+  }
+  .clock-zones dd { margin: 0; text-align: right; }
 
   /* ── Wetter ───────────────────────────────────────────────────────────── */
-  .wx { display: flex; gap: 1rem 2.5rem; flex-wrap: wrap; }
-  .wx-main { flex: 1 1 20rem; min-width: 0; }
-  .wx-now { display: flex; gap: .9rem; align-items: baseline; flex-wrap: wrap; }
-  .wx-temp { font-size: 2rem; font-weight: 700; line-height: 1.2; }
-  .spark { letter-spacing: -.06em; color: var(--color-accent); }
-  .wx-line { margin-top: .3rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
-  .wx-days { display: grid; gap: 0; align-content: start; }
-  .wx-day { display: grid; grid-template-columns: 3ch 5.5ch 5.5ch 1fr; gap: .75rem;
+  /* Ein Raster für alles: Kennwort, zwei Zahlenspalten rechtsbündig, Text. Die 7ch der
+     Zahlenspalten sind das Maß von „↑ 06:05"; Temperaturen brauchen weniger und stehen
+     trotzdem auf derselben rechten Flucht. Haarlinien trennen die drei Gruppen, damit
+     „jetzt" nicht als sechster Wochentag gelesen wird. */
+  .wx { display: grid; grid-template-columns: 5.5ch 7ch 7ch minmax(0, 1fr); gap: 0 .9rem; }
+  .wx-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;
+            gap: 0 .9rem; align-items: baseline;
             padding: .05rem .4rem; margin: 0 -.4rem; }
-  .wx-day .hi { text-align: right; }
-  .wx-day .lo { text-align: right; color: var(--color-dim); }
+  .wx-key { color: var(--color-dim); }
+  .wx-val { text-align: right; }
+  .wx-val--lo { color: var(--color-dim); }
+  .wx-note { color: var(--color-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Sparkline, Mondangabe und die große Temperatur sind keine Zahlenpaare — sie nehmen
+     beide Zahlenspalten und enden auf derselben rechten Kante wie die Tageswerte. */
+  .wx-wide { grid-column: 2 / 4; text-align: right; }
+  .wx-wide.spark { text-align: left; }
+  .wx-temp { grid-column: 2 / 4; text-align: right; font-size: 2rem; font-weight: 700; line-height: 1.2; }
+  .wx-sep { grid-column: 1 / -1; border-top: 1px solid var(--color-border); margin: .5rem 0; }
+  .spark { letter-spacing: -.06em; color: var(--color-accent); }
+
+  /* ── Monat ────────────────────────────────────────────────────────────── */
+  .cal-grid {
+    display: grid; grid-template-columns: 3ch repeat(7, 3ch);
+    gap: .1rem .45rem; justify-content: start; font-variant-numeric: tabular-nums;
+  }
+  /* Rechtsbündig wie in cal(1): zentriert stünde die Einerstelle einstelliger Tage vier
+     Pixel neben der zweistelliger, und die Spalte zitterte über den Monat hinweg. */
+  .cal-grid > span { text-align: right; padding: .05rem 0; }
+  .cal-kw, .cal-head { color: var(--color-dim); font-size: 12px; }
+  .cal-day.is-weekend { color: var(--color-dim); }
+  /* Der Feiertag trägt seinen Namen nur im title-Attribut — im Raster muss die Zahl
+     allein auffallen, deshalb Akzentfarbe und Fettung statt Farbe allein. */
+  .cal-day.is-holiday { color: var(--color-accent); font-weight: 700; }
+  .cal-day.has-event { text-decoration: underline; text-underline-offset: .18em; }
+  /* Heute darf nie gedämpft sein: ohne die eigene Farbe gewänne is-weekend, und an einem
+     Samstag wäre der wichtigste Tag der Pane der leiseste. */
+  .cal-day.is-today { background: var(--color-bg-sel); color: var(--color-fg); }
+  .cal-day.is-today.is-holiday { color: var(--color-accent); }
 
   /* ── Homelab ──────────────────────────────────────────────────────────── */
-  .lab-node { display: flex; gap: 1.6rem; flex-wrap: wrap; }
-  .lab-node .metric { display: flex; gap: .45rem; align-items: baseline; }
-  .lab-store { margin-top: .35rem; display: flex; gap: 1.8rem; flex-wrap: wrap; color: var(--color-dim); }
+  /* Kennzahlen und Speicherbalken liegen auf denselben Spalten. Verteilte flex die
+     ungleich breiten Blöcke frei, stünden beide Zeilen an je eigenen, zufälligen
+     Positionen. 22rem, damit bei voller Fensterbreite genau vier Spuren entstehen. */
+  .lab-node, .lab-store {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+    gap: .1rem 1.6rem;
+  }
+  .lab-store { margin-top: .35rem; color: var(--color-dim); }
+  /* Jede Zelle liest sich gleich: Name, Wert, Verlauf. Die Namensspalte ist beim Speicher
+     breiter, weil dort „backups-tank" steht und beim Knoten nur „cpu". */
+  .metric { display: grid; grid-template-columns: 5.5ch 5.5ch minmax(0, 1fr);
+            gap: .6rem; align-items: baseline; }
+  .metric--store { grid-template-columns: 13ch 5.5ch minmax(0, 1fr); }
+  .metric .val { text-align: right; }
+  .metric > :last-child { overflow: hidden; }
+  .metric--store > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar { letter-spacing: 0; }
   .bar-on  { color: var(--color-accent); }
   .bar-off { color: var(--color-dim); }
@@ -176,33 +244,56 @@
     margin-top: .6rem; display: grid; gap: 0 2.5rem;
     grid-template-columns: 1fr; justify-content: start;
   }
-  @media (min-width: 760px)  { .lab-guests { grid-template-columns: repeat(2, max-content); } }
-  @media (min-width: 1240px) { .lab-guests { grid-template-columns: repeat(3, max-content); } }
+  /* Eine Gastzeile ist rund 380 px breit, der Spaltenabstand 40 px: zwei Spalten brauchen
+     800 px, drei brauchen 1220. Bei Umschaltpunkten von 760 und 1240 px schob die Tabelle
+     die Seite auf und erzeugte einen waagerechten Rollbalken. */
+  @media (min-width: 860px)  { .lab-guests { grid-template-columns: repeat(2, max-content); } }
+  @media (min-width: 1280px) { .lab-guests { grid-template-columns: repeat(3, max-content); } }
   .guest { display: grid; grid-template-columns: 1.4ch 4ch minmax(0, 18ch) 4.5ch 5.5ch 5.5ch; gap: .5rem;
            padding: .05rem .4rem; margin: 0 -.4rem; }
   .guest .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .guest.is-sel { background: var(--color-bg-sel); }
   .guest .num, .guest .val { text-align: right; }
+  /* Über alle Spuren, sonst stünde der Kopf in derselben Zeile wie die ersten beiden
+     Gäste und läse sich wie ein Eintrag. Ohne ihn stünde nirgends sichtbar, dass in
+     „run 0 % 8 %" die erste Prozentzahl die CPU meint. */
+  .guest--head { grid-column: 1 / -1; }
+  .guest--head > span {
+    font-weight: 400; text-align: left; color: var(--color-dim); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  .guest--head > span.num, .guest--head > span.val { text-align: right; }
   .lab-alerts { margin-top: .6rem; display: flex; flex-direction: column; gap: .1rem; }
   .alert { display: flex; gap: .6rem; }
-  .alert .mark { flex: none; font-weight: 700; }
+  /* Feste Breite, damit „!" und „!!" den Text auf derselben Flucht beginnen lassen. */
+  .alert .mark { flex: none; font-weight: 700; width: 2ch; }
 
   /* ── Agenda ───────────────────────────────────────────────────────────── */
   .ev { display: grid; grid-template-columns: 11.5ch 1fr; gap: .6rem;
         padding: .05rem .4rem; margin: 0 -.4rem; }
   .ev.is-sel { background: var(--color-bg-sel); }
-  .ev.is-now { background: var(--color-bg-sel); }
-  .ev.is-now .ev-title { color: var(--color-accent); }
+  /* „läuft gerade" trägt den Akzent auf Zeit und Titel, nicht dieselbe Auswahlfläche wie
+     der Cursor — sonst sähen das laufende und das angewählte Ereignis gleich aus. */
+  .ev.is-now .ev-time, .ev.is-now .ev-title { color: var(--color-accent); }
   .ev.is-past .ev-time, .ev.is-past .ev-title { color: var(--color-dim); }
   .ev-time { color: var(--color-dim); }
   .ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ── News ─────────────────────────────────────────────────────────────── */
-  .news-row { display: grid; grid-template-columns: 6ch 8ch 1fr; gap: .6rem;
+  /* Die Quellenspalte wächst auf den längsten Namen (gedeckelt), statt „tagesschau" auf
+     „tagess…" zu stutzen — subgrid hält sie über alle Zeilen hinweg auf einer Flucht. */
+  .news { display: grid; grid-template-columns: 5.5ch fit-content(11ch) minmax(0, 1fr);
+          gap: .35rem .6rem; }
+  .news-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;
+              gap: 0 .6rem; align-items: baseline;
               padding: .05rem .4rem; margin: 0 -.4rem; }
   .news-row.is-sel { background: var(--color-bg-sel); }
-  .news-row .src { color: var(--color-dim); overflow: hidden; text-overflow: ellipsis; }
-  .news-row .headline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .news-row .src { color: var(--color-dim); overflow: hidden; text-overflow: ellipsis;
+                   white-space: nowrap; }
+  .news-row .headline {
+    overflow: hidden; overflow-wrap: break-word;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+  }
 
   /* ── Kommandozeile ────────────────────────────────────────────────────── */
   .cmd { position: relative; }
@@ -352,72 +443,159 @@
     <!-- ══ CLOCK ══ -->
     <section class="pane" id="pane-1" tabindex="-1" aria-label="Uhrzeit">
       <h2 class="pane-title">Clock</h2>
-      <div class="clock-time">14:32</div>
-      <div class="clock-date">Mittwoch, 5. August</div>
-      <div class="clock-zones">IBsolution&nbsp; ·&nbsp; IST 18:02&nbsp; ·&nbsp; UTC 12:32</div>
+      <div class="clock">
+        <div>
+          <div class="clock-time">14:32</div>
+          <div class="clock-date">Mittwoch, 5. August</div>
+        </div>
+        <dl class="clock-zones">
+          <dt>IBsolution</dt><dd>14:32</dd>
+          <dt>IST</dt><dd>18:02</dd>
+          <dt>UTC</dt><dd>12:32</dd>
+        </dl>
+      </div>
     </section>
 
     <!-- ══ WEATHER ══ -->
-    <section class="pane pane--wide" id="pane-2" tabindex="-1" aria-label="Wetter">
+    <section class="pane" id="pane-2" tabindex="-1" aria-label="Wetter">
       <h2 class="pane-title">Weather <span class="sub">— Heilbronn</span></h2>
       <div class="wx">
-        <div class="wx-main">
-          <div class="wx-now">
-            <span class="wx-temp">24°</span>
-            <span class="dim">gefühlt 26°</span>
-            <span>leicht bewölkt</span>
-          </div>
-          <div class="wx-line">
-            <span class="spark" aria-label="Temperatur der nächsten zwölf Stunden: 24, 25, 27, 29, 31, 31, 30, 28, 26, 25, 24, 23 Grad">▂▃▄▆▇▇▆▅▃▃▂▁</span>
-            <span class="dim">nächste 12 h</span>
-            <span class="dim">Regen 10 %</span>
-          </div>
-          <div class="wx-line dim">
-            <span>↑ 05:58</span><span>↓ 21:04</span><span>Wind 11 km/h SW</span>
-          </div>
+        <div class="wx-row">
+          <span class="wx-key">jetzt</span>
+          <span class="wx-temp">24°</span>
+          <span class="wx-note">leicht bewölkt, gefühlt 26°</span>
         </div>
-        <div class="wx-days">
-          <div class="wx-day"><span class="dim">Do</span><span class="hi">32°</span><span class="lo">19°</span><span class="dim">sonnig</span></div>
-          <div class="wx-day"><span class="dim">Fr</span><span class="hi">29°</span><span class="lo">18°</span><span class="dim">leicht bewölkt</span></div>
-          <div class="wx-day"><span class="dim">Sa</span><span class="hi">24°</span><span class="lo">16°</span><span class="dim">Regenschauer</span></div>
-          <div class="wx-day"><span class="dim">So</span><span class="hi">22°</span><span class="lo">15°</span><span class="dim">Regen mäßig</span></div>
-          <div class="wx-day"><span class="dim">Mo</span><span class="hi">25°</span><span class="lo">14°</span><span class="dim">bedeckt</span></div>
+        <div class="wx-row">
+          <span class="wx-key">12 h</span>
+          <span class="wx-wide spark" aria-label="Temperatur der nächsten zwölf Stunden: 24, 25, 27, 29, 31, 31, 30, 28, 26, 25, 24, 23 Grad">▂▃▄▆▇▇▆▅▃▃▂▁</span>
+          <span class="wx-note">Regen 10 %</span>
+        </div>
+
+        <div class="wx-sep"></div>
+
+        <div class="wx-row"><span class="wx-key">heute</span><span class="wx-val">32°</span><span class="wx-val wx-val--lo">19°</span><span class="wx-note">sonnig</span></div>
+        <div class="wx-row"><span class="wx-key">Fr</span><span class="wx-val">29°</span><span class="wx-val wx-val--lo">18°</span><span class="wx-note">leicht bewölkt</span></div>
+        <div class="wx-row"><span class="wx-key">Sa</span><span class="wx-val">24°</span><span class="wx-val wx-val--lo">16°</span><span class="wx-note">Regenschauer</span></div>
+        <div class="wx-row"><span class="wx-key">So</span><span class="wx-val">22°</span><span class="wx-val wx-val--lo">15°</span><span class="wx-note">Regen mäßig</span></div>
+        <div class="wx-row"><span class="wx-key">Mo</span><span class="wx-val">25°</span><span class="wx-val wx-val--lo">14°</span><span class="wx-note">bedeckt</span></div>
+
+        <div class="wx-sep"></div>
+
+        <div class="wx-row">
+          <span class="wx-key">Sonne</span>
+          <span class="wx-val">↑ 05:58</span>
+          <span class="wx-val">↓ 21:04</span>
+          <span class="wx-note">15:06 h hell, −2:41 min/Tag</span>
+        </div>
+        <div class="wx-row">
+          <span class="wx-key">Mond</span>
+          <span class="wx-wide">◐ 62 %</span>
+          <span class="wx-note">zunehmend</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ MONTH ══ -->
+    <section class="pane" id="pane-7" tabindex="-1" aria-label="Monat">
+      <h2 class="pane-title">Month <span class="sub">— August 2026</span></h2>
+      <div class="cal">
+        <div class="cal-grid">
+          <span class="cal-kw">KW</span>
+          <span class="cal-head">Mo</span><span class="cal-head">Di</span><span class="cal-head">Mi</span>
+          <span class="cal-head">Do</span><span class="cal-head">Fr</span><span class="cal-head">Sa</span>
+          <span class="cal-head">So</span>
+
+          <span class="cal-kw">31</span>
+          <span class="cal-day is-outside"></span><span class="cal-day is-outside"></span>
+          <span class="cal-day is-outside"></span><span class="cal-day is-outside"></span>
+          <span class="cal-day is-outside"></span>
+          <span class="cal-day is-weekend">1</span><span class="cal-day is-weekend">2</span>
+
+          <span class="cal-kw">32</span>
+          <span class="cal-day">3</span><span class="cal-day">4</span><span class="cal-day has-event">5</span>
+          <span class="cal-day is-today">6</span><span class="cal-day">7</span>
+          <span class="cal-day is-weekend">8</span><span class="cal-day is-weekend">9</span>
+
+          <span class="cal-kw">33</span>
+          <span class="cal-day">10</span><span class="cal-day">11</span><span class="cal-day">12</span>
+          <span class="cal-day has-event">13</span><span class="cal-day">14</span>
+          <span class="cal-day is-weekend">15</span><span class="cal-day is-weekend">16</span>
+
+          <span class="cal-kw">34</span>
+          <span class="cal-day">17</span><span class="cal-day">18</span><span class="cal-day">19</span>
+          <span class="cal-day">20</span><span class="cal-day">21</span>
+          <span class="cal-day is-weekend">22</span><span class="cal-day is-weekend">23</span>
+
+          <span class="cal-kw">35</span>
+          <span class="cal-day">24</span><span class="cal-day">25</span><span class="cal-day">26</span>
+          <span class="cal-day">27</span><span class="cal-day">28</span>
+          <span class="cal-day is-weekend">29</span><span class="cal-day is-weekend">30</span>
+
+          <span class="cal-kw">36</span>
+          <span class="cal-day">31</span>
+          <span class="cal-day is-outside"></span><span class="cal-day is-outside"></span>
+          <span class="cal-day is-outside"></span><span class="cal-day is-outside"></span>
+          <span class="cal-day is-outside"></span><span class="cal-day is-outside"></span>
         </div>
       </div>
     </section>
 
     <!-- ══ LINKS ══ -->
-    <nav class="pane pane--tall" id="pane-3" tabindex="-1" aria-label="Links">
+    <nav class="pane" id="pane-3" tabindex="-1" aria-label="Links">
       <h2 class="pane-title">Links</h2>
-      <div class="group-label">SAP</div>
-      <ul>
-        <li class="row" data-link="Datasphere"><span class="hint">gd</span><span>Datasphere</span></li>
-        <li class="row" data-link="Analytics Cloud"><span class="hint">gs</span><span>Analytics Cloud</span></li>
-        <li class="row" data-link="BTP Cockpit"><span class="hint">gb</span><span>BTP Cockpit</span></li>
-        <li class="row" data-link="HANA Cloud Central"><span class="hint">gn</span><span>HANA Cloud Central</span></li>
-      </ul>
-      <div class="group-label">Intern</div>
-      <ul>
-        <li class="row" data-link="Jira"><span class="hint">gj</span><span>Jira</span></li>
-        <li class="row" data-link="Confluence"><span class="hint">gc</span><span>Confluence</span></li>
-        <li class="row" data-link="Zeiterfassung"><span class="hint">gz</span><span>Zeiterfassung</span></li>
-        <li class="row" data-link="Outlook Web"><span class="hint">go</span><span>Outlook Web</span></li>
-      </ul>
-      <div class="group-label">Homelab</div>
-      <ul>
-        <li class="row" data-link="Proxmox"><span class="hint">gp</span><span>Proxmox</span></li>
-        <li class="row" data-link="Pi-hole"><span class="hint">gh</span><span>Pi-hole</span></li>
-        <li class="row" data-link="Uptime Kuma"><span class="hint">gk</span><span>Uptime Kuma</span></li>
-        <li class="row" data-link="Jellyfin"><span class="hint">gv</span><span>Jellyfin</span></li>
-        <li class="row" data-link="Filebrowser"><span class="hint">gf</span><span>Filebrowser</span></li>
-        <li class="row" data-link="Home Assistant"><span class="hint">ga</span><span>Home Assistant</span></li>
-      </ul>
-      <div class="group-label">Dev</div>
-      <ul>
-        <li class="row" data-link="GitHub"><span class="hint">gu</span><span>GitHub</span></li>
-        <li class="row" data-link="MDN"><span class="hint">gm</span><span>MDN</span></li>
-      </ul>
+      <div class="link-group">
+        <div class="group-label">SAP</div>
+        <ul>
+          <li class="row" data-link="Datasphere"><span class="hint">gd</span><span>Datasphere</span></li>
+          <li class="row" data-link="Analytics Cloud"><span class="hint">gs</span><span>Analytics Cloud</span></li>
+          <li class="row" data-link="BTP Cockpit"><span class="hint">gb</span><span>BTP Cockpit</span></li>
+          <li class="row" data-link="HANA Cloud Central"><span class="hint">gn</span><span>HANA Cloud Central</span></li>
+        </ul>
+      </div>
+      <div class="link-group">
+        <div class="group-label">Intern</div>
+        <ul>
+          <li class="row" data-link="Jira"><span class="hint">gj</span><span>Jira</span></li>
+          <li class="row" data-link="Confluence"><span class="hint">gc</span><span>Confluence</span></li>
+          <li class="row" data-link="Zeiterfassung"><span class="hint">gz</span><span>Zeiterfassung</span></li>
+          <li class="row" data-link="Outlook Web"><span class="hint">go</span><span>Outlook Web</span></li>
+        </ul>
+      </div>
+      <div class="link-group">
+        <div class="group-label">Homelab</div>
+        <ul>
+          <li class="row" data-link="Proxmox"><span class="hint">gp</span><span>Proxmox</span></li>
+          <li class="row" data-link="Pi-hole"><span class="hint">gh</span><span>Pi-hole</span></li>
+          <li class="row" data-link="Uptime Kuma"><span class="hint">gk</span><span>Uptime Kuma</span></li>
+          <li class="row" data-link="Jellyfin"><span class="hint">gv</span><span>Jellyfin</span></li>
+          <li class="row" data-link="Filebrowser"><span class="hint">gf</span><span>Filebrowser</span></li>
+          <li class="row" data-link="Home Assistant"><span class="hint">ga</span><span>Home Assistant</span></li>
+        </ul>
+      </div>
+      <div class="link-group">
+        <div class="group-label">Dev</div>
+        <ul>
+          <li class="row" data-link="GitHub"><span class="hint">gu</span><span>GitHub</span></li>
+          <li class="row" data-link="MDN"><span class="hint">gm</span><span>MDN</span></li>
+        </ul>
+      </div>
     </nav>
+
+    <!-- ══ NEWS ══ -->
+    <section class="pane" id="pane-5" tabindex="-1" aria-label="Nachrichten">
+      <h2 class="pane-title">News</h2>
+      <!-- Alter statt Uhrzeit: eine Umschaltung über den Kalendertag ließe kurz nach
+           Mitternacht jede Meldung des Vorabends „1 d" heißen. -->
+      <div class="news">
+        <div class="news-row"><span class="dim">30m</span><span class="src">heise</span><span class="headline">Neues Release-Modell für Cloud-Dienste angekündigt</span></div>
+        <div class="news-row"><span class="dim">45m</span><span class="src">tagesschau</span><span class="headline">Wirtschaftsdaten des Quartals veröffentlicht</span></div>
+        <div class="news-row"><span class="dim">2h</span><span class="src">heise</span><span class="headline">Sicherheitsupdate für weit verbreitete Bibliothek</span></div>
+        <div class="news-row"><span class="dim">3h</span><span class="src">golem</span><span class="headline">Rechenzentrumsausbau in Süddeutschland</span></div>
+        <div class="news-row"><span class="dim">4h</span><span class="src">tagesschau</span><span class="headline">Tarifverhandlungen gehen in die nächste Runde</span></div>
+        <div class="news-row"><span class="dim">6h</span><span class="src">golem</span><span class="headline">Neue Generation von Netzwerkkarten vorgestellt</span></div>
+        <div class="news-row"><span class="dim">7h</span><span class="src">heise</span><span class="headline">Open-Source-Projekt wechselt die Lizenz</span></div>
+      </div>
+    </section>
 
     <!-- ══ AGENDA ══ -->
     <section class="pane" id="pane-4" tabindex="-1" aria-label="Termine">
@@ -451,39 +629,37 @@
       </div>
     </section>
 
-    <!-- ══ NEWS ══ -->
-    <section class="pane" id="pane-5" tabindex="-1" aria-label="Nachrichten">
-      <h2 class="pane-title">News</h2>
-      <div class="news-row"><span class="dim">14:02</span><span class="src">heise</span><span class="headline">Neues Release-Modell für Cloud-Dienste angekündigt</span></div>
-      <div class="news-row"><span class="dim">13:47</span><span class="src">tagessch</span><span class="headline">Wirtschaftsdaten des Quartals veröffentlicht</span></div>
-      <div class="news-row"><span class="dim">12:20</span><span class="src">heise</span><span class="headline">Sicherheitsupdate für weit verbreitete Bibliothek</span></div>
-      <div class="news-row"><span class="dim">11:05</span><span class="src">golem</span><span class="headline">Rechenzentrumsausbau in Süddeutschland</span></div>
-      <div class="news-row"><span class="dim">09:58</span><span class="src">tagessch</span><span class="headline">Tarifverhandlungen gehen in die nächste Runde</span></div>
-      <div class="news-row"><span class="dim">08:31</span><span class="src">golem</span><span class="headline">Neue Generation von Netzwerkkarten vorgestellt</span></div>
-      <div class="news-row"><span class="dim">07:12</span><span class="src">heise</span><span class="headline">Open-Source-Projekt wechselt die Lizenz</span></div>
-    </section>
-
     <!-- ══ HOMELAB ══ -->
     <section class="pane pane--full" id="pane-6" tabindex="-1" aria-label="Homelab">
       <h2 class="pane-title">Homelab <span class="sub">— pve</span></h2>
 
+      <!-- Beide Zeilen liegen auf denselben vier Spuren, und jede Zelle liest sich
+           gleich: Name, Wert, Verlauf. -->
       <div class="lab-node">
-        <span class="metric"><span class="dim">cpu</span><span>1 %</span>
-          <span class="spark" aria-label="CPU-Auslastung der letzten Stunde: 0 bis 3 Prozent">▁▃▁▅▃▁▃▇▃</span></span>
-        <span class="metric"><span class="dim">mem</span><span>51 %</span>
-          <span class="spark" aria-label="Speicherauslastung der letzten Stunde: 50 bis 52 Prozent">▁▄▄▇▄▁▄▄▇</span></span>
-        <span class="metric"><span class="dim">root</span><span>28 %</span></span>
-        <span class="metric"><span class="dim">up</span><span>87 d</span></span>
-        <span class="metric"><span class="dim">load</span><span>0.05</span></span>
+        <span class="metric"><span class="dim">cpu</span><span class="val">1 %</span>
+          <span class="spark" aria-label="CPU-Auslastung der letzten 30 Minuten: 0 bis 3 Prozent">▁▃▁▅▃▁▃▇▃</span></span>
+        <span class="metric"><span class="dim">mem</span><span class="val">51 %</span>
+          <span class="spark" aria-label="Speicherauslastung der letzten 30 Minuten: 50 bis 52 Prozent">▁▄▄▇▄▁▄▄▇</span></span>
+        <span class="metric"><span class="dim">root</span><span class="val">28 %</span></span>
+        <span class="metric"><span class="dim">up</span><span class="val">87 d</span></span>
       </div>
 
       <div class="lab-store">
-        <span>tank <span class="bar" aria-label="tank zu 15 Prozent belegt"><span class="bar-on">━━</span><span class="bar-off">───────────</span></span> <span class="dim">15 %</span></span>
-        <span>local <span class="bar" aria-label="local zu 28 Prozent belegt"><span class="bar-on">━━━━</span><span class="bar-off">─────────</span></span> <span class="dim">28 %</span></span>
-        <span>local-lvm <span class="bar" aria-label="local-lvm zu 34 Prozent belegt"><span class="bar-on">━━━━</span><span class="bar-off">─────────</span></span> <span class="dim">34 %</span></span>
+        <span class="metric metric--store"><span>tank</span><span class="val">15 %</span>
+          <span class="bar" aria-label="tank zu 15 Prozent belegt"><span class="bar-on">━━</span><span class="bar-off">───────────</span></span></span>
+        <span class="metric metric--store"><span>local</span><span class="val">28 %</span>
+          <span class="bar" aria-label="local zu 28 Prozent belegt"><span class="bar-on">━━━━</span><span class="bar-off">─────────</span></span></span>
+        <span class="metric metric--store"><span>local-lvm</span><span class="val">34 %</span>
+          <span class="bar" aria-label="local-lvm zu 34 Prozent belegt"><span class="bar-on">━━━━</span><span class="bar-off">─────────</span></span></span>
+        <span class="metric metric--store"><span>backups-tank</span><span class="val">20 %</span>
+          <span class="bar" aria-label="backups-tank zu 20 Prozent belegt"><span class="bar-on">━━━</span><span class="bar-off">──────────</span></span></span>
       </div>
 
       <div class="lab-guests">
+        <div class="guest guest--head">
+          <span><span class="sr-only">Zustand</span></span><span class="num">VMID</span><span>Name</span>
+          <span>Status</span><span class="val">CPU</span><span class="val">Mem</span>
+        </div>
         <div class="guest"><span class="ok">●</span><span class="num">100</span><span class="name">caddy</span><span class="dim">run</span><span class="val">0 %</span><span class="val">8 %</span></div>
         <div class="guest"><span class="ok">●</span><span class="num">101</span><span class="name">pihole.local</span><span class="dim">run</span><span class="val">0 %</span><span class="val">21 %</span></div>
         <div class="guest"><span class="ok">●</span><span class="num">102</span><span class="name">fileshare.local</span><span class="dim">run</span><span class="val">0 %</span><span class="val">4 %</span></div>
@@ -523,10 +699,11 @@
     <span class="sl-panes" id="sl-panes">
       <span data-p="1"><b>1</b> clock</span>
       <span data-p="2"><b>2</b> weather</span>
-      <span data-p="3"><b>3</b> links</span>
-      <span data-p="4"><b>4</b> agenda</span>
+      <span data-p="7"><b>3</b> month</span>
+      <span data-p="3"><b>4</b> links</span>
       <span data-p="5"><b>5</b> news</span>
-      <span data-p="6"><b>6</b> lab</span>
+      <span data-p="4"><b>6</b> agenda</span>
+      <span data-p="6"><b>7</b> lab</span>
     </span>
     <span class="sl-right">
       <span class="sl-src"><span class="ok">●</span> wx</span>
@@ -546,7 +723,7 @@
     <h2>Tastenbelegung</h2>
     <dl class="keys">
       <dt>Zeichen, /</dt><dd>Fokus ins Suchfeld (INSERT)</dd>
-      <dt>1 – 6</dt><dd>Pane fokussieren</dd>
+      <dt>1 – 7</dt><dd>Pane fokussieren</dd>
       <dt>j / k</dt><dd>Zeile ab / auf im fokussierten Pane</dd>
       <dt>Enter</dt><dd>ausgewählte Zeile öffnen</dd>
       <dt>Shift+Enter</dt><dd>in neuem Tab öffnen</dd>
@@ -768,27 +945,32 @@
     };
   });
 
+  // Anzeigereihenfolge der Ziffern 1–7 auf die ids der Panes. Month kam später dazu und
+  // behält deshalb id 7, steht in der Reihenfolge aber an dritter Stelle.
+  var PANE_ORDER = [1, 2, 7, 3, 5, 4, 6];
+
   function rowsOf(n) {
     var p = document.getElementById("pane-" + n);
     if (!p) return [];
-    return [].slice.call(p.querySelectorAll(".row, .ev, .news-row, .guest"));
+    // Die Kopfzeile der Gästetabelle ist keine anwählbare Zeile.
+    return [].slice.call(p.querySelectorAll(".row, .ev, .news-row, .guest:not(.guest--head)"));
   }
 
   function render() {
     slMode.textContent = mode;
-    for (var n = 1; n <= 6; n++) {
+    PANE_ORDER.forEach(function (n) {
       var p = document.getElementById("pane-" + n);
       if (p) p.classList.toggle("is-focused", n === pane && mode === "NORMAL");
-    }
+    });
     [].forEach.call(slPanes.children, function (el) {
       el.classList.toggle("is-active", Number(el.getAttribute("data-p")) === pane);
     });
     cmd.classList.toggle("is-focused", mode === "INSERT" || mode === "COMMAND");
-    for (var m = 1; m <= 6; m++) {
+    PANE_ORDER.forEach(function (m) {
       rowsOf(m).forEach(function (el, i) {
         el.classList.toggle("is-sel", m === pane && i === row && mode === "NORMAL");
       });
-    }
+    });
   }
 
   function focusPane(n) {
@@ -873,7 +1055,7 @@
       input.value = e.key === ":" ? ":" : "";
       input.focus(); render(); e.preventDefault(); return;
     }
-    if (e.key >= "1" && e.key <= "6") { focusPane(Number(e.key)); e.preventDefault(); return; }
+    if (e.key >= "1" && e.key <= "7") { focusPane(PANE_ORDER[Number(e.key) - 1]); e.preventDefault(); return; }
     if (e.key === "j") { move(1); e.preventDefault(); return; }
     if (e.key === "k") { move(-1); e.preventDefault(); return; }
 
