@@ -2,6 +2,21 @@ import ICAL from "ical.js";
 
 export type CalEvent = { title: string; start: Date; end: Date; allDay: boolean };
 
+export const MAX_RECURRENCE_OPERATIONS = 10_000;
+export const MAX_RECURRENCE_MILLISECONDS = 1_000;
+
+export type IcsParseOptions = {
+  maxRecurrenceOperations?: number;
+  maxRecurrenceMilliseconds?: number;
+};
+
+export class RecurrenceExpansionError extends Error {
+  constructor() {
+    super("Serientermin überschreitet das Expansionsbudget");
+    this.name = "RecurrenceExpansionError";
+  }
+}
+
 function toCalEvent(event: ICAL.Event, start: Date, end: Date): CalEvent {
   return {
     title: event.summary || "(ohne Titel)",
@@ -21,13 +36,15 @@ function isCancelled(event: ICAL.Event): boolean {
   return typeof value === "string" && value.toUpperCase() === "CANCELLED";
 }
 
+function recurrenceIdKey(event: ICAL.Event): number {
+  return event.recurrenceId.toUnixTime();
+}
+
 function overlaps(start: Date, end: Date, from: Date, to: Date): boolean {
   return end >= from && start <= to;
 }
 
 type EventGroup = { master?: ICAL.Component; exceptions: ICAL.Component[] };
-
-const MAX_OCCURRENCES = 100_000;
 
 function expansionEnd(to: Date, exceptions: ICAL.Component[]): Date {
   let end = to;
@@ -38,11 +55,13 @@ function expansionEnd(to: Date, exceptions: ICAL.Component[]): Date {
   return end;
 }
 
-export function parseIcs(text: string, from: Date, to: Date): CalEvent[] {
+export function parseIcs(text: string, from: Date, to: Date, options: IcsParseOptions = {}): CalEvent[] {
   const comp = new ICAL.Component(ICAL.parse(text));
   const out: CalEvent[] = [];
   const groups = new Map<string, EventGroup>();
   const components = comp.getAllSubcomponents("vevent");
+  const maxRecurrenceOperations = options.maxRecurrenceOperations ?? MAX_RECURRENCE_OPERATIONS;
+  const maxRecurrenceMilliseconds = options.maxRecurrenceMilliseconds ?? MAX_RECURRENCE_MILLISECONDS;
 
   components.forEach((vevent, index) => {
     const uid = componentUid(vevent) ?? `anonymous-${index}`;
@@ -58,23 +77,40 @@ export function parseIcs(text: string, from: Date, to: Date): CalEvent[] {
     // bewusst ignoriert, statt einer anderen Serie zugeordnet zu werden.
     if (master === undefined) continue;
 
+    const activeExceptions: ICAL.Component[] = [];
+    const cancelledRecurrenceIds = new Set<number>();
+    for (const exceptionComponent of group.exceptions) {
+      const exception = new ICAL.Event(exceptionComponent);
+      if (isCancelled(exception)) {
+        cancelledRecurrenceIds.add(recurrenceIdKey(exception));
+      } else {
+        activeExceptions.push(exceptionComponent);
+      }
+    }
+
     const event = new ICAL.Event(master, {
       strictExceptions: true,
-      exceptions: group.exceptions,
+      exceptions: activeExceptions,
     });
     if (isCancelled(event)) continue;
 
     if (event.isRecurring()) {
       const it = event.iterator();
       const expansionTo = expansionEnd(to, group.exceptions);
-      let count = 0;
-      for (let next = it.next(); next && count < MAX_OCCURRENCES; next = it.next()) {
-        count += 1;
+      const expansionStartedAt = performance.now();
+      let operations = 0;
+      for (let next = it.next(); next; next = it.next()) {
         const occurrenceStart = next.toJSDate();
+        if (occurrenceStart > expansionTo) break;
+        if (operations >= maxRecurrenceOperations ||
+            performance.now() - expansionStartedAt >= maxRecurrenceMilliseconds) {
+          throw new RecurrenceExpansionError();
+        }
+        operations += 1;
         // Eine Exception darf die tatsächliche Zeit verschieben. Deshalb wird bis
         // zum letzten RECURRENCE-ID-Eintrag expandiert, nicht nur bis zur normalen
         // Serienzeit im sichtbaren Fenster.
-        if (occurrenceStart > expansionTo) break;
+        if (cancelledRecurrenceIds.has(next.toUnixTime())) continue;
 
         const details = event.getOccurrenceDetails(next);
         const item = details.item;

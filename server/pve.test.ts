@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { buildHomelab, parsePveEnvelope, type PveRaw } from "./pve.ts";
+import { buildHomelab, parsePveEnvelope, pveNodePathSegment, type PveRaw } from "./pve.ts";
 import { defaultConfig } from "../src/config/defaults";
 
 const cfg = { ...defaultConfig.homelab, expectRunning: [100, 110] };
@@ -60,6 +60,13 @@ describe("PVE-Antworten", () => {
   it("gibt keine NaN-Werte aus einem synthetischen PVE-Feld weiter", () => {
     expect(() => parsePveEnvelope({ data: { value: Number.NaN } }, "/nodes/pve/status", z.object({ value: finiteValue })))
       .toThrow("PVE /nodes/pve/status: ungültige Daten");
+  });
+});
+
+describe("PVE-Node-Pfad", () => {
+  it("kodiert den Node als einzelnes URL-Pfadsegment", () => {
+    expect(pveNodePathSegment("pve-home")).toBe("pve-home");
+    expect(pveNodePathSegment("pve/home?x=1#fragment")).toBe("pve%2Fhome%3Fx%3D1%23fragment");
   });
 });
 

@@ -41,6 +41,44 @@ describe("fetchEvents", () => {
     expect(result.items).toHaveLength(1);
     expect(result.failures).toEqual(["kaputt"]);
   });
+
+  it("meldet eine nicht expandierbare Serie als Quellenfehler", async () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:zu-häufig",
+      "DTSTART:20260801T090000",
+      "DTEND:20260801T090001",
+      "SUMMARY:Zu häufig",
+      "RRULE:FREQ=SECONDLY",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const goodIcs = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:gut",
+      "DTSTART:20260805T090000",
+      "DTEND:20260805T100000",
+      "SUMMARY:Termin",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      url.includes("gut") ? new Response(goodIcs, { status: 200 }) : new Response(ics, { status: 200 }),
+    ));
+
+    const result = await fetchEvents(
+      [
+        { label: "zu häufig", url: "https://calendar.example/zu-haeufig.ics" },
+        { label: "gut", url: "https://calendar.example/gut.ics" },
+      ],
+      new Date("2026-08-05T00:00:00"),
+      new Date("2026-08-08T23:59:59"),
+    );
+    expect(result.items).toHaveLength(1);
+    expect(result.failures).toEqual(["zu häufig"]);
+  });
 });
 
 describe("filterAgendaEvents", () => {

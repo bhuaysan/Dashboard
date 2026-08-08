@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { resolve } from "node:path";
-import { ConfigStoreError, createConfigStore, type ConfigStore } from "./config-store.ts";
+import { ConfigStoreError, ConfigTooLargeError, createConfigStore, type ConfigStore } from "./config-store.ts";
 import { createWriteGuard } from "./write-guard.ts";
-import { proxyFetch, type ProxyResult } from "./proxy.ts";
+import { ProxyOverloadedError, ProxyTimeoutError, proxyFetch, type ProxyResult } from "./proxy.ts";
 import type { Config } from "../src/config/schema.ts";
 import { fetchHomelab } from "./pve.ts";
 import { createHomelabCache, type HomelabFetcher } from "./homelab-cache.ts";
@@ -126,6 +126,9 @@ export function createApp(options: AppOptions): Hono {
       }
       return c.json(result.config);
     } catch (error) {
+      if (error instanceof ConfigTooLargeError) {
+        return c.json({ error: "Config-Datei ist zu groß" }, 413);
+      }
       if (error instanceof ConfigStoreError) {
         return c.json({ error: "Config nicht verfügbar" }, 503);
       }
@@ -156,6 +159,12 @@ export function createApp(options: AppOptions): Hono {
       const result = await proxyFetch(raw, cfg.proxyAllowlist);
       return inertProxyResponse(result);
     } catch (error) {
+      if (error instanceof ProxyOverloadedError) {
+        return c.json({ error: error.message }, 503);
+      }
+      if (error instanceof ProxyTimeoutError) {
+        return c.json({ error: error.message }, 504);
+      }
       const msg = error instanceof Error ? error.message : "Proxy-Fehler";
       if (msg === "Schema" || msg === "Host nicht erlaubt" || msg === "Private Adresse") {
         return c.json({ error: msg }, 403);

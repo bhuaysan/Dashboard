@@ -131,6 +131,10 @@ async function pveGet<T>(runtimeEnv: DashboardEnvironment, path: string, schema:
   return parsePveEnvelope(raw, path, schema);
 }
 
+export function pveNodePathSegment(node: string): string {
+  return encodeURIComponent(node);
+}
+
 export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date()): HomelabData {
   const pct = (used: number, total: number) => (total > 0 ? Math.round((used / total) * 100) : 0);
 
@@ -256,7 +260,7 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
 
 export async function fetchHomelab(cfg: Config, runtimeEnv: DashboardEnvironment = env): Promise<HomelabData> {
   if (!runtimeEnv.pve) return emptyHomelab;
-  const node = cfg.homelab.node;
+  const node = pveNodePathSegment(cfg.homelab.node);
   const [status, rrd, resources, storages, tasks, updates, reachability] = await Promise.all([
     pveGet<NodeStatus>(runtimeEnv, `/nodes/${node}/status`, nodeStatusSchema),
     pveGet<RrdPoint[]>(runtimeEnv, `/nodes/${node}/rrddata?timeframe=hour&cf=AVERAGE`, z.array(rrdPointSchema).max(10000)),

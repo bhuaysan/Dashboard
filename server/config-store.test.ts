@@ -4,11 +4,27 @@ import { join } from "node:path";
 // @vitest-environment node
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config/defaults";
+import type { Config } from "../src/config/schema";
 import { createConfigStore, MAX_CONFIG_BYTES, writeAtomic } from "./config-store.ts";
 
 let dir: string;
 let configPath: string;
 let store: ReturnType<typeof createConfigStore>;
+
+function nearLimitConfig(): Config {
+  const links: Config["linkGroups"][number]["links"] = Array.from({ length: 100 }, (_, index) => ({
+    label: `link-${index}`,
+    url: `https://example.com/${"x".repeat(1660)}`,
+  }));
+  return {
+    ...defaultConfig,
+    linkGroups: [
+      { title: "groß", links },
+      { title: "groß2", links },
+      { title: "groß3", links },
+    ],
+  };
+}
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "dashboard-store-"));
@@ -81,6 +97,17 @@ describe("writeConfig", () => {
     // und es bleiben genau sieben übrig
     const files = await readdir(dir);
     expect(files.filter((f) => /^config\.json\.\d+$/.test(f))).toHaveLength(7);
+  });
+
+  it("weist eine zu große endgültige Darstellung vor der Backup-Rotation ab", async () => {
+    const candidate = nearLimitConfig();
+    await store.writeConfig({ ...defaultConfig, updatedAt: "vorher" });
+    const before = await readFile(configPath, "utf8");
+    await writeFile(`${configPath}.1`, "unverändert");
+
+    await expect(store.writeConfig(candidate)).rejects.toThrow("Config-Datei ist zu groß");
+    expect(await readFile(configPath, "utf8")).toBe(before);
+    expect(await readFile(`${configPath}.1`, "utf8")).toBe("unverändert");
   });
 });
 

@@ -41,6 +41,27 @@ describe("configSchema", () => {
     expect(configSchema.safeParse({ ...defaultConfig, homelab: duplicateVmid }).success).toBe(false);
     expect(configSchema.safeParse({ ...defaultConfig, linkGroups: duplicateHint }).success).toBe(false);
   });
+
+  it("akzeptiert sichere Proxmox-Node-Namen", () => {
+    for (const node of ["pve", "pve-home-01"]) {
+      const parsed = configSchema.safeParse({
+        ...defaultConfig,
+        homelab: { ...defaultConfig.homelab, node },
+      });
+      expect(parsed.success).toBe(true);
+    }
+  });
+
+  it.each(["/", "..", "../cluster", "pve?x=1", "pve#x", "pve\\home", "pve home"])(
+    "weist einen unsicheren Proxmox-Node-Namen ab: %s",
+    (node) => {
+      const parsed = configSchema.safeParse({
+        ...defaultConfig,
+        homelab: { ...defaultConfig.homelab, node },
+      });
+      expect(parsed.success).toBe(false);
+    },
+  );
 });
 
 describe("isSafeLocalCalendarPath", () => {

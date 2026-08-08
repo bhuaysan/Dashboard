@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseIcs } from "./ics";
+import { parseIcs, RecurrenceExpansionError } from "./ics";
 
 const FROM = new Date("2026-08-05T00:00:00");
 const TO = new Date("2026-08-08T23:59:59");
@@ -110,6 +110,28 @@ describe("parseIcs", () => {
     expect(events[0]?.start.getDate()).toBe(5);
   });
 
+  it("überspringt eine minimale abgesagte Serienexception ohne DTSTART und DTEND", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:series-minimal-cancelled",
+      "DTSTART:20260805T090000",
+      "DTEND:20260805T100000",
+      "SUMMARY:Daily",
+      "RRULE:FREQ=DAILY;COUNT=2",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "UID:series-minimal-cancelled",
+      "RECURRENCE-ID:20260806T090000",
+      "STATUS:CANCELLED",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const events = parseIcs(ics, FROM, TO);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.start.getDate()).toBe(5);
+  });
+
   it("ordnet Exceptions nur ihrer UID zu und ignoriert verwaiste Exceptions", () => {
     const ics = [
       "BEGIN:VCALENDAR",
@@ -179,5 +201,20 @@ describe("parseIcs", () => {
     const events = parseIcs(ics, FROM, TO);
     expect(events).toHaveLength(4);
     expect(events[0]?.start.toISOString()).toContain("2026-08-05");
+  });
+
+  it("meldet eine alte sekundliche Serie statt still unvollständiger Daten", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:old-secondly",
+      "DTSTART:20260801T090000",
+      "DTEND:20260801T090001",
+      "SUMMARY:Zu häufig",
+      "RRULE:FREQ=SECONDLY",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    expect(() => parseIcs(ics, FROM, TO, { maxRecurrenceOperations: 4 })).toThrow(RecurrenceExpansionError);
   });
 });

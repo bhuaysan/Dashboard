@@ -57,6 +57,21 @@ function putConfig(cfg: Config, ifMatch: string, from = "127.0.0.1", extraHeader
   );
 }
 
+function nearLimitConfig(base: Config): Config {
+  const links: Config["linkGroups"][number]["links"] = Array.from({ length: 100 }, (_, index) => ({
+    label: `link-${index}`,
+    url: `https://example.com/${"x".repeat(1660)}`,
+  }));
+  return {
+    ...base,
+    linkGroups: [
+      { title: "groß", links },
+      { title: "groß2", links },
+      { title: "groß3", links },
+    ],
+  };
+}
+
 describe("/api/config", () => {
   it("GET liefert die Config", async () => {
     const cfg = await getConfig();
@@ -163,6 +178,17 @@ describe("/api/config", () => {
       body: JSON.stringify({ padding }),
     }, connInfo("127.0.0.1"));
     expect(res.status).toBe(413);
+  });
+
+  it("weist eine zu große endgültige Dateidarstellung als Clientfehler ab", async () => {
+    const seed = await getConfig();
+    const seeded = await putConfig(seed, seed.updatedAt);
+    expect(seeded.status).toBe(200);
+    const before = await getConfig();
+    const beforeDisk = await readFile(configPath, "utf8");
+    const res = await putConfig(nearLimitConfig(before), before.updatedAt);
+    expect(res.status).toBe(413);
+    expect(await readFile(configPath, "utf8")).toBe(beforeDisk);
   });
 
   it("liefert bei einem nicht sicherbaren Config-Backup 503", async () => {

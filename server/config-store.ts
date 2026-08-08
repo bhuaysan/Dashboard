@@ -36,6 +36,13 @@ export class ConfigStoreError extends Error {
   }
 }
 
+export class ConfigTooLargeError extends ConfigStoreError {
+  constructor() {
+    super("Config-Datei ist zu groß");
+    this.name = "ConfigTooLargeError";
+  }
+}
+
 function isMissing(error: unknown): boolean {
   return isRecord(error) && error.code === "ENOENT";
 }
@@ -46,7 +53,7 @@ function describeStoreError(message: string, error: unknown): ConfigStoreError {
 
 export async function writeAtomic(path: string, data: string): Promise<void> {
   if (Buffer.byteLength(data, "utf8") > MAX_CONFIG_BYTES) {
-    throw new ConfigStoreError("Config-Datei ist zu groß");
+    throw new ConfigTooLargeError();
   }
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
   let renamed = false;
@@ -160,8 +167,12 @@ export function createConfigStore(configPath: string): ConfigStore {
   }
 
   async function writeConfigUnlocked(cfg: Config): Promise<void> {
+    const serialized = JSON.stringify(cfg, null, 2);
+    if (Buffer.byteLength(serialized, "utf8") > MAX_CONFIG_BYTES) {
+      throw new ConfigTooLargeError();
+    }
     await keepPreviousVersion();
-    await writeAtomic(configPath, JSON.stringify(cfg, null, 2));
+    await writeAtomic(configPath, serialized);
   }
 
   function nextRevision(previous: string): string {

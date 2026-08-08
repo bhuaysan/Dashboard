@@ -76,10 +76,15 @@ function isHostname(value: string): boolean {
   }
 }
 
+function isPveNodeName(value: string): boolean {
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(value);
+}
+
 const isoDateTime = z.string().datetime({ offset: true });
 const httpUrl = text(MAX_URL_LENGTH).refine(isHttpUrl, "Keine gültige Adresse (muss mit http:// oder https:// beginnen)");
 const searchTemplate = text(MAX_URL_LENGTH).refine(isSearchTemplate, "Muss genau ein %s und eine HTTP(S)-Adresse enthalten");
 const hostname = text(253).refine(isHostname, "Ungültiger Hostname");
+const pveNodeName = text(63).refine(isPveNodeName, "Ungültiger Proxmox-Node-Name");
 const timezone = text(100).refine(isTimezone, "Ungültige Zeitzone");
 const percent = z.number().finite().min(0).max(100);
 const port = z.number().int().min(1).max(65535);
@@ -143,7 +148,7 @@ const baseConfigSchema = z.object({
   layout: layoutSchema,
   proxyAllowlist: z.array(hostname).max(128),
   homelab: z.object({
-    node: text(64).default("pve"),
+    node: pveNodeName.default("pve"),
     uiUrl: httpUrl.default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links
     expectRunning: z.array(z.number().int().positive().max(999999)).max(128).default([]),
     thresholds: z.object({

@@ -1,6 +1,24 @@
 import { lookup } from "node:dns/promises";
 import { Agent, fetch as undiciFetch } from "undici";
 
+export const PROXY_DEADLINE_MS = 5_000;
+export const MAX_PROXY_IN_FLIGHT = 8;
+export const MAX_PROXY_QUEUE = 32;
+
+export class ProxyTimeoutError extends Error {
+  constructor() {
+    super("Proxy-Zeitüberschreitung");
+    this.name = "ProxyTimeoutError";
+  }
+}
+
+export class ProxyOverloadedError extends Error {
+  constructor() {
+    super("Proxy ausgelastet");
+    this.name = "ProxyOverloadedError";
+  }
+}
+
 export function isBlockedIp(ip: string): boolean {
   if (ip.includes(":")) return true;              // IPv6: pauschal ablehnen, nicht gebraucht
   const parts = ip.split(".").map(Number);
@@ -26,10 +44,34 @@ export function assertListed(url: URL, allowlist: string[]): void {
 
 export type LookupAddress = (hostname: string, options: { family: 4 }) => Promise<{ address: string }>;
 
+function withAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort?: () => void): Promise<T> {
+  if (signal.aborted) return Promise.reject(new ProxyTimeoutError());
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      onAbort?.();
+      reject(new ProxyTimeoutError());
+    };
+    const settle = () => signal.removeEventListener("abort", abort);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => { settle(); resolve(value); },
+      (error: unknown) => { settle(); reject(error); },
+    );
+  });
+}
+
 // Liefert die geprüfte Adresse zurück, damit genau zu ihr verbunden wird.
-export async function assertAllowed(url: URL, allowlist: string[], resolveAddress: LookupAddress = lookup): Promise<string> {
+export async function assertAllowed(
+  url: URL,
+  allowlist: string[],
+  resolveAddress: LookupAddress = lookup,
+  signal?: AbortSignal,
+): Promise<string> {
   assertListed(url, allowlist);
-  const { address } = await resolveAddress(url.hostname, { family: 4 });
+  const lookupPromise = resolveAddress(url.hostname, { family: 4 });
+  const { address } = signal === undefined
+    ? await lookupPromise
+    : await withAbort(lookupPromise, signal);
   if (isBlockedIp(address)) throw new Error("Private Adresse");
   return address;
 }
@@ -50,9 +92,15 @@ let cacheBytes = 0;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_ENTRIES = 64;
 export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
-const MAX_IN_FLIGHT = 8;
 let inFlight = 0;
-const waiters: Array<() => void> = [];
+type SlotWaiter = {
+  resolve: () => void;
+  reject: (reason: unknown) => void;
+  signal: AbortSignal;
+  onAbort: () => void;
+};
+const waiters: SlotWaiter[] = [];
+const inFlightRequests = new Map<string, Promise<ProxyResult>>();
 
 function cacheKey(url: URL): string {
   const normalized = new URL(url);
@@ -101,72 +149,133 @@ export function proxyCacheSize(): { entries: number; bytes: number } {
   return { entries: cache.size, bytes: cacheBytes };
 }
 
-async function acquireSlot(): Promise<void> {
-  if (inFlight < MAX_IN_FLIGHT) {
+function acquireSlot(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new ProxyTimeoutError());
+  if (waiters.length === 0 && inFlight < MAX_PROXY_IN_FLIGHT) {
     inFlight += 1;
-    return;
+    return Promise.resolve();
   }
-  await new Promise<void>((resolve) => waiters.push(resolve));
-  inFlight += 1;
+  if (waiters.length >= MAX_PROXY_QUEUE) return Promise.reject(new ProxyOverloadedError());
+  return new Promise<void>((resolve, reject) => {
+    const waiter: SlotWaiter = {
+      resolve,
+      reject,
+      signal,
+      onAbort: () => {
+        const index = waiters.indexOf(waiter);
+        if (index === -1) return;
+        waiters.splice(index, 1);
+        reject(new ProxyTimeoutError());
+      },
+    };
+    signal.addEventListener("abort", waiter.onAbort, { once: true });
+    waiters.push(waiter);
+  });
 }
 
 function releaseSlot(): void {
-  inFlight -= 1;
-  const next = waiters.shift();
-  next?.();
+  for (;;) {
+    const next = waiters.shift();
+    if (next === undefined) {
+      inFlight -= 1;
+      return;
+    }
+    next.signal.removeEventListener("abort", next.onAbort);
+    if (next.signal.aborted) {
+      next.reject(new ProxyTimeoutError());
+      continue;
+    }
+    // Das Permit bleibt belegt und geht direkt an den ältesten Wartenden. So
+    // kann ein neuer Aufrufer nicht zwischen decrement und resolve überholen.
+    next.resolve();
+    return;
+  }
 }
 
 function ttlFor(url: URL): number {
   return url.hostname.endsWith("open-meteo.com") ? 600_000 : 900_000;
 }
 
-async function readLimited(res: Response, max: number): Promise<Uint8Array> {
+async function cancelResponseBody(res: Response): Promise<void> {
+  try { await res.body?.cancel(); } catch { /* best effort: der ursprüngliche Fehler bleibt maßgeblich */ }
+}
+
+async function readLimited(res: Response, max: number, signal?: AbortSignal): Promise<Uint8Array> {
   if (!res.body) return new Uint8Array();
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel();
-      throw new Error("Antwort zu groß");
+  const cancelOnAbort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  if (signal?.aborted) cancelOnAbort();
+  signal?.addEventListener("abort", cancelOnAbort, { once: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) {
+        try { await reader.cancel(); } catch { /* best effort */ }
+        throw new Error("Antwort zu groß");
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+    const out = new Uint8Array(size);
+    let off = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, off);
+      off += chunk.byteLength;
+    }
+    return out;
+  } finally {
+    signal?.removeEventListener("abort", cancelOnAbort);
+    reader.releaseLock();
   }
-  const out = new Uint8Array(size);
-  let off = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, off);
-    off += chunk.byteLength;
-  }
-  return out;
 }
 
-export async function proxyFetch(rawUrl: string, allowlist: string[], resolveAddress: LookupAddress = lookup): Promise<ProxyResult> {
-  await acquireSlot();
+type Deadline = { signal: AbortSignal; stop: () => void };
+
+function startDeadline(): Deadline {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROXY_DEADLINE_MS);
+  return { signal: controller.signal, stop: () => clearTimeout(timer) };
+}
+
+async function fetchUncached(
+  initialUrl: URL,
+  key: string,
+  allowlist: string[],
+  resolveAddress: LookupAddress,
+): Promise<ProxyResult> {
+  const deadline = startDeadline();
+  let acquired = false;
   try {
-    let url = new URL(rawUrl);
-    url.hash = "";
-    assertListed(url, allowlist);   // vor dem Cache, sonst wirkt das Streichen eines Hosts erst nach der TTL
-
-    const key = cacheKey(url);
-    const hit = cached(key);
-    if (hit) return hit;
-
+    await acquireSlot(deadline.signal);
+    acquired = true;
+    let url = initialUrl;
     let result: ProxyResult | undefined;
-    for (let redirects = 0; redirects <= 3 && !result; redirects++) {
-      const agent = pinnedAgent(await assertAllowed(url, allowlist, resolveAddress));   // jedes Ziel erneut prüfen
+    for (let redirects = 0; result === undefined; redirects += 1) {
+      const agent = pinnedAgent(await assertAllowed(url, allowlist, resolveAddress, deadline.signal));
       try {
-        const res = await undiciFetch(url, {
-          redirect: "manual",
-          signal: AbortSignal.timeout(5000),
-          dispatcher: agent,
-        });
+        let res: Response;
+        try {
+          res = await undiciFetch(url, {
+            redirect: "manual",
+            signal: deadline.signal,
+            dispatcher: agent,
+          });
+        } catch (error) {
+          if (deadline.signal.aborted) throw new ProxyTimeoutError();
+          throw error;
+        }
         const location = res.headers.get("location");
-        if (res.status >= 300 && res.status < 400 && location && redirects < 3) {
-          await res.body?.cancel();
+        if (res.status >= 300 && res.status < 400 && location) {
+          if (redirects >= 3) {
+            await cancelResponseBody(res);
+            throw new Error("Zu viele Weiterleitungen");
+          }
+          await cancelResponseBody(res);
           url = new URL(location, url);
           url.hash = "";
           continue;
@@ -174,23 +283,52 @@ export async function proxyFetch(rawUrl: string, allowlist: string[], resolveAdd
         const contentLength = res.headers.get("content-length");
         if (contentLength !== null) {
           const declaredLength = Number(contentLength);
-          if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) throw new Error("Ungültige Antwortgröße");
-          if (declaredLength > MAX_BYTES) throw new Error("Antwort zu groß");
+          if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) {
+            await cancelResponseBody(res);
+            throw new Error("Ungültige Antwortgröße");
+          }
+          if (declaredLength > MAX_BYTES) {
+            await cancelResponseBody(res);
+            throw new Error("Antwort zu groß");
+          }
         }
         result = {
           status: res.status,
           contentType: res.headers.get("content-type") ?? "application/octet-stream",
-          body: await readLimited(res, MAX_BYTES),   // muss vor agent.close() gelesen sein
+          body: await withAbort(
+            readLimited(res, MAX_BYTES, deadline.signal),
+            deadline.signal,
+          ),
         };
       } finally {
         await agent.close();
       }
     }
-    if (!result) throw new Error("Zu viele Weiterleitungen");
-
     if (result.status >= 200 && result.status < 300) remember(key, result, ttlFor(url));
     return result;
   } finally {
-    releaseSlot();
+    if (acquired) releaseSlot();
+    deadline.stop();
+  }
+}
+
+export async function proxyFetch(rawUrl: string, allowlist: string[], resolveAddress: LookupAddress = lookup): Promise<ProxyResult> {
+  const url = new URL(rawUrl);
+  url.hash = "";
+  assertListed(url, allowlist);   // vor dem Cache, sonst wirkt das Streichen eines Hosts erst nach der TTL
+
+  const key = cacheKey(url);
+  const hit = cached(key);
+  if (hit) return hit;
+
+  const running = inFlightRequests.get(key);
+  if (running !== undefined) return running;
+
+  const operation = fetchUncached(url, key, allowlist, resolveAddress);
+  inFlightRequests.set(key, operation);
+  try {
+    return await operation;
+  } finally {
+    if (inFlightRequests.get(key) === operation) inFlightRequests.delete(key);
   }
 }
