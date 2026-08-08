@@ -74,14 +74,16 @@ const cls = (level: Level) => LEVEL_CLASS[asLevel(level)];
 function Bar({ name, pct, level }: { name: string; pct: number; level: Level }) {
   const width = 13;
   const filled = Math.round((Math.max(0, Math.min(100, pct)) / 100) * width);
+  // Name, Wert, Balken — dieselbe Reihenfolge wie bei den Knotenwerten darüber. Vorher
+  // stand der Balken zwischen Name und Prozentzahl und damit anders herum als dort.
   return (
-    <span>
-      {name}{" "}
+    <span className="metric metric--store">
+      <span>{name}</span>
+      <span className={`val${cls(level)}`}>{pct} %</span>
       <span className="bar" aria-label={`${LEVEL_WORD[asLevel(level)]}${name} zu ${pct} Prozent belegt`}>
         <span className={`bar-on${cls(level)}`}>{"━".repeat(filled)}</span>
         <span className="bar-off">{"─".repeat(width - filled)}</span>
-      </span>{" "}
-      <span className={`dim${cls(level)}`}>{pct} %</span>
+      </span>
     </span>
   );
 }
@@ -133,32 +135,39 @@ export function Homelab({ data, selIndex, consoleUrl }: HomelabProps) {
       <div className="lab-node">
         <span className="metric">
           <span className="dim">cpu</span>
-          <span className={cls(n.cpuLevel).trim() || undefined}>{n.cpu} %</span>
+          <span className={`val${cls(n.cpuLevel)}`}>{n.cpu} %</span>
           <span className="spark" aria-label={`CPU-Auslastung der letzten 30 Minuten: ${n.cpuSpark.join(", ")} Prozent`}>
             {sparkline(n.cpuSpark)}
           </span>
         </span>
         <span className="metric">
           <span className="dim">mem</span>
-          <span className={cls(n.memLevel).trim() || undefined}>{n.mem} %</span>
+          <span className={`val${cls(n.memLevel)}`}>{n.mem} %</span>
           <span className="spark" aria-label={`Speicherauslastung der letzten 30 Minuten: ${n.memSpark.join(", ")} Prozent`}>
             {sparkline(n.memSpark)}
           </span>
         </span>
         <span className="metric">
           <span className="dim">root</span>
-          <span className={cls(n.rootLevel).trim() || undefined}>{n.root} %</span>
+          <span className={`val${cls(n.rootLevel)}`}>{n.root} %</span>
         </span>
-        <span className="metric"><span className="dim">up</span><span>{n.uptimeDays} d</span></span>
+        <span className="metric"><span className="dim">up</span><span className="val">{n.uptimeDays} d</span></span>
       </div>
       <div className="lab-store">
         {data.storage.map((s) => <Bar key={s.name} name={s.name} pct={s.pct} level={s.level} />)}
       </div>
       <table className="lab-guests">
         <thead>
-          <tr>
-            <th scope="col">Zustand</th><th scope="col">VMID</th><th scope="col">Name</th>
-            <th scope="col">Status</th><th scope="col">CPU</th><th scope="col">Speicher</th>
+          {/* Dieselbe Zeilenklasse wie ein Gast, damit die sechs Spalten übereinander
+              stehen. „Zustand" bleibt für Screenreader, sichtbar wäre das Wort über
+              einem einzelnen ● nur Ballast. */}
+          <tr className="guest guest--head">
+            <th scope="col"><span className="sr-only">Zustand</span></th>
+            <th scope="col" className="num">VMID</th>
+            <th scope="col">Name</th>
+            <th scope="col">Status</th>
+            <th scope="col" className="val">CPU</th>
+            <th scope="col" className="val">Mem</th>
           </tr>
         </thead>
         <tbody>

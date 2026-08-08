@@ -262,9 +262,28 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .cal-day.is-today { background: var(--color-bg-sel); color: var(--color-fg); }
 .cal-day.is-today.is-holiday { color: var(--color-accent); }
 
-.lab-node { display: flex; gap: 1.6rem; flex-wrap: wrap; }
-.lab-node .metric { display: flex; gap: .45rem; align-items: baseline; }
-.lab-store { margin-top: .35rem; display: flex; gap: 1.8rem; flex-wrap: wrap; color: var(--color-dim); }
+/* Kennzahlen und Speicherbalken liegen auf denselben Spalten. Vorher verteilte flex die
+   ungleich breiten Blöcke frei — 292/301/74/58 px —, sodass beide Zeilen an je eigenen,
+   zufälligen Positionen standen und kein gemeinsames Raster hatten. */
+/* 22rem, damit bei voller Fensterbreite genau vier Spuren entstehen: die vier Kennzahlen
+   des Knotens stehen dann in einer Zeile statt drei plus eine. */
+.lab-node, .lab-store {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: .1rem 1.6rem;
+}
+.lab-store { margin-top: .35rem; color: var(--color-dim); }
+/* Jede Zelle liest sich gleich: Name, Wert, Verlauf. Die Namensspalte ist beim Speicher
+   breiter, weil dort „backups-tank" steht und beim Knoten nur „cpu". */
+.metric { display: grid; grid-template-columns: 5.5ch 5.5ch minmax(0, 1fr);
+          gap: .6rem; align-items: baseline; }
+.metric--store { grid-template-columns: 13ch 5.5ch minmax(0, 1fr); }
+.metric .val { text-align: right; }
+/* Wird die Spur schmal, soll die Sparkline hinten abgeschnitten werden, statt in die
+   Nachbarspalte zu laufen — 30 Zeichen brauchen rund 237 px. */
+.metric > :last-child { overflow: hidden; }
+.metric--store > :first-child {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .bar { letter-spacing: 0; }
 .bar-on  { color: var(--color-accent); }
 .bar-off { color: var(--color-dim); }
@@ -276,8 +295,13 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
   margin-top: .6rem; display: grid; gap: 0 2.5rem;
   grid-template-columns: 1fr; justify-content: start;
 }
-@media (min-width: 760px)  { .lab-guests { grid-template-columns: repeat(2, max-content); } }
-@media (min-width: 1240px) { .lab-guests { grid-template-columns: repeat(3, max-content); } }
+/* Eine Gastzeile ist rund 380 px breit, der Spaltenabstand 40 px. Zwei Spalten brauchen
+   also 800 px plus Panepolsterung, drei brauchen 1220 — die Umschaltungen standen aber bei
+   760 und 1240 px. Dazwischen schob die Tabelle die ganze Seite auf und erzeugte einen
+   waagerechten Rollbalken. Die Spalten dürfen nicht schrumpfen: die Kopfzeile läuft über
+   alle Spuren und behielte ihre 18 Zeichen für den Namen, während die Gäste enger würden. */
+@media (min-width: 860px)  { .lab-guests { grid-template-columns: repeat(2, max-content); } }
+@media (min-width: 1280px) { .lab-guests { grid-template-columns: repeat(3, max-content); } }
 .guest { display: grid; grid-template-columns: 1.4ch 4ch minmax(0, 18ch) 4.5ch 5.5ch 5.5ch; gap: .5rem;
          padding: .05rem .4rem; margin: 0 -.4rem; }
 .guest .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -484,8 +508,18 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .set-foot .note { color: var(--color-dim); font-size: 12px; }
 .set-error { color: var(--color-crit); font-size: 13px; }
 
-/* Gästeliste als Tabelle: Kopfzeile nur für Screenreader sichtbar */
+/* Gästeliste als Tabelle. Die Kopfzeile war nur für Screenreader da — sichtbar stand in
+   „run 0 % 8 %" nirgends, dass die erste Prozentzahl die CPU meint und die zweite den
+   Speicher. Sie fließt jetzt als erste Zelle im Raster mit und trägt dieselben sechs
+   Spalten wie jede Gastzeile; bei mehreren Spalten steht sie einmal links oben. */
 table.lab-guests { border-collapse: collapse; }
-table.lab-guests thead { position: absolute; width: 1px; height: 1px; overflow: hidden;
-                         clip: rect(0 0 0 0); white-space: nowrap; }
-table.lab-guests tbody { display: contents; }
+table.lab-guests thead, table.lab-guests tbody { display: contents; }
+/* Über alle Spuren, sonst stünde der Kopf in derselben Zeile wie die ersten beiden
+   Gäste und läse sich wie ein Eintrag. Die sechs Spalten der Zeile behalten ihre festen
+   Breiten und decken sich deshalb mit denen der Gäste in der ersten Spur. */
+.guest--head { grid-column: 1 / -1; }
+.guest--head > th {
+  font-weight: 400; text-align: left; color: var(--color-dim); font-size: 12px;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.guest--head > th.num, .guest--head > th.val { text-align: right; }
