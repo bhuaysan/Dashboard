@@ -199,7 +199,25 @@ describe("/api/config", () => {
     const res = await putConfig(app, candidate, before.updatedAt);
     expect(res.status).toBe(200);
     const saved = (await res.json()) as Config;
-    expect(saved.proxyAllowlist).toEqual(["api.open-meteo.com"]);
+    expect(saved.proxyAllowlist[0]).toBe("api.open-meteo.com");
+  });
+
+  // Ein Feed einzutragen ist die Erlaubnis für seinen Host. Ohne diese Ergänzung müsste
+  // ihn jemand ein zweites Mal von Hand eintragen — und wer das vergisst, bekommt eine
+  // Quelle, die still fehlschlägt.
+  itWithApp("nimmt den Host eines neuen Feeds in die Allowlist auf", async ({ app }) => {
+    const before = await getConfig(app);
+    const candidate = {
+      ...before,
+      feeds: [...before.feeds, { label: "zt", url: "https://newsfeed.zeit.de/index", limit: 5 }],
+    };
+    const res = await putConfig(app, candidate, before.updatedAt);
+    expect(res.status).toBe(200);
+    const saved = (await res.json()) as Config;
+    expect(saved.proxyAllowlist).toContain("newsfeed.zeit.de");
+    // Die von Hand gepflegten Einträge bleiben, wo sie waren.
+    expect(saved.proxyAllowlist.slice(0, before.proxyAllowlist.length))
+      .toEqual(before.proxyAllowlist);
   });
 
   itWithApp("weist einen zu großen JSON-Body mit 413 ab", async ({ app }) => {

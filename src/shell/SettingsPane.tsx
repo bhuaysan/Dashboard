@@ -764,7 +764,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
 
             {sec === "proxy" && (
               <section>
-                <p className="set-hint">Nur diese Hosts darf der Server abrufen. Private Adressen sind grundsätzlich gesperrt und lassen sich hier nicht freigeben.</p>
+                <p className="set-hint">Nur diese Hosts darf der Server abrufen. Private Adressen sind grundsätzlich gesperrt und lassen sich hier nicht freigeben. Die Hosts eingetragener Feeds und Kalender kommen beim Speichern von selbst dazu — gelöscht bleiben sie deshalb nur, wenn auch die Quelle geht.</p>
                 <div className="tbl tbl--hosts">
                   {draft.proxyAllowlist.map((h, i) => (
                     <div className="tbl-row" key={i}>

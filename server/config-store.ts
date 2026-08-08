@@ -3,6 +3,7 @@ import { copyFile, readFile, rename, stat, unlink, writeFile } from "node:fs/pro
 import type { ZodIssue } from "zod";
 import { configSchema, PANE_IDS, type Config } from "../src/config/schema.ts";
 import { defaultConfig } from "../src/config/defaults.ts";
+import { withRequiredProxyHosts } from "../src/config/proxyHosts.ts";
 import { env } from "./env.ts";
 
 const KEEP_BACKUPS = 7;
@@ -134,7 +135,9 @@ export function createConfigStore(configPath: string): ConfigStore {
         parsed.data.layout.push(entry);
       }
     }
-    return parsed.data;
+    // Auch beim Lesen, nicht nur beim Schreiben: eine von Hand bearbeitete config.json
+    // soll ihre Quellen laden können, ohne dass erst jemand einmal speichern muss.
+    return withRequiredProxyHosts(parsed.data);
   }
 
   // Alle Schreibvorgänge dieses Stores laufen durch dieselbe Promise-Queue. Das ist auch
@@ -203,8 +206,12 @@ export function createConfigStore(configPath: string): ConfigStore {
         return { kind: "invalid", issues: parsed.error.issues };
       }
 
-      await writeConfigUnlocked(parsed.data);
-      return { kind: "ok", config: parsed.data };
+      // Ein neu eingetragener Feed bringt seinen Host mit. Ohne das hier müsste ihn
+      // jemand ein zweites Mal von Hand in die Allowlist schreiben — und wer das
+      // vergisst, bekommt eine Quelle, die still fehlschlägt.
+      const config = withRequiredProxyHosts(parsed.data);
+      await writeConfigUnlocked(config);
+      return { kind: "ok", config };
     });
   }
 
