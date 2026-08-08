@@ -6,7 +6,7 @@ const allow = ["api.open-meteo.com", "localhost", "169.254.169.254"];
 describe("assertAllowed", () => {
   it("lässt erlaubte Hosts durch und liefert die geprüfte Adresse", async () => {
     await expect(
-      assertAllowed(new URL("https://api.open-meteo.com/v1/forecast"), allow),
+      assertAllowed(new URL("https://api.open-meteo.com/v1/forecast"), allow, async () => ({ address: "93.184.216.34" })),
     ).resolves.toMatch(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/);
   });
 

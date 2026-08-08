@@ -12,6 +12,7 @@ if ! command -v node >/dev/null; then
 fi
 id dashboard &>/dev/null || useradd -r -s /usr/sbin/nologin -d /opt/dashboard dashboard
 mkdir -p /opt/dashboard
+mkdir -p /opt/dashboard/static
 chown dashboard:dashboard /opt/dashboard
 REMOTE
 

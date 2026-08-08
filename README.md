@@ -29,8 +29,13 @@ Der Dienst läuft als `dashboard.service` (systemd) auf Port 80.
 Liegt nur auf dem Server (`/opt/dashboard/config.json`), ist die einzige Quelle der Wahrheit und
 enthält keine Secrets. Aufbau: `src/config/schema.ts` (Zod). `GET /api/config` ist offen im LAN,
 `PUT` verlangt `If-Match: <updatedAt>` (409 bei Konflikt) und eine Adresse aus
-`DASHBOARD_WRITE_ALLOW`. Kaputte Dateien landen als `config.json.bak`, es wird auf die Defaults
+`DASHBOARD_WRITE_ALLOW`; zusätzlich müssen Browser-Schreibzugriffe über einen erlaubten Host aus
+`DASHBOARD_WRITE_HOSTS` kommen. Kaputte Dateien landen als `config.json.bak`, es wird auf die Defaults
 zurückgefallen (`src/config/defaults.ts`). Export/Import geht auch über `:export` / `:import`.
+
+Lokale Kalender werden als `/static/name.ics` eingetragen. Sie liegen im separaten Verzeichnis aus
+`DASHBOARD_STATIC` (Standard: `./static`), nicht unter `dist/` und werden deshalb nicht durch das
+Deployment gelöscht. Fehlende oder unsichere Static-Pfade liefern 404.
 
 Jedes Speichern hebt den vorherigen Stand auf: `config.json.1` ist der jüngste, `config.json.7`
 der älteste. Einen davon zurückholen:
@@ -43,7 +48,7 @@ ssh root@10.0.10.20 'cd /opt/dashboard && cp config.json.1 config.json && chown 
 
 Nur auf dem Server, `chmod 600`, nicht in Git. Variablen siehe `.env.example`:
 `PVE_URL`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_PATH`, `PORT`, `DASHBOARD_CONFIG`,
-`DASHBOARD_WRITE_ALLOW`. Leeres `PVE_TOKEN_SECRET` schaltet die Homelab-Pane ab
+`DASHBOARD_WRITE_ALLOW`, `DASHBOARD_WRITE_HOSTS` und `DASHBOARD_STATIC`. Leeres `PVE_TOKEN_SECRET` schaltet die Homelab-Pane ab
 („nicht konfiguriert"), der Rest läuft weiter.
 
 ### Proxmox-Token erneuern

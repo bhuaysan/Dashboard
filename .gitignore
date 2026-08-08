@@ -17,6 +17,7 @@ dist-ssr
 config.json
 config.json.*
 pve-ca.pem
+static/*
 
 # Editor directories and files
 .vscode/*

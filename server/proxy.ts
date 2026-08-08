@@ -24,10 +24,12 @@ export function assertListed(url: URL, allowlist: string[]): void {
   if (!allowlist.includes(url.hostname)) throw new Error("Host nicht erlaubt");
 }
 
+export type LookupAddress = (hostname: string, options: { family: 4 }) => Promise<{ address: string }>;
+
 // Liefert die geprüfte Adresse zurück, damit genau zu ihr verbunden wird.
-export async function assertAllowed(url: URL, allowlist: string[]): Promise<string> {
+export async function assertAllowed(url: URL, allowlist: string[], resolveAddress: LookupAddress = lookup): Promise<string> {
   assertListed(url, allowlist);
-  const { address } = await lookup(url.hostname, { family: 4 });
+  const { address } = await resolveAddress(url.hostname, { family: 4 });
   if (isBlockedIp(address)) throw new Error("Private Adresse");
   return address;
 }
@@ -44,13 +46,74 @@ export type ProxyResult = { status: number; contentType: string; body: Uint8Arra
 type CacheEntry = ProxyResult & { t: number; ttl: number };
 
 const cache = new Map<string, CacheEntry>();
+let cacheBytes = 0;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_ENTRIES = 64;
+export const MAX_CACHE_BYTES = 16 * 1024 * 1024;
+const MAX_IN_FLIGHT = 8;
+let inFlight = 0;
+const waiters: Array<() => void> = [];
+
+function cacheKey(url: URL): string {
+  const normalized = new URL(url);
+  normalized.hash = "";
+  return normalized.toString();
+}
+
+function removeCacheEntry(key: string): void {
+  const entry = cache.get(key);
+  if (!entry) return;
+  cacheBytes -= entry.body.byteLength;
+  cache.delete(key);
+}
 
 function remember(key: string, result: ProxyResult, ttl: number): void {
-  const oldest = cache.size >= MAX_ENTRIES ? cache.keys().next().value : undefined;
-  if (oldest !== undefined) cache.delete(oldest);   // Map behält die Einfügereihenfolge
+  if (result.body.byteLength > MAX_CACHE_BYTES) return;
+  removeCacheEntry(key);
+  while (cache.size >= MAX_ENTRIES || cacheBytes + result.body.byteLength > MAX_CACHE_BYTES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    removeCacheEntry(oldest);   // Map-Reihenfolge entspricht der LRU-Reihenfolge.
+  }
   cache.set(key, { ...result, t: Date.now(), ttl });
+  cacheBytes += result.body.byteLength;
+}
+
+function cached(key: string): ProxyResult | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.t >= entry.ttl) {
+    removeCacheEntry(key);
+    return undefined;
+  }
+  // Zugriff macht den Eintrag zum jüngsten LRU-Element.
+  cache.delete(key);
+  cache.set(key, entry);
+  return entry;
+}
+
+export function clearProxyCache(): void {
+  cache.clear();
+  cacheBytes = 0;
+}
+
+export function proxyCacheSize(): { entries: number; bytes: number } {
+  return { entries: cache.size, bytes: cacheBytes };
+}
+
+async function acquireSlot(): Promise<void> {
+  if (inFlight < MAX_IN_FLIGHT) {
+    inFlight += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => waiters.push(resolve));
+  inFlight += 1;
+}
+
+function releaseSlot(): void {
+  inFlight -= 1;
+  const next = waiters.shift();
+  next?.();
 }
 
 function ttlFor(url: URL): number {
@@ -81,39 +144,53 @@ async function readLimited(res: Response, max: number): Promise<Uint8Array> {
   return out;
 }
 
-export async function proxyFetch(rawUrl: string, allowlist: string[]): Promise<ProxyResult> {
-  let url = new URL(rawUrl);
-  assertListed(url, allowlist);   // vor dem Cache, sonst wirkt das Streichen eines Hosts erst nach der TTL
+export async function proxyFetch(rawUrl: string, allowlist: string[], resolveAddress: LookupAddress = lookup): Promise<ProxyResult> {
+  await acquireSlot();
+  try {
+    let url = new URL(rawUrl);
+    url.hash = "";
+    assertListed(url, allowlist);   // vor dem Cache, sonst wirkt das Streichen eines Hosts erst nach der TTL
 
-  const cached = cache.get(rawUrl);
-  if (cached && Date.now() - cached.t < cached.ttl) return cached;
+    const key = cacheKey(url);
+    const hit = cached(key);
+    if (hit) return hit;
 
-  let result: ProxyResult | undefined;
-  for (let redirects = 0; redirects <= 3 && !result; redirects++) {
-    const agent = pinnedAgent(await assertAllowed(url, allowlist));   // jedes Ziel erneut prüfen
-    try {
-      const res = await undiciFetch(url, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(5000),
-        dispatcher: agent,
-      });
-      const location = res.headers.get("location");
-      if (res.status >= 300 && res.status < 400 && location && redirects < 3) {
-        await res.body?.cancel();
-        url = new URL(location, url);
-        continue;
+    let result: ProxyResult | undefined;
+    for (let redirects = 0; redirects <= 3 && !result; redirects++) {
+      const agent = pinnedAgent(await assertAllowed(url, allowlist, resolveAddress));   // jedes Ziel erneut prüfen
+      try {
+        const res = await undiciFetch(url, {
+          redirect: "manual",
+          signal: AbortSignal.timeout(5000),
+          dispatcher: agent,
+        });
+        const location = res.headers.get("location");
+        if (res.status >= 300 && res.status < 400 && location && redirects < 3) {
+          await res.body?.cancel();
+          url = new URL(location, url);
+          url.hash = "";
+          continue;
+        }
+        const contentLength = res.headers.get("content-length");
+        if (contentLength !== null) {
+          const declaredLength = Number(contentLength);
+          if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) throw new Error("Ungültige Antwortgröße");
+          if (declaredLength > MAX_BYTES) throw new Error("Antwort zu groß");
+        }
+        result = {
+          status: res.status,
+          contentType: res.headers.get("content-type") ?? "application/octet-stream",
+          body: await readLimited(res, MAX_BYTES),   // muss vor agent.close() gelesen sein
+        };
+      } finally {
+        await agent.close();
       }
-      result = {
-        status: res.status,
-        contentType: res.headers.get("content-type") ?? "application/octet-stream",
-        body: await readLimited(res, MAX_BYTES),   // muss vor agent.close() gelesen sein
-      };
-    } finally {
-      await agent.close();
     }
-  }
-  if (!result) throw new Error("Zu viele Weiterleitungen");
+    if (!result) throw new Error("Zu viele Weiterleitungen");
 
-  if (result.status >= 200 && result.status < 300) remember(rawUrl, result, ttlFor(url));
-  return result;
+    if (result.status >= 200 && result.status < 300) remember(key, result, ttlFor(url));
+    return result;
+  } finally {
+    releaseSlot();
+  }
 }

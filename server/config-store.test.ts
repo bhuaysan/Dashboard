@@ -50,6 +50,11 @@ describe("readConfig", () => {
     expect(cfg.layout.map((l) => l.id)).not.toContain("music");
     expect(cfg.linkGroups).toEqual(defaultConfig.linkGroups);   // Rest der Config bleibt erhalten
   });
+
+  it("liest eine übergroße Config nicht vollständig ein", async () => {
+    await writeFile(configPath, Buffer.alloc(store.MAX_CONFIG_BYTES + 1, 120));
+    await expect(store.readConfig()).rejects.toThrow("Config-Datei ist zu groß");
+  });
 });
 
 describe("writeConfig", () => {

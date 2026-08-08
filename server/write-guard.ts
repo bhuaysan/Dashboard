@@ -22,8 +22,50 @@ export function ipAllowed(addr: string, allow: string[]): boolean {
   });
 }
 
+function hostnameFromHeader(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "" || /[\u0000-\u0020]/.test(trimmed)) return undefined;
+  try {
+    const parsed = new URL(`http://${trimmed}`);
+    if (parsed.username !== "" || parsed.password !== "" || parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+      return undefined;
+    }
+    return parsed.hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+export function hostAllowed(host: string, allow: string[]): boolean {
+  const actual = hostnameFromHeader(host);
+  if (actual === undefined) return false;
+  return allow.some((entry) => hostnameFromHeader(entry) === actual);
+}
+
+export function originAllowed(origin: string, requestHost: string | undefined, allow: string[]): boolean {
+  if (origin === "null") return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") return false;
+  if (parsed.username !== "" || parsed.password !== "" || !hostAllowed(parsed.host, allow)) return false;
+  return requestHost === undefined || hostnameFromHeader(requestHost) === hostnameFromHeader(parsed.host);
+}
+
 export const writeGuard: MiddlewareHandler = async (c, next) => {
   if (c.req.method !== "PUT" && c.req.method !== "DELETE") return next();
+  const requestHost = c.req.header("host");
+  if (requestHost !== undefined && !hostAllowed(requestHost, env.writeHosts)) {
+    return c.json({ error: "Host für Schreibzugriff nicht erlaubt" }, 403);
+  }
+  const origin = c.req.header("origin");
+  if (origin !== undefined && !originAllowed(origin, requestHost, env.writeHosts)) {
+    return c.json({ error: "Origin für Schreibzugriff nicht erlaubt" }, 403);
+  }
   let addr: string | undefined;
   try {
     addr = getConnInfo(c).remote.address;

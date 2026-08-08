@@ -1,17 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { copyFile, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import type { ZodIssue } from "zod";
-import { configSchema, type Config } from "../src/config/schema.ts";
+import { configSchema, PANE_IDS, type Config } from "../src/config/schema.ts";
 import { defaultConfig } from "../src/config/defaults.ts";
 import { env } from "./env.ts";
 
 const configPath = env.configPath;
 const KEEP_BACKUPS = 7;
+export const MAX_CONFIG_BYTES = 512 * 1024;
 
 // Panes, die das Schema nicht mehr kennt (z. B. "music" nach dessen Entfernung), lässt das
 // enum in configSchema sonst am ganzen layout-Array scheitern — nicht nur an dem einen
 // veralteten Eintrag. Deshalb hier herausfiltern, bevor die Live-Config überhaupt geparst wird.
-const KNOWN_PANE_IDS = new Set<string>(configSchema.shape.layout.element.shape.id.options);
+const KNOWN_PANE_IDS = new Set<string>(PANE_IDS);
 
 type RecordValue = Record<string, unknown>;
 
@@ -53,6 +54,9 @@ async function preserveBrokenConfig(): Promise<void> {
 }
 
 export async function writeAtomic(path: string, data: string): Promise<void> {
+  if (Buffer.byteLength(data, "utf8") > MAX_CONFIG_BYTES) {
+    throw new ConfigStoreError("Config-Datei ist zu groß");
+  }
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
   let renamed = false;
   try {
@@ -67,12 +71,26 @@ export async function writeAtomic(path: string, data: string): Promise<void> {
 }
 
 async function readConfigUnlocked(): Promise<Config> {
+  try {
+    const info = await stat(configPath);
+    if (info.size > MAX_CONFIG_BYTES) {
+      throw new ConfigStoreError("Config-Datei ist zu groß");
+    }
+  } catch (error) {
+    if (isMissing(error)) return defaultConfig;
+    if (error instanceof ConfigStoreError) throw error;
+    throw describeStoreError("Config-Datei nicht lesbar", error);
+  }
+
   let text: string;
   try {
     text = await readFile(configPath, "utf8");
   } catch (error) {
     if (isMissing(error)) return defaultConfig;
     throw describeStoreError("Config-Datei nicht lesbar", error);
+  }
+  if (Buffer.byteLength(text, "utf8") > MAX_CONFIG_BYTES) {
+    throw new ConfigStoreError("Config-Datei ist zu groß");
   }
 
   let raw: unknown;

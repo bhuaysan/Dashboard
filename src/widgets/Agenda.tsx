@@ -1,4 +1,4 @@
-import type { Config } from "../config/schema";
+import { isSafeLocalCalendarPath, type Config } from "../config/schema";
 import { parseIcs, type CalEvent } from "../lib/ics";
 
 export type { CalEvent };
@@ -18,7 +18,7 @@ export async function fetchEvents(cals: Config["calendars"], to: Date): Promise<
   let failed = 0;
   await Promise.all(cals.map(async (cal) => {
     try {
-      const url = cal.url.startsWith("/")
+      const url = isSafeLocalCalendarPath(cal.url)
         ? cal.url
         : `/api/proxy?url=${encodeURIComponent(cal.url)}`;
       const res = await fetch(url);

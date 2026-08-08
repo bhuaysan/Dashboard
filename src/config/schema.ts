@@ -6,49 +6,177 @@ import { z } from "zod";
 export const PANE_IDS = ["clock", "weather", "month", "links", "news", "agenda", "homelab"] as const;
 export type PaneId = (typeof PANE_IDS)[number];
 
-export const configSchema = z.object({
+const MAX_URL_LENGTH = 2048;
+const MAX_TEXT_LENGTH = 256;
+
+function text(max: number): z.ZodType<string> {
+  return z.string()
+    .min(1)
+    .max(max)
+    .refine((value) => value.trim().length > 0, "Darf nicht leer sein")
+    .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "Enthält ein Steuerzeichen");
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") &&
+      url.username === "" && url.password === "";
+  } catch {
+    return false;
+  }
+}
+
+function isSearchTemplate(value: string): boolean {
+  const matches = value.match(/%s/g);
+  return matches?.length === 1 && isHttpUrl(value.replace("%s", "dashboard"));
+}
+
+function isTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("de-DE", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Lokale Kalender dürfen ausschließlich aus dem erhaltenen Static-Root kommen. */
+export function isSafeLocalCalendarPath(value: string): boolean {
+  if (!value.startsWith("/static/") || value.startsWith("//") || value.includes("\\") || value.includes("\u0000")) {
+    return false;
+  }
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return false;
+  }
+  if (decoded !== value || decoded.includes("//")) return false;
+  const parts = decoded.split("/");
+  const filename = parts.at(-1);
+  return parts[0] === "" && parts[1] === "static" &&
+    parts.slice(2).every((part) => part !== "" && part !== "." && part !== "..") &&
+    filename?.toLowerCase().endsWith(".ics") === true;
+}
+
+function isCalendarUrl(value: string): boolean {
+  return isSafeLocalCalendarPath(value) || isHttpUrl(value);
+}
+
+function isHostname(value: string): boolean {
+  if (value !== value.trim() || value.includes("\\") || value.includes("/") || value.includes(":")) return false;
+  try {
+    const url = new URL(`https://${value}`);
+    return url.hostname === value.toLowerCase() && url.pathname === "/" && url.search === "" && url.hash === "";
+  } catch {
+    return false;
+  }
+}
+
+const isoDateTime = z.string().datetime({ offset: true });
+const httpUrl = text(MAX_URL_LENGTH).refine(isHttpUrl, "Keine gültige Adresse (muss mit http:// oder https:// beginnen)");
+const searchTemplate = text(MAX_URL_LENGTH).refine(isSearchTemplate, "Muss genau ein %s und eine HTTP(S)-Adresse enthalten");
+const hostname = text(253).refine(isHostname, "Ungültiger Hostname");
+const timezone = text(100).refine(isTimezone, "Ungültige Zeitzone");
+const percent = z.number().finite().min(0).max(100);
+const port = z.number().int().min(1).max(65535);
+const paneId = z.enum(PANE_IDS);
+
+const linkSchema = z.object({
+  label: text(MAX_TEXT_LENGTH),
+  url: httpUrl,
+  hint: z.string().regex(/^[A-Za-z0-9]{1,2}$/).optional(),
+});
+
+const layoutSchema = z.array(z.object({
+  id: paneId,
+  visible: z.boolean(),
+  span: z.union([z.literal(1), z.literal(2)]),
+})).max(PANE_IDS.length).superRefine((layout, ctx) => {
+  const seen = new Set<PaneId>();
+  layout.forEach((entry, index) => {
+    if (seen.has(entry.id)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [index, "id"], message: "Pane darf nur einmal vorkommen" });
+    }
+    seen.add(entry.id);
+  });
+});
+
+const baseConfigSchema = z.object({
   version: z.literal(1),
-  updatedAt: z.string(),                       // ISO-8601, wird vom Server gesetzt
+  updatedAt: isoDateTime,                  // ISO-8601, wird vom Server gesetzt
   theme: z.enum(["dark", "light", "system"]).default("system"),
   clock: z.object({
-    secondary: z.array(z.object({ label: z.string(), tz: z.string() })).default([]),
+    secondary: z.array(z.object({ label: text(MAX_TEXT_LENGTH), tz: timezone })).max(8).default([]),
   }),
-  location: z.object({ label: z.string(), lat: z.number(), lon: z.number() }),
+  location: z.object({
+    label: text(MAX_TEXT_LENGTH),
+    lat: z.number().finite().min(-90).max(90),
+    lon: z.number().finite().min(-180).max(180),
+  }),
   linkGroups: z.array(z.object({
-    title: z.string(),
-    links: z.array(z.object({
-      label: z.string(),
-      url: z.string().url(),
-      hint: z.string().max(2).optional(),
-    })),
-  })),
+    title: text(MAX_TEXT_LENGTH),
+    links: z.array(linkSchema).max(100),
+  })).max(32),
   feeds: z.array(z.object({
-    label: z.string(), url: z.string().url(), limit: z.number().int().min(1).default(5),
-  })),
-  calendars: z.array(z.object({ label: z.string(), url: z.string() })),
+    label: text(MAX_TEXT_LENGTH),
+    url: httpUrl,
+    limit: z.number().int().min(1).max(50).default(5),
+  })).max(32),
+  calendars: z.array(z.object({
+    label: text(MAX_TEXT_LENGTH),
+    url: text(MAX_URL_LENGTH).refine(isCalendarUrl, "Nur ein sicherer /static/*.ics-Pfad oder HTTP(S) ist erlaubt"),
+  })).max(32),
   search: z.object({
-    default: z.string(),                       // "https://duckduckgo.com/?q=%s"
-    bangs: z.record(z.string()),               // { "g": "https://www.google.com/search?q=%s" }
+    default: searchTemplate,
+    bangs: z.record(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/), searchTemplate).refine(
+      (bangs) => Object.keys(bangs).length <= 64,
+      "Zu viele Suchkürzel",
+    ),
   }),
-  layout: z.array(z.object({
-    id: z.enum(PANE_IDS),
-    visible: z.boolean(),
-    span: z.union([z.literal(1), z.literal(2)]),
-  })),
-  proxyAllowlist: z.array(z.string()),         // Hostnamen, z.B. "api.open-meteo.com"
+  layout: layoutSchema,
+  proxyAllowlist: z.array(hostname).max(128),
   homelab: z.object({
-    node: z.string().default("pve"),
-    uiUrl: z.string().default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links
-
-    expectRunning: z.array(z.number().int()).default([]),   // VMIDs, die laufen sollen
+    node: text(64).default("pve"),
+    uiUrl: httpUrl.default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links
+    expectRunning: z.array(z.number().int().positive().max(999999)).max(128).default([]),
     thresholds: z.object({
-      cpu: z.number().default(90), mem: z.number().default(85),
-      storage: z.number().default(80), backupAgeHours: z.number().default(36),
+      cpu: percent.default(90),
+      mem: percent.default(85),
+      storage: percent.default(80),
+      backupAgeHours: z.number().finite().positive().max(8760).default(36),
     }),
     reachability: z.array(z.object({
-      label: z.string(), host: z.string(), port: z.number().int(),
-    })).default([]),
+      label: text(MAX_TEXT_LENGTH),
+      host: hostname,
+      port,
+    })).max(64).default([]),
   }),
+});
+
+export const configSchema = baseConfigSchema.superRefine((config, ctx) => {
+  const vmids = new Set<number>();
+  config.homelab.expectRunning.forEach((vmid, index) => {
+    if (vmids.has(vmid)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["homelab", "expectRunning", index], message: "VMID darf nur einmal vorkommen" });
+    }
+    vmids.add(vmid);
+  });
+
+  const hints = new Set<string>();
+  config.linkGroups.forEach((group, groupIndex) => {
+    group.links.forEach((link, linkIndex) => {
+      if (link.hint && hints.has(link.hint)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["linkGroups", groupIndex, "links", linkIndex, "hint"],
+          message: "Kürzel darf nur einmal vorkommen",
+        });
+      }
+      if (link.hint) hints.add(link.hint);
+    });
+  });
 });
 
 export type Config = z.infer<typeof configSchema>;

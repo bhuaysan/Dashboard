@@ -6,13 +6,21 @@ import type { Config } from "../src/config/schema";
 
 let app: typeof import("./index.ts").app;
 let inertProxyResponse: typeof import("./index.ts").inertProxyResponse;
+let readJsonBody: typeof import("./index.ts").readJsonBody;
 let configPath: string;
+let staticPath: string;
 
 beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), "dashboard-api-"));
   configPath = join(dir, "config.json");
+  staticPath = join(dir, "static");
+  await mkdir(staticPath);
+  await writeFile(join(staticPath, "arbeit.ics"), "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
   process.env.DASHBOARD_CONFIG = configPath;
-  ({ app, inertProxyResponse } = await import("./index.ts"));
+  process.env.DASHBOARD_STATIC = staticPath;
+  process.env.DASHBOARD_WRITE_ALLOW = "127.0.0.1";
+  process.env.DASHBOARD_WRITE_HOSTS = "start.home.arpa,10.0.10.20,localhost,127.0.0.1";
+  ({ app, inertProxyResponse, readJsonBody } = await import("./index.ts"));
 });
 
 async function getConfig(): Promise<Config> {
@@ -27,12 +35,12 @@ function connInfo(address: string) {
   return { incoming: { socket: { remoteAddress: address, remotePort: 51234, remoteFamily: "IPv4" } } };
 }
 
-function putConfig(cfg: Config, ifMatch: string, from = "127.0.0.1") {
+function putConfig(cfg: Config, ifMatch: string, from = "127.0.0.1", extraHeaders: Record<string, string> = {}) {
   return app.request(
     "/api/config",
     {
       method: "PUT",
-      headers: { "content-type": "application/json", "If-Match": ifMatch },
+      headers: { "content-type": "application/json", "If-Match": ifMatch, ...extraHeaders },
       body: JSON.stringify(cfg),
     },
     connInfo(from),
@@ -123,6 +131,28 @@ describe("/api/config", () => {
     expect(res.status).toBe(403);
   });
 
+  it("prüft Host und Origin zusätzlich zur Absenderadresse", async () => {
+    const before = await getConfig();
+    const foreignHost = await putConfig(before, before.updatedAt, "127.0.0.1", { host: "evil.example" });
+    expect(foreignHost.status).toBe(403);
+    const foreignOrigin = await putConfig(before, before.updatedAt, "127.0.0.1", {
+      host: "start.home.arpa",
+      origin: "http://evil.example",
+    });
+    expect(foreignOrigin.status).toBe(403);
+  });
+
+  it("weist einen zu großen JSON-Body mit 413 ab", async () => {
+    const before = await getConfig();
+    const padding = "x".repeat(600 * 1024);
+    const res = await app.request("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json", "If-Match": before.updatedAt },
+      body: JSON.stringify({ padding }),
+    }, connInfo("127.0.0.1"));
+    expect(res.status).toBe(413);
+  });
+
   it("liefert bei einem nicht sicherbaren Config-Backup 503", async () => {
     await rm(`${configPath}.bak`, { force: true, recursive: true });
     await writeFile(configPath, "{");
@@ -184,5 +214,38 @@ describe("/api/proxy", () => {
     );
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "Host nicht erlaubt" });
+  });
+});
+
+describe("Static- und Fallback-Routen", () => {
+  it("liefert lokale ICS-Dateien aus dem separaten Static-Root", async () => {
+    const res = await app.request("/static/arbeit.ics");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("BEGIN:VCALENDAR");
+  });
+
+  it("liefert für fehlende Static-Dateien und unbekannte APIs 404 statt SPA-HTML", async () => {
+    const missing = await app.request("/static/fehlt.ics");
+    expect(missing.status).toBe(404);
+    expect((missing.headers.get("content-type") ?? "").toLowerCase()).toContain("application/json");
+
+    const unknownApi = await app.request("/api/gibt-es-nicht");
+    expect(unknownApi.status).toBe(404);
+    expect((unknownApi.headers.get("content-type") ?? "").toLowerCase()).toContain("application/json");
+  });
+
+  it("weist Traversal im Static-Pfad ab", async () => {
+    const res = await app.request("/static/%2e%2e/config.json");
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("readJsonBody", () => {
+  it("begrenzt auch einen chunked Body ohne Content-Length", async () => {
+    const request = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({ padding: "x".repeat(600 * 1024) }),
+    });
+    await expect(readJsonBody(request, 512 * 1024)).resolves.toEqual({ kind: "too-large" });
   });
 });
