@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildHomelab, type PveRaw } from "./pve.ts";
+import { z } from "zod";
+import { buildHomelab, parsePveEnvelope, type PveRaw } from "./pve.ts";
 import { defaultConfig } from "../src/config/defaults";
 
 const cfg = { ...defaultConfig.homelab, expectRunning: [100, 110] };
@@ -37,6 +38,27 @@ describe("buildHomelab · expectRunning", () => {
   it("gestoppter Gast außerhalb von expectRunning erzeugt keine Zeile", () => {
     const d = buildHomelab(raw({ resources: [guest(108, "stopped")] }), cfg, NOW);
     expect(d.alerts.filter((a) => a.text.includes("läuft nicht"))).toHaveLength(0);
+  });
+
+  it("meldet einen erwarteten, vollständig fehlenden Gast", () => {
+    const d = buildHomelab(raw({ resources: [guest(110, "running")] }), cfg, NOW);
+    expect(d.alerts).toContainEqual({ level: "crit", text: "gast vmid 100 nicht gefunden" });
+  });
+});
+
+describe("PVE-Antworten", () => {
+  const finiteValue = z.number().finite();
+
+  it("weist malformed 200-Umschläge vor der Auswertung ab", () => {
+    expect(() => parsePveEnvelope({ data: {} }, "/nodes/pve/status", z.object({ value: finiteValue })))
+      .toThrow("PVE /nodes/pve/status: ungültige Daten");
+    expect(() => parsePveEnvelope({ nope: true }, "/nodes/pve/status", z.object({ value: finiteValue })))
+      .toThrow("PVE /nodes/pve/status: ungültige Antwort");
+  });
+
+  it("gibt keine NaN-Werte aus einem synthetischen PVE-Feld weiter", () => {
+    expect(() => parsePveEnvelope({ data: { value: Number.NaN } }, "/nodes/pve/status", z.object({ value: finiteValue })))
+      .toThrow("PVE /nodes/pve/status: ungültige Daten");
   });
 });
 
@@ -80,6 +102,14 @@ describe("buildHomelab · Backups", () => {
       ],
     }), cfg, NOW);
     expect(d.alerts).toContainEqual({ level: "crit", text: "backup gast-100 fehlgeschlagen vor 3 h" });
+  });
+
+  it("zeigt einen Job ohne positive Gast-ID nicht als vmid 0 an", () => {
+    const d = buildHomelab(raw({
+      tasks: [{ id: "0", starttime: 1, endtime: (NOW.getTime() - 3 * H) / 1000, status: "FAILED" }],
+    }), cfg, NOW);
+    expect(d.alerts.some((alert) => alert.text.includes("vmid 0"))).toBe(false);
+    expect(d.alerts.some((alert) => alert.text.startsWith("backup"))).toBe(false);
   });
 });
 
@@ -147,9 +177,9 @@ describe("buildHomelab · Pegel", () => {
 
   it("alarmiert nicht bei hoher CPU — ein Messwert ist keine Last", () => {
     const d = buildHomelab(raw({
-      resources: [guest(101, "running", { cpu: 0.99 })],
+      resources: [guest(100, "running"), guest(101, "running", { cpu: 0.99 }), guest(110, "running")],
     }), cfg, NOW);
-    expect(d.guests[0]?.cpuLevel).toBe("crit");
+    expect(d.guests.find((guest) => guest.vmid === 101)?.cpuLevel).toBe("crit");
     expect(d.alerts).toHaveLength(1);   // nur die leere vzdump-Liste
   });
 

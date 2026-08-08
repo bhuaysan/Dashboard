@@ -46,12 +46,28 @@ describe("useCachedQuery", () => {
     ["alte Version", { version: 0, t: Date.now(), data: [] }],
     ["fehlende Daten", { version: 1, t: Date.now(), data: {} }],
     ["ungültiger Zeitstempel", { version: 1, t: "gestern", data: [] }],
+    ["negativer Zeitstempel", { version: 1, t: -1, data: [] }],
   ])("verwirft %s aus dem Cache", async (label, entry) => {
     const key = `invalid-${label.replaceAll(" ", "-")}`;
     localStorage.setItem(`dashboard:cache:${key}`, JSON.stringify(entry));
     const { result } = renderHook(
       () => useCachedQuery<Item[]>(key, async () => [{ title: "neu", date: new Date() }], 60_000, {
         decode: () => undefined,
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.data?.[0]?.title).toBe("neu"));
+    expect(localStorage.getItem(`dashboard:cache:${key}`)).toContain('"version":1');
+  });
+
+  it("behandelt einen werfenden Decoder wie einen ungültigen Cache", async () => {
+    const key = "decoder-wirft";
+    localStorage.setItem(`dashboard:cache:${key}`, JSON.stringify({
+      version: 1, t: Date.now(), data: { alt: true },
+    }));
+    const { result } = renderHook(
+      () => useCachedQuery<Item[]>(key, async () => [{ title: "neu", date: new Date() }], 60_000, {
+        decode: () => { throw new Error("Decoderfehler"); },
       }),
       { wrapper },
     );

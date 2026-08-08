@@ -35,6 +35,21 @@ describe("useConfig", () => {
 });
 
 describe("useSaveConfig", () => {
+  it("invalidiert nach einem erfolgreichen Save den Homelab-Query", async () => {
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify(defaultConfig), { status: 200 })));
+    const { result } = renderHook(() => useSaveConfig(), { wrapper: testWrapper });
+
+    result.current.mutate(defaultConfig);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["pve"] });
+  });
+
   it("trägt bei 409 den frischen Stand des Servers im Fehler", async () => {
     const fresh = "2026-08-06T12:00:00.000Z";
     vi.stubGlobal("fetch", vi.fn(async () =>

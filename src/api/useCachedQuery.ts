@@ -23,7 +23,7 @@ function readEnvelope(key: string): CacheEnvelope | undefined {
     if (!raw) return undefined;
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed) || parsed.version !== CACHE_VERSION ||
-        typeof parsed.t !== "number" || !Number.isFinite(parsed.t) || !("data" in parsed)) {
+        typeof parsed.t !== "number" || !Number.isFinite(parsed.t) || parsed.t < 0 || !("data" in parsed)) {
       localStorage.removeItem(`dashboard:cache:${key}`);
       return undefined;
     }
@@ -47,8 +47,13 @@ export function useCachedQuery<T>(key: string, fn: () => Promise<T>, ttlMs: numb
     initialData: () => {
       const envelope = readEnvelope(key);
       if (envelope === undefined || decode === undefined) return undefined;
-      const data = decode(envelope.data);
-      if (data !== undefined) return data;
+      try {
+        const data = decode(envelope.data);
+        if (data !== undefined) return data;
+      } catch {
+        // Ein Decoder ist eine Trust-Boundary. Auch ein fehlerhafter Decoder darf
+        // einen kaputten localStorage-Eintrag nicht bis in React propagieren.
+      }
       try { localStorage.removeItem(`dashboard:cache:${key}`); } catch { /* Speicher nicht verfügbar */ }
       return undefined;
     },

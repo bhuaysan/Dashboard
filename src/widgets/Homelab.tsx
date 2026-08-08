@@ -6,28 +6,50 @@ import { z } from "zod";
 export type { HomelabData };
 
 const levelSchema = z.enum(["ok", "warn", "crit"]);
+const percentage = z.number().finite().min(0).max(100);
+const nonNegative = z.number().finite().min(0);
+const text = z.string().min(1).max(256);
 const homelabDataSchema = z.object({
   configured: z.boolean(),
   node: z.object({
-    cpu: z.number().finite(), mem: z.number().finite(), root: z.number().finite(),
-    uptimeDays: z.number().finite(), cpuSpark: z.array(z.number().finite()).max(1000),
-    memSpark: z.array(z.number().finite()).max(1000), cpuLevel: levelSchema,
+    cpu: percentage, mem: percentage, root: percentage,
+    uptimeDays: nonNegative, cpuSpark: z.array(percentage).max(1000),
+    memSpark: z.array(percentage).max(1000), cpuLevel: levelSchema,
     memLevel: levelSchema, rootLevel: levelSchema,
   }),
   guests: z.array(z.object({
-    vmid: z.number().int().positive(), name: z.string(), running: z.boolean(),
-    cpu: z.number().finite(), mem: z.number().finite(), cpuLevel: levelSchema,
+    vmid: z.number().int().positive().max(999999), name: text, running: z.boolean(),
+    cpu: percentage, mem: percentage, cpuLevel: levelSchema,
     memLevel: levelSchema,
   })).max(1000),
   storage: z.array(z.object({
-    name: z.string(), pct: z.number().finite(), level: levelSchema,
+    name: text, pct: percentage, level: levelSchema,
   })).max(1000),
-  alerts: z.array(z.object({ level: z.enum(["warn", "crit"]), text: z.string() })).max(1000),
+  alerts: z.array(z.object({ level: z.enum(["warn", "crit"]), text })).max(1000),
 });
+
+// Vor dem Hinzufügen der Pegel enthielt der Cache dieselben Messfelder ohne die
+// cpuLevel/memLevel/rootLevel-Felder. Strict verhindert, dass eine Antwort mit einem
+// vorhandenen, aber ungültigen Pegel still als alte Antwort akzeptiert wird.
+const legacyHomelabDataSchema = z.object({
+  configured: z.boolean(),
+  node: z.object({
+    cpu: percentage, mem: percentage, root: percentage, uptimeDays: nonNegative,
+    cpuSpark: z.array(percentage).max(1000), memSpark: z.array(percentage).max(1000),
+  }).strict(),
+  guests: z.array(z.object({
+    vmid: z.number().int().positive().max(999999), name: text, running: z.boolean(),
+    cpu: percentage, mem: percentage,
+  }).strict()).max(1000),
+  storage: z.array(z.object({ name: text, pct: percentage }).strict()).max(1000),
+  alerts: z.array(z.object({ level: z.enum(["warn", "crit"]), text }).strict()).max(1000),
+}).strict();
 
 export function decodeHomelab(value: unknown): HomelabData | undefined {
   const parsed = homelabDataSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
+  if (parsed.success) return parsed.data;
+  const legacy = legacyHomelabDataSchema.safeParse(value);
+  return legacy.success ? reviveHomelab(legacy.data) : undefined;
 }
 
 export async function fetchHomelab(): Promise<HomelabData> {
@@ -40,28 +62,6 @@ export async function fetchHomelab(): Promise<HomelabData> {
 
 function asLevel(v: unknown): Level {
   return v === "warn" || v === "crit" ? v : "ok";
-}
-
-/**
- * Im localStorage liegt nach einem Deploy noch die Antwortform von vorher. Die Pegel
- * kamen erst später dazu — ohne diese Auffrischung rendert die erste Darstellung aus
- * dem Cache, bevor der erste Fetch zurück ist, mit fehlenden Feldern. Dasselbe Ventil,
- * das reviveEvents und reviveNews für ihre Date-Felder benutzen.
- */
-export function reviveHomelab(d: HomelabData): HomelabData {
-  return {
-    ...d,
-    node: {
-      ...d.node,
-      cpuLevel: asLevel(d.node?.cpuLevel),
-      memLevel: asLevel(d.node?.memLevel),
-      rootLevel: asLevel(d.node?.rootLevel),
-    },
-    guests: (d.guests ?? []).map((g) => ({
-      ...g, cpuLevel: asLevel(g.cpuLevel), memLevel: asLevel(g.memLevel),
-    })),
-    storage: (d.storage ?? []).map((s) => ({ ...s, level: asLevel(s.level) })),
-  };
 }
 
 // Nur warn und crit bekommen Farbe. Wäre auch der Normalfall eingefärbt, hätte die Farbe
@@ -84,6 +84,37 @@ function Bar({ name, pct, level }: { name: string; pct: number; level: Level }) 
       <span className={`dim${cls(level)}`}>{pct} %</span>
     </span>
   );
+}
+
+type HomelabShape = {
+  configured: boolean;
+  node: {
+    cpu: number; mem: number; root: number; uptimeDays: number;
+    cpuSpark: number[]; memSpark: number[];
+    cpuLevel?: unknown; memLevel?: unknown; rootLevel?: unknown;
+  };
+  guests: {
+    vmid: number; name: string; running: boolean; cpu: number; mem: number;
+    cpuLevel?: unknown; memLevel?: unknown;
+  }[];
+  storage: { name: string; pct: number; level?: unknown }[];
+  alerts: { level: "warn" | "crit"; text: string }[];
+};
+
+export function reviveHomelab(d: HomelabShape): HomelabData {
+  return {
+    ...d,
+    node: {
+      ...d.node,
+      cpuLevel: asLevel(d.node.cpuLevel),
+      memLevel: asLevel(d.node.memLevel),
+      rootLevel: asLevel(d.node.rootLevel),
+    },
+    guests: d.guests.map((g) => ({
+      ...g, cpuLevel: asLevel(g.cpuLevel), memLevel: asLevel(g.memLevel),
+    })),
+    storage: d.storage.map((s) => ({ ...s, level: asLevel(s.level) })),
+  };
 }
 
 type HomelabProps = {

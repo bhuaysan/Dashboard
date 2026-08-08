@@ -11,7 +11,8 @@ import { ConfigStoreError, readConfig, updateConfig } from "./config-store.ts";
 import { writeGuard } from "./write-guard.ts";
 import { proxyFetch, type ProxyResult } from "./proxy.ts";
 import type { Config } from "../src/config/schema.ts";
-import { fetchHomelab, type HomelabData } from "./pve.ts";
+import { fetchHomelab } from "./pve.ts";
+import { createHomelabCache } from "./homelab-cache.ts";
 
 export const app = new Hono();
 export const MAX_CONFIG_BODY_BYTES = 512 * 1024;
@@ -141,7 +142,7 @@ app.get("/api/proxy", async (c) => {
   }
 });
 
-let homelabCache: { t: number; data: HomelabData } | undefined;
+const homelabCache = createHomelabCache(fetchHomelab);
 
 app.get("/api/homelab", async (c) => {
   let cfg: Config;
@@ -153,13 +154,8 @@ app.get("/api/homelab", async (c) => {
     }
     return c.json({ error: "Homelab nicht erreichbar" }, 502);
   }
-  if (homelabCache && Date.now() - homelabCache.t < 60_000) {
-    return c.json(homelabCache.data);
-  }
   try {
-    const data = await fetchHomelab(cfg);
-    homelabCache = { t: Date.now(), data };
-    return c.json(data);
+    return c.json(await homelabCache.get(cfg));
   } catch {
     return c.json({ error: "Homelab nicht erreichbar" }, 502);
   }

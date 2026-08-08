@@ -58,25 +58,33 @@ type StorageEntry = { storage: string; total: number; used: number; active: numb
 type Task = { id?: string | null; starttime: number; endtime?: number; status?: string };
 
 const finite = z.number().finite();
+const nonNegative = finite.min(0);
+const ratio = finite.min(0).max(1);
+const unixSeconds = nonNegative.refine(
+  (value) => Number.isFinite(new Date(value * 1000).getTime()),
+  "Ungültiger Zeitstempel",
+);
 const nodeStatusSchema = z.object({
-  cpu: finite,
-  memory: z.object({ used: finite, total: finite }),
-  rootfs: z.object({ used: finite, total: finite }),
-  uptime: finite,
+  cpu: ratio,
+  memory: z.object({ used: nonNegative, total: nonNegative }),
+  rootfs: z.object({ used: nonNegative, total: nonNegative }),
+  uptime: nonNegative,
 });
 const rrdPointSchema = z.object({
-  cpu: finite.optional(), memused: finite.optional(), memtotal: finite.optional(),
+  cpu: ratio.optional(), memused: nonNegative.optional(), memtotal: nonNegative.optional(),
 });
 const resourceSchema = z.object({
-  vmid: z.number().int().positive(), name: z.string().optional(), type: z.string(),
-  status: z.string(), cpu: finite.optional(), mem: finite.optional(),
-  maxmem: finite.optional(), template: finite.optional(),
+  vmid: z.number().int().positive().max(999999), name: z.string().max(256).optional(), type: z.string(),
+  status: z.string().max(64), cpu: ratio.optional(), mem: nonNegative.optional(),
+  maxmem: nonNegative.optional(), template: z.number().int().optional(),
 });
 const storageEntrySchema = z.object({
-  storage: z.string(), total: finite, used: finite, active: z.number().int(),
+  storage: z.string().min(1).max(256), total: nonNegative, used: nonNegative,
+  active: z.number().int().min(0).max(1),
 });
 const taskSchema = z.object({
-  id: z.string().nullable().optional(), starttime: finite, endtime: finite.optional(), status: z.string().optional(),
+  id: z.string().max(256).nullable().optional(), starttime: unixSeconds,
+  endtime: unixSeconds.optional(), status: z.string().max(256).optional(),
 });
 
 export type PveRaw = {
@@ -102,6 +110,15 @@ function pveAgent(): Agent {
   return agent;
 }
 
+export function parsePveEnvelope<T>(raw: unknown, path: string, schema: z.ZodType<T>): T {
+  const envelope = z.object({ data: z.unknown() }).safeParse(raw);
+  const hasData = typeof raw === "object" && raw !== null && !Array.isArray(raw) && "data" in raw;
+  if (!envelope.success || !hasData) throw new Error(`PVE ${path}: ungültige Antwort`);
+  const data = schema.safeParse(envelope.data.data);
+  if (!data.success) throw new Error(`PVE ${path}: ungültige Daten`);
+  return data.data;
+}
+
 async function pveGet<T>(path: string, schema: z.ZodType<T>): Promise<T> {
   if (!env.pve) throw new Error("PVE nicht konfiguriert");
   const res = await undiciFetch(`${env.pve.url}/api2/json${path}`, {
@@ -111,11 +128,7 @@ async function pveGet<T>(path: string, schema: z.ZodType<T>): Promise<T> {
   });
   if (!res.ok) throw new Error(`PVE ${path}: HTTP ${res.status}`);
   const raw: unknown = await res.json();
-  const envelope = z.object({ data: z.unknown() }).safeParse(raw);
-  if (!envelope.success) throw new Error(`PVE ${path}: ungültige Antwort`);
-  const data = schema.safeParse(envelope.data.data);
-  if (!data.success) throw new Error(`PVE ${path}: ungültige Daten`);
-  return data.data;
+  return parsePveEnvelope(raw, path, schema);
 }
 
 export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date()): HomelabData {
@@ -156,7 +169,11 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
 
   for (const vmid of cfg.expectRunning) {
     const g = guests.find((x) => x.vmid === vmid);
-    if (g && !g.running) alerts.push({ level: "crit", text: `gast ${g.name} läuft nicht` });
+    if (!g) {
+      alerts.push({ level: "crit", text: `gast vmid ${vmid} nicht gefunden` });
+    } else if (!g.running) {
+      alerts.push({ level: "crit", text: `gast ${g.name} läuft nicht` });
+    }
   }
 
   if (raw.tasks.length === 0) {
@@ -165,8 +182,9 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
     const latestByVmid = new Map<number, Task>();
     for (const t of raw.tasks) {
       if (t.endtime === undefined) continue;   // läuft noch
+      if (typeof t.id !== "string" || !/^\d+$/.test(t.id)) continue;
       const vmid = Number(t.id);
-      if (!Number.isInteger(vmid)) continue;
+      if (!Number.isSafeInteger(vmid) || vmid <= 0) continue;
       const prev = latestByVmid.get(vmid);
       if (!prev || (t.endtime ?? 0) > (prev.endtime ?? 0)) latestByVmid.set(vmid, t);
     }

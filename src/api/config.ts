@@ -55,6 +55,10 @@ export function useSaveConfig() {
     onSuccess: (cfg) => {
       writeLocalConfig(cfg);
       qc.setQueryData(["config"], cfg);
+      // Homelab-Schwellwerte, erwartete Gäste und Erreichbarkeitsziele gehören zur
+      // Config-Revision. Ein erfolgreicher Save darf deshalb keinen alten PVE-Stand
+      // bis zum nächsten 60-Sekunden-Intervall anzeigen.
+      void qc.invalidateQueries({ queryKey: ["pve"] });
     },
   });
 }

@@ -17,6 +17,11 @@ export type WeatherData = {
 };
 
 const finiteNumber = z.number().finite();
+const percentage = finiteNumber.min(0).max(100);
+const unixSeconds = finiteNumber.refine(
+  (value) => Number.isFinite(new Date(value * 1000).getTime()),
+  "Ungültiger Zeitstempel",
+);
 function isTimezone(value: string): boolean {
   try {
     new Intl.DateTimeFormat("de-DE", { timeZone: value }).format();
@@ -34,18 +39,30 @@ const openMeteoSchema = z.object({
     weather_code: finiteNumber,
   }),
   hourly: z.object({
-    time: z.array(finiteNumber).min(1).max(1000),
+    time: z.array(unixSeconds).min(1).max(1000),
     temperature_2m: z.array(finiteNumber).min(1).max(1000),
-    precipitation_probability: z.array(finiteNumber).min(1).max(1000),
+    precipitation_probability: z.array(percentage).min(1).max(1000),
+  }).superRefine((hourly, ctx) => {
+    const length = hourly.time.length;
+    if (hourly.temperature_2m.length !== length || hourly.precipitation_probability.length !== length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Stündliche Wetterfelder haben unterschiedliche Längen" });
+    }
   }),
   daily: z.object({
-    time: z.array(finiteNumber).min(1).max(100),
+    time: z.array(unixSeconds).min(1).max(100),
     temperature_2m_min: z.array(finiteNumber).min(1).max(100),
     temperature_2m_max: z.array(finiteNumber).min(1).max(100),
     weather_code: z.array(finiteNumber).min(1).max(100),
-    sunrise: z.array(finiteNumber).min(1).max(100),
-    sunset: z.array(finiteNumber).min(1).max(100),
-    daylight_duration: z.array(finiteNumber).min(1).max(100),
+    sunrise: z.array(unixSeconds).min(1).max(100),
+    sunset: z.array(unixSeconds).min(1).max(100),
+    daylight_duration: z.array(finiteNumber.min(0)).min(1).max(100),
+  }).superRefine((daily, ctx) => {
+    const length = daily.time.length;
+    const fields = [daily.temperature_2m_min, daily.temperature_2m_max, daily.weather_code,
+      daily.sunrise, daily.sunset, daily.daylight_duration];
+    if (fields.some((field) => field.length !== length)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Tägliche Wetterfelder haben unterschiedliche Längen" });
+    }
   }),
 });
 
@@ -54,7 +71,7 @@ const weatherDataSchema = z.object({
   feels: finiteNumber,
   code: finiteNumber,
   hours: z.array(finiteNumber).max(1000),
-  rainPct: finiteNumber,
+  rainPct: percentage,
   sunrise: z.string(),
   sunset: z.string(),
   daylight: finiteNumber,
@@ -87,30 +104,30 @@ export async function fetchWeather(loc: { lat: number; lon: number }): Promise<W
   const j = parsed.data;
 
   const timeZone = j.timezone;
-  const times = j.hourly?.time ?? [];
-  const temps = j.hourly?.temperature_2m ?? [];
+  const times = j.hourly.time;
+  const temps = j.hourly.temperature_2m;
   const now = Date.now();
   let idx = times.findIndex((t) => t * 1000 > now) - 1;
   if (idx < 0) idx = 0;
   const hours = temps.slice(idx, idx + 12);
-  const rainPct = j.hourly?.precipitation_probability?.[idx] ?? 0;
+  const rainPct = j.hourly.precipitation_probability[idx] ?? 0;
 
   const fmtTime = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", timeZone });
   const fmtDay = new Intl.DateTimeFormat("de-DE", { weekday: "short", timeZone });
-  const dayTimes = j.daily?.time ?? [];
+  const dayTimes = j.daily.time;
   const days = dayTimes.map((t, i) => ({
     label: fmtDay.format(new Date(t * 1000)),
-    hi: Math.round(j.daily?.temperature_2m_max?.[i] ?? 0),
-    lo: Math.round(j.daily?.temperature_2m_min?.[i] ?? 0),
-    code: j.daily?.weather_code?.[i] ?? -1,
+    hi: Math.round(j.daily.temperature_2m_max[i] ?? 0),
+    lo: Math.round(j.daily.temperature_2m_min[i] ?? 0),
+    code: j.daily.weather_code[i] ?? -1,
   }));
 
-  const sunrise = j.daily?.sunrise?.[0];
-  const sunset = j.daily?.sunset?.[0];
+  const sunrise = j.daily.sunrise[0];
+  const sunset = j.daily.sunset[0];
   // Die tägliche Änderung aus heute und morgen statt aus gestern: das spart den Abruf
   // eines vergangenen Tages, der alle Indizes der Vorschau um eins verschieben würde.
-  const daylight = j.daily?.daylight_duration?.[0] ?? 0;
-  const daylightNext = j.daily?.daylight_duration?.[1] ?? daylight;
+  const daylight = j.daily.daylight_duration[0] ?? 0;
+  const daylightNext = j.daily.daylight_duration[1] ?? daylight;
   return {
     temp: Math.round(j.current?.temperature_2m ?? 0),
     feels: Math.round(j.current?.apparent_temperature ?? 0),
