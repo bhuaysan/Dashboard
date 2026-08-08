@@ -35,6 +35,28 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ ...base, DASHBOARD_WRITE_HOSTS: "https://evil.example" })).toThrow("DASHBOARD_WRITE_HOSTS");
   });
 
+  it("behandelt PVE-Felder ohne Secret als nicht konfiguriert", () => {
+    const parsed = parseEnv({
+      ...base,
+      PVE_URL: "https://pve.example:8006",
+      PVE_TOKEN_ID: "dashboard@pve!startpage",
+      PVE_TOKEN_SECRET: "   ",
+      PVE_CA_PATH: "/etc/dashboard/pve-ca.pem",
+    });
+    expect(parsed.pve).toBeUndefined();
+  });
+
+  it("akzeptiert eine vollständig leere PVE-Gruppe als nicht konfiguriert", () => {
+    const parsed = parseEnv({
+      ...base,
+      PVE_URL: "",
+      PVE_TOKEN_ID: "",
+      PVE_TOKEN_SECRET: "",
+      PVE_CA_PATH: "",
+    });
+    expect(parsed.pve).toBeUndefined();
+  });
+
   it("akzeptiert eine vollständige HTTPS-PVE-Konfiguration", () => {
     const parsed = parseEnv({
       ...base,
@@ -57,9 +79,24 @@ describe("parseEnv", () => {
       throw new Error("erwarteter Testfehler fehlt");
     } catch (error) {
       expect(error).toBeInstanceOf(EnvironmentError);
-      expect(error).toHaveProperty("message", expect.stringContaining("PVE_URL"));
-      expect(error).toHaveProperty("message", expect.stringContaining("PVE_TOKEN_ID"));
-      expect((error as Error).message).not.toContain("synthetic-secret");
+      if (error instanceof Error) {
+        expect(error.message).toContain("PVE_URL");
+        expect(error.message).toContain("PVE_TOKEN_ID");
+        expect(error.message).not.toContain("synthetic-secret");
+      }
+    }
+  });
+
+  it("fordert bei gesetztem Secret die übrigen PVE-Felder an", () => {
+    try {
+      parseEnv({ ...base, PVE_TOKEN_SECRET: "synthetic-secret" });
+      throw new Error("erwarteter Testfehler fehlt");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvironmentError);
+      if (error instanceof EnvironmentError) {
+        expect(error.variables).toEqual(expect.arrayContaining(["PVE_URL", "PVE_TOKEN_ID", "PVE_CA_PATH"]));
+        expect(error.message).not.toContain("synthetic-secret");
+      }
     }
   });
 });

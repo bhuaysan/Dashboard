@@ -105,11 +105,9 @@ export function parseEnv(record: EnvRecord): DashboardEnvironment {
   });
   if (!parsed.success) throw new EnvironmentError(invalidVariables(parsed.error.issues));
 
-  const pveNames = ["PVE_URL", "PVE_TOKEN_ID", "PVE_TOKEN_SECRET", "PVE_CA_PATH"];
-  const pveValues = pveNames.map((name) => record[name]?.trim() ?? "");
-  const hasPveValue = pveValues.some((value) => value !== "");
+  const secret = record.PVE_TOKEN_SECRET?.trim() ?? "";
   let pve: PveEnvironment | undefined;
-  if (hasPveValue) {
+  if (secret !== "") {
     const pveParsed = pveEnvironmentSchema.safeParse({
       PVE_URL: record.PVE_URL ?? "",
       PVE_TOKEN_ID: record.PVE_TOKEN_ID ?? "",
