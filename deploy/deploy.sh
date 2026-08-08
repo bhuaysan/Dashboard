@@ -104,8 +104,20 @@ systemctl daemon-reload
 ln -sfn "$release_dir" "${current}.next"
 mv -Tf "${current}.next" "$current"
 systemctl restart dashboard
-systemctl is-active --quiet dashboard
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1/api/health >/dev/null
+
+health_ok=false
+for _ in {1..30}; do
+  if systemctl is-active --quiet dashboard \
+    && curl --fail --silent --max-time 2 http://127.0.0.1/api/health >/dev/null; then
+    health_ok=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$health_ok" != true ]]; then
+  echo "Healthcheck für dashboard.service fehlgeschlagen." >&2
+  false
+fi
 
 trap - ERR
 rm -f "/tmp/dashboard.service.$release_id" "$previous_unit"
