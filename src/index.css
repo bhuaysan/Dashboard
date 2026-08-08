@@ -440,15 +440,15 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
             letter-spacing: .06em; padding-bottom: .15rem; }
 /* Der Name war auf 14ch festgenagelt und schnitt „Analytics Cloud" ab, während die
    URL-Spalte den Platz hatte. Beide teilen ihn sich jetzt. */
-.tbl--links .tbl-head, .tbl--links .tbl-row { grid-template-columns: 6ch minmax(0,1fr) minmax(0,1.7fr) 7ch; }
-.tbl--feeds .tbl-head, .tbl--feeds .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) 6ch 7ch; }
+.tbl--links .tbl-head, .tbl--links .tbl-row { grid-template-columns: 6ch minmax(0,1fr) minmax(0,1.7fr) minmax(7.5rem,max-content); }
+.tbl--feeds .tbl-head, .tbl--feeds .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) 6ch minmax(7.5rem,max-content); }
 .tbl--panes .tbl-head, .tbl--panes .tbl-row { grid-template-columns: minmax(0,12ch) 11ch 14ch; }
 .tbl--panes .tbl-row > span { white-space: nowrap; }
-.tbl--bangs .tbl-head, .tbl--bangs .tbl-row { grid-template-columns: 6ch minmax(0,1fr) 7ch; }
-.tbl--hosts .tbl-head, .tbl--hosts .tbl-row { grid-template-columns: minmax(0,1fr) 7ch; }
-.tbl--zones .tbl-head, .tbl--zones .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) 7ch; }
-.tbl--reach .tbl-head, .tbl--reach .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) 8ch 7ch; }
-.rowacts { display: flex; gap: .35rem; justify-content: flex-end; }
+.tbl--bangs .tbl-head, .tbl--bangs .tbl-row { grid-template-columns: 6ch minmax(0,1fr) minmax(7.5rem,max-content); }
+.tbl--hosts .tbl-head, .tbl--hosts .tbl-row { grid-template-columns: minmax(0,1fr) minmax(7.5rem,max-content); }
+.tbl--zones .tbl-head, .tbl--zones .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) minmax(7.5rem,max-content); }
+.tbl--reach .tbl-head, .tbl--reach .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) 8ch minmax(7.5rem,max-content); }
+.rowacts { display: flex; gap: .35rem; justify-content: flex-end; min-width: max-content; }
 .rowact { border: 0; background: transparent; color: var(--color-dim); font: inherit;
           cursor: pointer; padding: 0 .35rem; min-width: 2.25rem; min-height: 2.25rem; }
 .rowact:hover { color: var(--color-accent); }

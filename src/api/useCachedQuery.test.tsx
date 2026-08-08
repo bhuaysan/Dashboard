@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useCachedQuery } from "./useCachedQuery";
+import { CACHE_MAX_AGE_MS, CACHE_MAX_ENTRIES, cleanupCache, useCachedQuery } from "./useCachedQuery";
 
 type Item = { title: string; date: Date };
 
@@ -11,6 +11,8 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("useCachedQuery", () => {
+  beforeEach(() => localStorage.clear());
+
   it("belebt Datumsfelder aus dem JSON-Cache wieder", async () => {
     localStorage.setItem(
       "dashboard:cache:test",
@@ -73,5 +75,39 @@ describe("useCachedQuery", () => {
     );
     await waitFor(() => expect(result.current.data?.[0]?.title).toBe("neu"));
     expect(localStorage.getItem(`dashboard:cache:${key}`)).toContain('"version":1');
+  });
+
+  it("verwirft einen Zeitstempel weit in der Zukunft", () => {
+    const key = "future";
+    localStorage.setItem(`dashboard:cache:${key}`, JSON.stringify({
+      version: 1, t: Date.now() + 60_000, data: { alt: true },
+    }));
+    cleanupCache();
+    expect(localStorage.getItem(`dashboard:cache:${key}`)).toBeNull();
+  });
+
+  it("räumt alte eigene Query-Varianten auf, lässt fremde Schlüssel aber unangetastet", () => {
+    const now = Date.now();
+    localStorage.setItem("dashboard:cache:alt-1", JSON.stringify({
+      version: 1, t: now - CACHE_MAX_AGE_MS - 1, data: [],
+    }));
+    localStorage.setItem("dashboard:cache:alt-2", JSON.stringify({
+      version: 1, t: now - CACHE_MAX_AGE_MS - 2, data: [],
+    }));
+    localStorage.setItem("other-app:cache:alt", JSON.stringify({ t: now - CACHE_MAX_AGE_MS - 3 }));
+    for (let index = 0; index < CACHE_MAX_ENTRIES + 4; index += 1) {
+      localStorage.setItem(`dashboard:cache:variant-${index}`, JSON.stringify({
+        version: 1, t: now - index, data: [],
+      }));
+    }
+
+    cleanupCache(now);
+
+    expect(localStorage.getItem("dashboard:cache:alt-1")).toBeNull();
+    expect(localStorage.getItem("dashboard:cache:alt-2")).toBeNull();
+    expect(localStorage.getItem("other-app:cache:alt")).not.toBeNull();
+    const dashboardKeys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .filter((key): key is string => key?.startsWith("dashboard:cache:") === true);
+    expect(dashboardKeys).toHaveLength(CACHE_MAX_ENTRIES);
   });
 });

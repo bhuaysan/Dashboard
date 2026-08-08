@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { assertAllowed, isBlockedIp } from "./proxy.ts";
+import { assertAllowed, assertListed, isBlockedIp } from "./proxy.ts";
 
 const allow = ["api.open-meteo.com", "localhost", "169.254.169.254"];
 const resolveAddress = async (hostname: string): Promise<{ address: string }> => ({
@@ -8,6 +8,11 @@ const resolveAddress = async (hostname: string): Promise<{ address: string }> =>
 });
 
 describe("assertAllowed", () => {
+  it("vergleicht Hostnamen kanonisch gegen die Allowlist", () => {
+    expect(() => assertListed(new URL("https://API.OPEN-METEO.COM/"), ["api.open-meteo.com"])).not.toThrow();
+    expect(() => assertListed(new URL("https://api.open-meteo.com/"), ["API.OPEN-METEO.COM"])).not.toThrow();
+  });
+
   it("lässt erlaubte Hosts durch und liefert die geprüfte Adresse", async () => {
     await expect(
       assertAllowed(new URL("https://api.open-meteo.com/v1/forecast"), allow, async () => ({ address: "93.184.216.34" })),

@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { Agent, fetch as undiciFetch } from "undici";
+import { canonicalHostname } from "../src/config/schema.ts";
 
 export const PROXY_DEADLINE_MS = 5_000;
 export const MAX_PROXY_IN_FLIGHT = 8;
@@ -39,7 +40,10 @@ export function isBlockedIp(ip: string): boolean {
 // vor dem Cache steht.
 export function assertListed(url: URL, allowlist: string[]): void {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Schema");
-  if (!allowlist.includes(url.hostname)) throw new Error("Host nicht erlaubt");
+  const hostname = canonicalHostname(url.hostname);
+  if (hostname === undefined || !allowlist.some((entry) => canonicalHostname(entry) === hostname)) {
+    throw new Error("Host nicht erlaubt");
+  }
 }
 
 export type LookupAddress = (hostname: string, options: { family: 4 }) => Promise<{ address: string }>;

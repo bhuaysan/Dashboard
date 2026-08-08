@@ -53,10 +53,11 @@ describe("SettingsPane", () => {
   it("hält den Tastaturfokus im Einstellungsdialog", () => {
     render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
       save={saveSucceeds()} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Homelab" }));
     const dialog = screen.getByRole("dialog");
     const focusable = [...dialog.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    )];
+    )].filter((element) => element.tabIndex >= 0);
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     if (!first || !last) throw new Error("Dialog hat keine fokussierbaren Schaltflächen");
@@ -66,6 +67,16 @@ describe("SettingsPane", () => {
     first.focus();
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(last);
+  });
+
+  it("benennt wiederholte Eingaben mit dem Zeilenkontext", () => {
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} />);
+    expect(screen.getByLabelText('URL von Link „Datasphere" Zeile 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Feeds" }));
+    expect(screen.getByLabelText('URL von Feed „heise" Zeile 1')).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Suche" }));
+    expect(screen.getByLabelText("Bang-Kürzel Zeile 1")).toBeTruthy();
   });
 
   it("blockt das Speichern bei doppelten Kürzeln", () => {
@@ -113,9 +124,9 @@ describe("SettingsPane", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Suche" }));
     // „npm" auf das schon vergebene „gh" umbenennen. Vorher fiel dabei ein Eintrag
     // stillschweigend aus dem Objekt; jetzt lehnt das Speichern ab.
-    const keyFields = screen.getAllByLabelText("Bang");
+    const keyFields = screen.getAllByLabelText(/^Bang-Kürzel Zeile/);
     fireEvent.change(keyFields[2] as HTMLInputElement, { target: { value: "gh" } });
-    expect(screen.getAllByLabelText("Bang")).toHaveLength(5);
+    expect(screen.getAllByLabelText(/^Bang-Kürzel Zeile/)).toHaveLength(5);
     fireEvent.click(screen.getByText("Speichern"));
     expect(save.mutate).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("doppelt vergeben");
@@ -286,7 +297,7 @@ describe("SettingsPane", () => {
     render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
       save={save} onSaved={() => undefined} />);
     fireEvent.click(screen.getByRole("button", { name: 'Gruppe „Intern" nach oben' }));
-    expect(screen.getAllByLabelText("Gruppenname").map((field) => (field as HTMLInputElement).value))
+    expect(screen.getAllByLabelText(/^Gruppenname von/).map((field) => (field as HTMLInputElement).value))
       .toEqual(["Intern", "SAP", "Homelab", "Dev"]);
     expect((screen.getByRole("button", { name: 'Gruppe „Intern" nach oben' }) as HTMLButtonElement).disabled).toBe(true);
   });

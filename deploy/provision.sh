@@ -9,7 +9,8 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt update && apt install -y curl rsync
-if ! command -v node >/dev/null; then
+node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)"
+if [[ "$node_major" != "22" ]]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt install -y nodejs
 fi

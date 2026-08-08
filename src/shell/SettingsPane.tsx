@@ -114,6 +114,13 @@ function isGeocodingHit(value: unknown): value is { name: string; latitude: numb
     value.longitude >= -180 && value.longitude <= 180;
 }
 
+function isVisibleFocusable(element: HTMLElement): boolean {
+  if (element.hidden || element.getAttribute("aria-hidden") === "true" ||
+      element.closest("[hidden], [aria-hidden=\"true\"]") !== null) return false;
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
+
 export function SettingsPane({ open, config, guests, onClose, save, onSaved, onReload }: Props) {
   const [draft, setDraft] = useState<Config>(config);
   const [sec, setSec] = useState<Sec>("links");
@@ -164,7 +171,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
     if (!box) return;
     const focusable = [...box.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    )].filter((el) => !el.hidden && el.getAttribute("aria-hidden") !== "true");
+    )].filter((el) => el.tabIndex >= 0 && isVisibleFocusable(el));
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     if (!first || !last) return;
@@ -378,7 +385,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                         className="inp"
                         style={{ maxWidth: "24ch" }}
                         value={g.title}
-                        aria-label="Gruppenname"
+                        aria-label={`Gruppenname von „${g.title}"`}
                         onChange={(e) => upd((d) => ({
                           ...d,
                           linkGroups: d.linkGroups.map((x, i) => i === gi ? { ...x, title: e.target.value } : x),
@@ -428,7 +435,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                       <div className="tbl-head"><span>Kürzel</span><span>Name</span><span>URL</span><span /></div>
                       {g.links.map((l, li) => (
                         <div className="tbl-row" key={li}>
-                          <input className="inp inp--hint" value={l.hint ?? ""} maxLength={2} aria-label="Kürzel"
+                          <input className="inp inp--hint" value={l.hint ?? ""} maxLength={2} aria-label={`Kürzel von Link „${l.label}" Zeile ${li + 1}`}
                             onChange={(e) => upd((d) => ({
                               ...d,
                               linkGroups: d.linkGroups.map((x, i) => i !== gi ? x : {
@@ -437,7 +444,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                               }),
                             }))}
                           />
-                          <input className="inp" value={l.label} aria-label="Name"
+                          <input className="inp" value={l.label} aria-label={`Name von Link „${l.label}" Zeile ${li + 1}`}
                             onChange={(e) => upd((d) => ({
                               ...d,
                               linkGroups: d.linkGroups.map((x, i) => i !== gi ? x : {
@@ -446,7 +453,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                               }),
                             }))}
                           />
-                          <input className="inp" value={l.url} aria-label="URL"
+                          <input className="inp" value={l.url} aria-label={`URL von Link „${l.label}" Zeile ${li + 1}`}
                             onChange={(e) => upd((d) => ({
                               ...d,
                               linkGroups: d.linkGroups.map((x, i) => i !== gi ? x : {
@@ -494,11 +501,11 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                   <div className="tbl-head"><span>Name</span><span>URL</span><span>Anzahl</span><span /></div>
                   {draft.feeds.map((f, i) => (
                     <div className="tbl-row" key={i}>
-                      <input className="inp" value={f.label} aria-label="Name"
+                      <input className="inp" value={f.label} aria-label={`Name von Feed „${f.label}" Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, label: e.target.value } : x) }))} />
-                      <input className="inp" value={f.url} aria-label="URL"
+                      <input className="inp" value={f.url} aria-label={`URL von Feed „${f.label}" Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, url: e.target.value } : x) }))} />
-                      <NumInput className="inp inp--num" value={f.limit} min={1} aria-label="Anzahl"
+                      <NumInput className="inp inp--num" value={f.limit} min={1} aria-label={`Anzahl von Feed „${f.label}" Zeile ${i + 1}`}
                         onCommit={(n) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, limit: n } : x) }))} />
                       <RowActs label={`Feed „${f.label}"`} first={i === 0} last={i === draft.feeds.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, feeds: move(d.feeds, i, delta) }))}
@@ -521,9 +528,9 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                   <div className="tbl-head"><span>Name</span><span>ICS-URL</span><span /><span /></div>
                   {draft.calendars.map((c, i) => (
                     <div className="tbl-row" key={i}>
-                      <input className="inp" value={c.label} aria-label="Name"
+                      <input className="inp" value={c.label} aria-label={`Name von Kalender „${c.label}" Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, calendars: d.calendars.map((x, j) => j === i ? { ...x, label: e.target.value } : x) }))} />
-                      <input className="inp" value={c.url} aria-label="ICS-URL"
+                      <input className="inp" value={c.url} aria-label={`ICS-URL von Kalender „${c.label}" Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, calendars: d.calendars.map((x, j) => j === i ? { ...x, url: e.target.value } : x) }))} />
                       <span />
                       <RowActs label={`Kalender „${c.label}"`} first={i === 0} last={i === draft.calendars.length - 1}
@@ -576,9 +583,9 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                   <div className="tbl-head"><span>Label</span><span>Zeitzone</span><span /></div>
                   {draft.clock.secondary.map((z, i) => (
                     <div className="tbl-row" key={i}>
-                      <input className="inp" value={z.label} aria-label="Label"
+                      <input className="inp" value={z.label} aria-label={`Label von Zeitzone Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, clock: { secondary: d.clock.secondary.map((x, j) => j === i ? { ...x, label: e.target.value } : x) } }))} />
-                      <input className="inp" value={z.tz} aria-label="Zeitzone"
+                      <input className="inp" value={z.tz} aria-label={`Zeitzone von Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, clock: { secondary: d.clock.secondary.map((x, j) => j === i ? { ...x, tz: e.target.value } : x) } }))} />
                       <RowActs label={`Zeitzone „${z.label}"`} first={i === 0} last={i === draft.clock.secondary.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, clock: { secondary: move(d.clock.secondary, i, delta) } }))}
@@ -698,11 +705,11 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                   <div className="tbl-head"><span>Label</span><span>Host</span><span>Port</span><span /></div>
                   {draft.homelab.reachability.map((r, i) => (
                     <div className="tbl-row" key={i}>
-                      <input className="inp" value={r.label} aria-label="Label"
+                      <input className="inp" value={r.label} aria-label={`Label von Ziel „${r.label}" Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, label: e.target.value } : x) } }))} />
-                      <input className="inp" value={r.host} aria-label="Host"
+                      <input className="inp" value={r.host} aria-label={`Host von Ziel „${r.label}" Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, host: e.target.value } : x) } }))} />
-                      <NumInput className="inp inp--num" value={r.port} min={1} aria-label="Port"
+                      <NumInput className="inp inp--num" value={r.port} min={1} aria-label={`Port von Ziel „${r.label}" Zeile ${i + 1}`}
                         onCommit={(n) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, port: n } : x) } }))} />
                       <RowActs label={`Ziel „${r.label}"`} first={i === 0} last={i === draft.homelab.reachability.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: move(d.homelab.reachability, i, delta) } }))}
@@ -730,9 +737,9 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                   <div className="tbl-head"><span>Bang</span><span>URL-Vorlage</span><span /></div>
                   {bangs.map((b, i) => (
                     <div className="tbl-row" key={i}>
-                      <input className="inp inp--hint" value={b.key} aria-label="Bang"
+                      <input className="inp inp--hint" value={b.key} aria-label={`Bang-Kürzel Zeile ${i + 1}`}
                         onChange={(e) => setBangs((rows) => rows.map((x, j) => j === i ? { ...x, key: e.target.value } : x))} />
-                      <input className="inp" value={b.tpl} aria-label="URL-Vorlage"
+                      <input className="inp" value={b.tpl} aria-label={`URL-Vorlage von Bang Zeile ${i + 1}`}
                         onChange={(e) => setBangs((rows) => rows.map((x, j) => j === i ? { ...x, tpl: e.target.value } : x))} />
                       <RowActs label={`Bang „!${b.key}"`} first={i === 0} last={i === bangs.length - 1}
                         onMove={(delta) => setBangs((rows) => move(rows, i, delta))}
@@ -753,7 +760,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                 <div className="tbl tbl--hosts">
                   {draft.proxyAllowlist.map((h, i) => (
                     <div className="tbl-row" key={i}>
-                      <input className="inp" value={h} aria-label="Host"
+                      <input className="inp" value={h} aria-label={`Proxy-Host Zeile ${i + 1}`}
                         onChange={(e) => upd((d) => ({ ...d, proxyAllowlist: d.proxyAllowlist.map((x, j) => j === i ? e.target.value : x) }))} />
                       <RowActs label={`Proxy-Host „${h}"`} first={i === 0} last={i === draft.proxyAllowlist.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, proxyAllowlist: move(d.proxyAllowlist, i, delta) }))}

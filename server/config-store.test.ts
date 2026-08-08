@@ -2,14 +2,10 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @vitest-environment node
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config/defaults";
 import type { Config } from "../src/config/schema";
 import { createConfigStore, MAX_CONFIG_BYTES, writeAtomic } from "./config-store.ts";
-
-let dir: string;
-let configPath: string;
-let store: ReturnType<typeof createConfigStore>;
 
 function nearLimitConfig(): Config {
   const links: Config["linkGroups"][number]["links"] = Array.from({ length: 100 }, (_, index) => ({
@@ -26,35 +22,48 @@ function nearLimitConfig(): Config {
   };
 }
 
-beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "dashboard-store-"));
-  configPath = join(dir, "config.json");
-  store = createConfigStore(configPath);
-});
+type StoreFixture = {
+  dir: string;
+  configPath: string;
+  store: ReturnType<typeof createConfigStore>;
+};
 
-afterAll(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
+async function createFixture(): Promise<StoreFixture> {
+  const dir = await mkdtemp(join(tmpdir(), "dashboard-store-"));
+  const configPath = join(dir, "config.json");
+  return { dir, configPath, store: createConfigStore(configPath) };
+}
+
+function itWithStore(name: string, test: (fixture: StoreFixture) => Promise<void>): void {
+  it(name, async () => {
+    const fixture = await createFixture();
+    try {
+      await test(fixture);
+    } finally {
+      await rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+}
 
 describe("readConfig", () => {
-  it("liefert Defaults, wenn die Datei fehlt", async () => {
+  itWithStore("liefert Defaults, wenn die Datei fehlt", async ({ store }) => {
     expect(await store.readConfig()).toEqual(defaultConfig);
   });
 
-  it("legt bei kaputtem Inhalt eine .bak-Datei an und fällt auf Defaults zurück", async () => {
+  itWithStore("legt bei kaputtem Inhalt eine .bak-Datei an und fällt auf Defaults zurück", async ({ configPath, store }) => {
     await writeFile(configPath, JSON.stringify({ version: 99, kaputt: true }));
     expect(await store.readConfig()).toEqual(defaultConfig);
     const bak = JSON.parse(await readFile(`${configPath}.bak`, "utf8")) as { version: number };
     expect(bak.version).toBe(99);
   });
 
-  it("sichert auch syntaktisch kaputtes JSON vor dem Fallback", async () => {
+  itWithStore("sichert auch syntaktisch kaputtes JSON vor dem Fallback", async ({ configPath, store }) => {
     await writeFile(configPath, "{");
     expect(await store.readConfig()).toEqual(defaultConfig);
     expect(await readFile(`${configPath}.bak`, "utf8")).toBe("{");
   });
 
-  it("gibt einen fehlgeschlagenen Backup-Versuch als Fehler weiter", async () => {
+  itWithStore("gibt einen fehlgeschlagenen Backup-Versuch als Fehler weiter", async ({ configPath, store }) => {
     await writeFile(configPath, "{");
     await rm(`${configPath}.bak`, { force: true, recursive: true });
     await mkdir(`${configPath}.bak`);
@@ -62,7 +71,7 @@ describe("readConfig", () => {
     await rm(`${configPath}.bak`, { recursive: true, force: true });
   });
 
-  it("verwirft eine unbekannte Pane-Id im Layout, statt an der ganzen Config zu scheitern", async () => {
+  itWithStore("verwirft eine unbekannte Pane-Id im Layout, statt an der ganzen Config zu scheitern", async ({ configPath, store }) => {
     await writeFile(configPath, JSON.stringify({
       ...defaultConfig,
       layout: [...defaultConfig.layout, { id: "music", visible: true, span: 1 }],
@@ -72,14 +81,14 @@ describe("readConfig", () => {
     expect(cfg.linkGroups).toEqual(defaultConfig.linkGroups);   // Rest der Config bleibt erhalten
   });
 
-  it("liest eine übergroße Config nicht vollständig ein", async () => {
+  itWithStore("liest eine übergroße Config nicht vollständig ein", async ({ configPath, store }) => {
     await writeFile(configPath, Buffer.alloc(MAX_CONFIG_BYTES + 1, 120));
     await expect(store.readConfig()).rejects.toThrow("Config-Datei ist zu groß");
   });
 });
 
 describe("writeConfig", () => {
-  it("hebt die vorherigen Stände als config.json.1 bis .7 auf", async () => {
+  itWithStore("hebt die vorherigen Stände als config.json.1 bis .7 auf", async ({ configPath, dir, store }) => {
     // zehn Speichervorgänge mit unterscheidbarem Inhalt
     for (let i = 1; i <= 10; i++) {
       await store.writeConfig({ ...defaultConfig, updatedAt: `stand-${i}` });
@@ -99,7 +108,7 @@ describe("writeConfig", () => {
     expect(files.filter((f) => /^config\.json\.\d+$/.test(f))).toHaveLength(7);
   });
 
-  it("weist eine zu große endgültige Darstellung vor der Backup-Rotation ab", async () => {
+  itWithStore("weist eine zu große endgültige Darstellung vor der Backup-Rotation ab", async ({ configPath, store }) => {
     const candidate = nearLimitConfig();
     await store.writeConfig({ ...defaultConfig, updatedAt: "vorher" });
     const before = await readFile(configPath, "utf8");
@@ -112,7 +121,7 @@ describe("writeConfig", () => {
 });
 
 describe("updateConfig", () => {
-  it("serialisiert CAS-Updates und erzeugt unter gleicher Uhrzeit neue Revisionen", async () => {
+  itWithStore("serialisiert CAS-Updates und erzeugt unter gleicher Uhrzeit neue Revisionen", async ({ store }) => {
     const first = await store.readConfig();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-08T12:00:00.000Z"));
@@ -132,7 +141,7 @@ describe("updateConfig", () => {
 });
 
 describe("writeAtomic", () => {
-  it("schreibt vollständig und hinterlässt keine tmp-Datei", async () => {
+  itWithStore("schreibt vollständig und hinterlässt keine tmp-Datei", async ({ dir }) => {
     const target = join(dir, "atomic.txt");
     await writeAtomic(target, "inhalt");
     expect(await readFile(target, "utf8")).toBe("inhalt");

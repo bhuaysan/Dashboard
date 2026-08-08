@@ -66,14 +66,19 @@ function isCalendarUrl(value: string): boolean {
   return isSafeLocalCalendarPath(value) || isHttpUrl(value);
 }
 
+const dnsLabel = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+
+/** Liefert die eine Schreibweise, die auch URL.hostname verwendet: lowercase ohne Punktsegmente. */
+export function canonicalHostname(value: string): string | undefined {
+  if (value !== value.trim() || value.length === 0 || value.length > 253 || value.includes("\\") ||
+      value.includes("/") || value.includes(":")) return undefined;
+  const labels = value.split(".");
+  if (labels.some((label) => label.length === 0 || label.length > 63 || !dnsLabel.test(label))) return undefined;
+  return value.toLowerCase();
+}
+
 function isHostname(value: string): boolean {
-  if (value !== value.trim() || value.includes("\\") || value.includes("/") || value.includes(":")) return false;
-  try {
-    const url = new URL(`https://${value}`);
-    return url.hostname === value.toLowerCase() && url.pathname === "/" && url.search === "" && url.hash === "";
-  } catch {
-    return false;
-  }
+  return canonicalHostname(value) !== undefined;
 }
 
 function isPveNodeName(value: string): boolean {
@@ -83,7 +88,9 @@ function isPveNodeName(value: string): boolean {
 const isoDateTime = z.string().datetime({ offset: true });
 const httpUrl = text(MAX_URL_LENGTH).refine(isHttpUrl, "Keine gültige Adresse (muss mit http:// oder https:// beginnen)");
 const searchTemplate = text(MAX_URL_LENGTH).refine(isSearchTemplate, "Muss genau ein %s und eine HTTP(S)-Adresse enthalten");
-const hostname = text(253).refine(isHostname, "Ungültiger Hostname");
+const hostname = text(253)
+  .transform((value) => value.toLowerCase())
+  .refine(isHostname, "Ungültiger Hostname");
 const pveNodeName = text(63).refine(isPveNodeName, "Ungültiger Proxmox-Node-Name");
 const timezone = text(100).refine(isTimezone, "Ungültige Zeitzone");
 const percent = z.number().finite().min(0).max(100);
@@ -93,7 +100,7 @@ const paneId = z.enum(PANE_IDS);
 const linkSchema = z.object({
   label: text(MAX_TEXT_LENGTH),
   url: httpUrl,
-  hint: z.string().regex(/^[A-Za-z0-9]{1,2}$/).optional(),
+  hint: z.string().regex(/^g[A-Za-z0-9]$/).optional(),
 });
 
 const layoutSchema = z.array(z.object({

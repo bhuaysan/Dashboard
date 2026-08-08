@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { configSchema, isSafeLocalCalendarPath } from "./schema";
 import { defaultConfig } from "./defaults";
 import { readLocalConfig } from "./local";
-import { restoreConfig } from "./io";
+import { importConfig, restoreConfig } from "./io";
+
+function configFile(value: unknown): File {
+  const source = JSON.stringify(value);
+  const file = new File([source], "config.json");
+  // Die schlanke jsdom-File-Implementierung hat in dieser Testumgebung kein Blob.text().
+  Object.defineProperty(file, "text", { configurable: true, value: async () => source });
+  return file;
+}
 
 describe("configSchema", () => {
   it("akzeptiert die Defaults", () => {
@@ -52,6 +60,43 @@ describe("configSchema", () => {
     }
   });
 
+  it("kanonisiert Allowlist- und Erreichbarkeits-Hosts auf lowercase", () => {
+    const parsed = configSchema.parse({
+      ...defaultConfig,
+      proxyAllowlist: ["API.Open-Meteo.COM"],
+      homelab: {
+        ...defaultConfig.homelab,
+        reachability: [{ label: "Router", host: "ROUTER.Home", port: 80 }],
+      },
+    });
+    expect(parsed.proxyAllowlist).toEqual(["api.open-meteo.com"]);
+    expect(parsed.homelab.reachability[0]?.host).toBe("router.home");
+  });
+
+  it.each([
+    "-router.home",
+    "router-.home",
+    "router..home",
+    `${"a".repeat(64)}.home`,
+    `${"a".repeat(250)}.home`,
+  ])("weist einen ungültigen DNS-Hostnamen ab: %s", (host) => {
+    const parsed = configSchema.safeParse({
+      ...defaultConfig,
+      proxyAllowlist: [host],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it.each(["d", "g", "g_", "g-", "Gd"])("weist ein nicht auslösbares Link-Kürzel ab: %s", (hint) => {
+    const parsed = configSchema.safeParse({
+      ...defaultConfig,
+      linkGroups: defaultConfig.linkGroups.map((group, groupIndex) => groupIndex === 0
+        ? { ...group, links: group.links.map((link, linkIndex) => linkIndex === 0 ? { ...link, hint } : link) }
+        : group),
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it.each(["/", "..", "../cluster", "pve?x=1", "pve#x", "pve\\home", "pve home"])(
     "weist einen unsicheren Proxmox-Node-Namen ab: %s",
     (node) => {
@@ -95,5 +140,20 @@ describe("restoreConfig", () => {
     const restored = restoreConfig(imported, current);
     expect(restored.theme).toBe("light");
     expect(restored.updatedAt).toBe("aktueller-stand");
+  });
+});
+
+describe("importConfig", () => {
+  it("kanonisiert eine gültige importierte Allowlist", async () => {
+    const imported = { ...defaultConfig, proxyAllowlist: ["API.OPEN-METEO.COM"] };
+    const result = await importConfig(configFile(imported));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.proxyAllowlist).toEqual(["api.open-meteo.com"]);
+  });
+
+  it("weist einen nichtkanonischen DNS-Labelrand im Import ab", async () => {
+    const imported = { ...defaultConfig, proxyAllowlist: ["-api.open-meteo.com"] };
+    const result = await importConfig(configFile(imported));
+    expect(result.ok).toBe(false);
   });
 });

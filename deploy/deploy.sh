@@ -57,69 +57,12 @@ rsync -a --delete server/ "$HOST:$REMOTE_RELEASE/server/"
 rsync -a --delete --exclude '*.test.*' --exclude 'test/' src/ "$HOST:$REMOTE_RELEASE/src/"
 rsync -a package.json pnpm-lock.yaml pnpm-workspace.yaml "$HOST:$REMOTE_RELEASE/"
 rsync -a deploy/dashboard.service "$HOST:/tmp/dashboard.service.$RELEASE_ID"
+rsync -a deploy/remote-deploy.sh "$HOST:/tmp/dashboard.remote-deploy.$RELEASE_ID"
 
 ssh "$HOST" bash -se -- "$RELEASE_ID" <<'REMOTE'
 set -euo pipefail
 release_id="$1"
-release_dir="/opt/dashboard/releases/$release_id"
-current="/opt/dashboard/current"
-previous_target=""
-previous_unit="/tmp/dashboard.service.previous.$$"
-
-if [[ -L "$current" ]]; then
-  previous_target="$(readlink "$current")"
-fi
-if [[ -f /etc/systemd/system/dashboard.service ]]; then
-  cp /etc/systemd/system/dashboard.service "$previous_unit"
-fi
-
-rollback() {
-  trap - ERR
-  set +e
-  if [[ -n "$previous_target" ]]; then
-    ln -sfn "$previous_target" "${current}.rollback"
-    mv -Tf "${current}.rollback" "$current"
-  else
-    rm -f "$current"
-  fi
-  if [[ -f "$previous_unit" ]]; then
-    install -o root -g root -m 0644 "$previous_unit" /etc/systemd/system/dashboard.service
-  fi
-  systemctl daemon-reload
-  systemctl restart dashboard
-  rm -f "$previous_unit"
-  exit 1
-}
-trap rollback ERR
-
-cd "$release_dir"
-corepack enable
-corepack install --global pnpm@11.20.0
-corepack pnpm install --prod --frozen-lockfile
-test -x node_modules/.bin/tsx
-node_modules/.bin/tsx --version >/dev/null
-
-install -o root -g root -m 0644 "/tmp/dashboard.service.$release_id" /etc/systemd/system/dashboard.service
-systemctl daemon-reload
-ln -sfn "$release_dir" "${current}.next"
-mv -Tf "${current}.next" "$current"
-systemctl restart dashboard
-
-health_ok=false
-for _ in {1..30}; do
-  if systemctl is-active --quiet dashboard \
-    && curl --fail --silent --max-time 2 http://127.0.0.1/api/health >/dev/null; then
-    health_ok=true
-    break
-  fi
-  sleep 1
-done
-if [[ "$health_ok" != true ]]; then
-  echo "Healthcheck für dashboard.service fehlgeschlagen." >&2
-  false
-fi
-
-trap - ERR
-rm -f "/tmp/dashboard.service.$release_id" "$previous_unit"
-echo "Release $release_id ist aktiv."
+script="/tmp/dashboard.remote-deploy.$release_id"
+trap 'rm -f -- "$script"' EXIT
+bash "$script" "$release_id"
 REMOTE

@@ -40,7 +40,12 @@ describe("hostAllowed und originAllowed", () => {
     expect(originAllowed("http://evil.example", "start.home.arpa", hosts)).toBe(false);
     expect(originAllowed("javascript:alert(1)", "start.home.arpa", hosts)).toBe(false);
     expect(originAllowed("http://localhost:5173", "localhost:7777", hosts)).toBe(true);
+    expect(originAllowed("http://localhost:5174", "localhost:7777", hosts)).toBe(false);
+    expect(originAllowed("http://start.home.arpa:8080", "start.home.arpa", hosts)).toBe(false);
+    expect(originAllowed("https://start.home.arpa", "start.home.arpa", hosts, "http:")).toBe(false);
+    expect(originAllowed("https://start.home.arpa", "start.home.arpa", hosts, "https:")).toBe(true);
     expect(originAllowed("http://start.home.arpa/path", "start.home.arpa", hosts)).toBe(false);
     expect(originAllowed("null", "start.home.arpa", hosts)).toBe(false);
+    expect(originAllowed("http://start.home.arpa", undefined, hosts)).toBe(false);
   });
 });

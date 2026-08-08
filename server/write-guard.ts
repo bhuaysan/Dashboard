@@ -22,27 +22,61 @@ export function ipAllowed(addr: string, allow: string[]): boolean {
   });
 }
 
-function hostnameFromHeader(value: string): string | undefined {
+type HostEndpoint = { hostname: string; port: number; hasPort: boolean };
+
+function defaultPort(protocol: string): number | undefined {
+  if (protocol === "http:") return 80;
+  if (protocol === "https:") return 443;
+  return undefined;
+}
+
+function hasExplicitPort(value: string): boolean {
+  if (value.startsWith("[")) {
+    const close = value.indexOf("]");
+    return close !== -1 && /^:\d+$/.test(value.slice(close + 1));
+  }
+  return /:\d+$/.test(value);
+}
+
+function parseHost(value: string, protocol = "http:"): HostEndpoint | undefined {
   const trimmed = value.trim();
   if (trimmed === "" || /[\u0000-\u0020]/.test(trimmed)) return undefined;
   try {
-    const parsed = new URL(`http://${trimmed}`);
+    const parsed = new URL(`${protocol}//${trimmed}`);
     if (parsed.username !== "" || parsed.password !== "" || parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
       return undefined;
     }
-    return parsed.hostname.toLowerCase().replace(/\.$/, "");
+    const port = parsed.port === "" ? defaultPort(protocol) : Number(parsed.port);
+    if (port === undefined || !Number.isInteger(port) || port < 1 || port > 65535) return undefined;
+    return {
+      hostname: parsed.hostname.toLowerCase().replace(/\.$/, ""),
+      port,
+      hasPort: hasExplicitPort(trimmed),
+    };
   } catch {
     return undefined;
   }
 }
 
 export function hostAllowed(host: string, allow: string[]): boolean {
-  const actual = hostnameFromHeader(host);
+  const actual = parseHost(host);
   if (actual === undefined) return false;
-  return allow.some((entry) => hostnameFromHeader(entry) === actual);
+  return allow.some((entry) => {
+    const allowed = parseHost(entry);
+    return allowed !== undefined && allowed.hostname === actual.hostname &&
+      (!allowed.hasPort || allowed.port === actual.port);
+  });
 }
 
-export function originAllowed(origin: string, requestHost: string | undefined, allow: string[]): boolean {
+const VITE_DEV_ORIGINS = new Set(["http://localhost:5173", "http://127.0.0.1:5173"]);
+
+export function originAllowed(
+  origin: string,
+  requestHost: string | undefined,
+  allow: string[],
+  requestProtocol = "http:",
+  devApiPort = 7777,
+): boolean {
   if (origin === "null") return false;
   let parsed: URL;
   try {
@@ -52,19 +86,32 @@ export function originAllowed(origin: string, requestHost: string | undefined, a
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
   if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") return false;
-  if (parsed.username !== "" || parsed.password !== "" || !hostAllowed(parsed.host, allow)) return false;
-  return requestHost === undefined || hostnameFromHeader(requestHost) === hostnameFromHeader(parsed.host);
+  if (parsed.username !== "" || parsed.password !== "") return false;
+  if (requestHost === undefined || !hostAllowed(requestHost, allow)) return false;
+
+  const request = parseHost(requestHost, requestProtocol);
+  const originEndpoint = parseHost(parsed.host, parsed.protocol);
+  if (request === undefined || originEndpoint === undefined) return false;
+  if (parsed.protocol === requestProtocol && request.hostname === originEndpoint.hostname &&
+      request.port === originEndpoint.port) return true;
+
+  // Vite serves the UI from 5173 while the API stays on the configured dev port.
+  // This is deliberately an exact allowlist, not a general cross-port exception.
+  return requestProtocol === "http:" && request.port === devApiPort &&
+    VITE_DEV_ORIGINS.has(parsed.origin) && request.hostname === originEndpoint.hostname;
 }
 
-export function createWriteGuard(runtimeEnv: Pick<DashboardEnvironment, "writeAllow" | "writeHosts">): MiddlewareHandler {
+export function createWriteGuard(runtimeEnv: Pick<DashboardEnvironment, "port" | "writeAllow" | "writeHosts">): MiddlewareHandler {
   return async (c, next) => {
     if (c.req.method !== "PUT" && c.req.method !== "DELETE") return next();
     const requestHost = c.req.header("host");
-    if (requestHost !== undefined && !hostAllowed(requestHost, runtimeEnv.writeHosts)) {
+    if (requestHost === undefined || !hostAllowed(requestHost, runtimeEnv.writeHosts)) {
       return c.json({ error: "Host für Schreibzugriff nicht erlaubt" }, 403);
     }
     const origin = c.req.header("origin");
-    if (origin !== undefined && !originAllowed(origin, requestHost, runtimeEnv.writeHosts)) {
+    let requestProtocol = "http:";
+    try { requestProtocol = new URL(c.req.url).protocol; } catch { /* Hono liefert normalerweise eine gültige URL */ }
+    if (origin !== undefined && !originAllowed(origin, requestHost, runtimeEnv.writeHosts, requestProtocol, runtimeEnv.port)) {
       return c.json({ error: "Origin für Schreibzugriff nicht erlaubt" }, 403);
     }
     let addr: string | undefined;
