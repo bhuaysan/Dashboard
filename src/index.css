@@ -195,10 +195,15 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .warn { color: var(--color-warn); }
 .crit { color: var(--color-crit); }
 .group-label {
-  margin-top: .55rem; font-size: 12px; letter-spacing: .08em;
+  font-size: 12px; letter-spacing: .08em;
   text-transform: uppercase; color: var(--color-dim);
 }
-.group-label:first-child { margin-top: 0; }
+/* Der Abstand gehört zwischen die Gruppen, nicht über jede Beschriftung. Vorher trug ihn
+   das Label als margin-top, den `.group-label:first-child` aber wieder auf null setzte —
+   und weil jedes Label das erste Kind seiner Gruppe ist, traf die Ausnahme jede Gruppe.
+   Gemessen blieb zwischen zwei Gruppen null Abstand, bei 24 px Zeilentakt: zwanzig Links
+   lasen sich als eine Liste statt als vier Gruppen. */
+.link-group + .link-group { margin-top: 1.1rem; }
 
 .clock-time {
   font-size: clamp(3rem, 7vw, 5.5rem); line-height: 1.05;

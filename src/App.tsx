@@ -360,7 +360,7 @@ export default function App() {
           >
             <nav aria-label="Links">
               {config.linkGroups.map((g) => (
-                <div key={g.title}>
+                <div className="link-group" key={g.title}>
                   <div className="group-label">{g.title}</div>
                   <ul>
                     {g.links.map((l) => {

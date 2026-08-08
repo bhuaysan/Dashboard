@@ -1,6 +1,6 @@
 import type { Config } from "../config/schema";
 import { parseFeed, type NewsItem } from "../lib/rss";
-import { isSameDay } from "../lib/relativeTime";
+import { shortAge, spokenAge } from "../lib/relativeTime";
 import { safeHref } from "../lib/useKeymap";
 import { z } from "zod";
 
@@ -67,12 +67,6 @@ export function News({ items, failures = [], selIndex, feedCount }: {
     return <>{warning}<div className="dim">{feedCount === 0 ? "keine Feeds eingetragen" : "keine Meldungen geladen"}</div></>;
   }
   const now = new Date();
-  const fmtTime = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
-  const stamp = (d: Date) => {
-    if (isSameDay(d, now)) return fmtTime.format(d);
-    const days = Math.max(1, Math.round((now.getTime() - d.getTime()) / 86400000));
-    return `${days} d`;
-  };
   return (
     <div className="news">
       {warning}
@@ -81,7 +75,12 @@ export function News({ items, failures = [], selIndex, feedCount }: {
         const cls = `news-row${i === selIndex ? " is-sel" : ""}`;
         const inner = (
           <>
-            <span className="dim">{stamp(n.date)}</span>
+            {/* Alter statt Uhrzeit: die Umschaltung lief über den Kalendertag, weshalb
+                kurz nach Mitternacht jede Meldung des Vorabends „1 d" hieß — sieben
+                gleiche Zellen, die nichts mehr aussagten. Vorgelesen wird ausgeschrieben,
+                „12m" ist zum Hören zu knapp. */}
+            <span className="dim" aria-hidden="true">{shortAge(n.date, now)}</span>
+            <span className="sr-only">{spokenAge(n.date, now)}</span>
             <span className="src">{n.source}</span>
             <span className="headline">{n.title}</span>
           </>
