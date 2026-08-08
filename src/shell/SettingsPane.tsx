@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { configSchema, type Config } from "../config/schema";
 import { describeIssue, issueRootKey } from "../config/describeIssue";
-import { ConfigConflictError, type useSaveConfig } from "../api/config";
+import { ConfigConflictError } from "../api/config";
 
 type Guest = { vmid: number; name: string };
-export type SaveConfig = ReturnType<typeof useSaveConfig>;
+type SaveOptions = {
+  onSuccess?: () => void;
+  onError?: (error: unknown) => void;
+};
+
+export type SaveConfig = {
+  mutate: (config: Config, options?: SaveOptions) => void;
+  isPending: boolean;
+};
 
 type Props = {
   open: boolean;

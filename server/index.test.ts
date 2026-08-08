@@ -19,6 +19,7 @@ async function createFixture(): Promise<AppFixture> {
   const staticPath = join(tempDir, "static");
   await mkdir(staticPath);
   await mkdir(join(tempDir, "dist"));
+  await writeFile(join(tempDir, "dist", "index.html"), '<html><body><div id="root">Dashboard</div></body></html>');
   await writeFile(join(staticPath, "arbeit.ics"), "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
   const testEnv: DashboardEnvironment = {
     port: 7777,
@@ -298,6 +299,12 @@ describe("/api/proxy", () => {
 });
 
 describe("Static- und Fallback-Routen", () => {
+  itWithApp("liefert für eine gültige SPA-Clientroute weiterhin index.html", async ({ app }) => {
+    const res = await app.request("/settings");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<div id="root">Dashboard</div>');
+  });
+
   itWithApp("liefert lokale ICS-Dateien aus dem separaten Static-Root", async ({ app }) => {
     const res = await app.request("/static/arbeit.ics");
     expect(res.status).toBe(200);

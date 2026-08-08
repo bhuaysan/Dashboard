@@ -13,7 +13,7 @@ const guests = [{ vmid: 100, name: "caddy" }, { vmid: 110, name: "minecraft.loca
 type MutateCall = (cfg: Config, opts?: { onSuccess?: () => void; onError?: (err: unknown) => void }) => void;
 
 function fakeSave(mutate: MutateCall): SaveConfig {
-  return { mutate: vi.fn(mutate), isPending: false } as unknown as SaveConfig;
+  return { mutate: vi.fn(mutate), isPending: false };
 }
 
 function saveSucceeds(): SaveConfig {

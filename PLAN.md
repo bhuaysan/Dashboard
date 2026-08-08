@@ -868,7 +868,7 @@ Tage, gruppiert nach `heute` / `morgen` / Wochentag; der laufende Termin bekommt
 
 **Hinweis zum Kalender:** Ob sich der Outlook-Kalender bei IBsolution als ICS veröffentlichen lässt,
 entscheidet eine Exchange-Richtlinie der IT und kann gesperrt sein. Falls es nicht geht: eine
-`.ics`-Datei in `/opt/dashboard/static/` legen und als `calendars[].url` einen Pfad auf dem eigenen
+`.ics`-Datei in `/var/lib/dashboard/static/` legen und als `calendars[].url` einen Pfad auf dem eigenen
 Server eintragen. Dann greift der Proxy nicht und alles andere bleibt gleich. Microsoft Graph mit
 OAuth ist **nicht** Teil dieses Auftrags.
 
