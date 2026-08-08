@@ -51,4 +51,22 @@ describe("parseFeed", () => {
   it("meldet unlesbares XML, statt stillschweigend nichts zu liefern", () => {
     expect(() => parseFeed("<rss><channel>", "beispiel")).toThrow("kein gültiges XML");
   });
+
+  it("bevorzugt im Atom-Feed alternate vor self und löst relative Links auf", () => {
+    const xml = `<?xml version="1.0"?>
+      <feed xmlns="http://www.w3.org/2005/Atom"><entry>
+        <title>Artikel</title>
+        <link rel="self" href="https://example.com/feed.xml"/>
+        <link rel="alternate" href="../artikel/1"/>
+        <updated>2026-08-05T12:02:00Z</updated>
+      </entry></feed>`;
+    const [item] = parseFeed(xml, "beispiel", "https://example.com/news/feed.xml");
+    expect(item?.url).toBe("https://example.com/artikel/1");
+  });
+
+  it("blockiert unsichere Link-Schemata", () => {
+    const xml = `<rss><channel><item><title>Böse</title><link>javascript:alert(1)</link><pubDate>Wed, 05 Aug 2026 12:02:00 GMT</pubDate></item></channel></rss>`;
+    const [item] = parseFeed(xml, "beispiel", "https://example.com/feed.xml");
+    expect(item?.url).toBe("");
+  });
 });

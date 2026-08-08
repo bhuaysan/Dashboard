@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { CalEvent } from "../lib/ics";
+import type { HolidayRegion } from "../config/schema";
 import { dayKey, isoWeek, monthGrid, startOfDay } from "../lib/date";
 import { holidayNames } from "../lib/holidays";
 
@@ -11,15 +12,29 @@ export function monthLabel(d: Date): string {
   return new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(d);
 }
 
-export function Month({ now, events }: { now: Date; events?: CalEvent[] }) {
-  const { weeks } = monthGrid(now);
+export function Month({ now, events, holidayRegion = "BW" }: {
+  now: Date;
+  events?: CalEvent[];
+  holidayRegion?: HolidayRegion;
+}) {
+  const grid = monthGrid(now);
+  const { weeks } = grid;
   const today = startOfDay(now);
   const todayKey = dayKey(today);
   const month = now.getMonth();
 
   // Ein Raster kann bis in zwei Nachbarjahre reichen — Dezember zeigt Tage im Januar.
-  const holidays = holidayNames(weeks.flat().map((d) => d.getFullYear()));
-  const withEvents = new Set((events ?? []).map((e) => dayKey(e.start)));
+  const holidays = holidayNames(weeks.flat().map((d) => d.getFullYear()), holidayRegion);
+  const withEvents = new Set<string>();
+  for (const event of events ?? []) {
+    if (event.end < grid.from || event.start > grid.to) continue;
+    const end = new Date(event.end.getTime() - 1);
+    const cursor = startOfDay(event.start < grid.from ? grid.from : event.start);
+    const last = startOfDay(end > grid.to ? grid.to : end);
+    for (let day = cursor; day <= last; day.setDate(day.getDate() + 1)) {
+      withEvents.add(dayKey(day));
+    }
+  }
 
   const spoken = weeks.flat()
     .filter((d) => d.getMonth() === month)

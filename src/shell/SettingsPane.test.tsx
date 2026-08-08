@@ -216,4 +216,14 @@ describe("SettingsPane", () => {
     fireEvent.click(screen.getByLabelText('Gruppe „Leer" löschen'));
     expect(screen.queryByDisplayValue("Leer")).toBeNull();
   });
+
+  it("sortiert Linkgruppen mit eigenen Auf-/Ab-Aktionen", () => {
+    const save = saveSucceeds();
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("button", { name: 'Gruppe „Intern" nach oben' }));
+    expect(screen.getAllByLabelText("Gruppenname").map((field) => (field as HTMLInputElement).value))
+      .toEqual(["Intern", "SAP", "Homelab", "Dev"]);
+    expect((screen.getByRole("button", { name: 'Gruppe „Intern" nach oben' }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

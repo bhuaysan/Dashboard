@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../config/schema";
-import { fetchEvents } from "./Agenda";
+import { fetchEvents, filterAgendaEvents } from "./Agenda";
+import type { CalEvent } from "../lib/ics";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -15,5 +16,41 @@ describe("fetchEvents", () => {
 
     await expect(fetchEvents(calendars, new Date("2026-08-08T23:59:59Z"))).rejects.toThrow("Kein Kalender erreichbar");
     expect(fetchMock).toHaveBeenCalledWith(`/api/proxy?url=${encodeURIComponent(url)}`);
+  });
+
+  it("liefert erreichbare Kalender und benennt einen partiellen Ausfall", async () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:ok",
+      "DTSTART:20260806T090000",
+      "DTEND:20260806T100000",
+      "SUMMARY:Termin",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const fetchMock = vi.fn(async (url: string) =>
+      url.includes("ok.example") ? new Response(ics, { status: 200 }) : new Response("", { status: 502 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchEvents(
+      [{ label: "ok", url: "https://ok.example/calendar.ics" }, { label: "kaputt", url: "https://bad.example/calendar.ics" }],
+      new Date("2026-08-05T00:00:00"),
+      new Date("2026-08-08T23:59:59"),
+    );
+    expect(result.items).toHaveLength(1);
+    expect(result.failures).toEqual(["kaputt"]);
+  });
+});
+
+describe("filterAgendaEvents", () => {
+  it("behält einen über Mitternacht laufenden Termin", () => {
+    const event: CalEvent = {
+      title: "Nacht",
+      start: new Date("2026-08-06T23:00:00"),
+      end: new Date("2026-08-07T01:00:00"),
+      allDay: false,
+    };
+    expect(filterAgendaEvents([event], new Date("2026-08-07T09:00:00"))).toEqual([event]);
   });
 });

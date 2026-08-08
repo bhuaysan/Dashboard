@@ -26,6 +26,9 @@ export function useConfig() {
     },
     initialData: () => readLocalConfig() ?? defaultConfig,
     staleTime: 30_000,
+    // Local Storage liefert sofort ein sichtbares Bild, ist aber keine Aussage
+    // darüber, ob der Serverstand noch aktuell ist.
+    refetchOnMount: "always",
     refetchInterval: 15_000,              // Sync zwischen Geräten
     refetchIntervalInBackground: false,   // pausiert im versteckten Tab
     refetchOnWindowFocus: "always",

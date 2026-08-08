@@ -12,6 +12,7 @@ export const defaultConfig: Config = {
     ],
   },
   location: { label: "Heilbronn", lat: 49.1427, lon: 9.2109 },
+  holidayRegion: "BW",
   linkGroups: [
     {
       title: "SAP",

@@ -18,13 +18,13 @@ import { exportConfig, importConfig, restoreConfig } from "./config/io";
 import type { Config } from "./config/schema";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
 import { useCachedQuery } from "./api/useCachedQuery";
-import { fetchWeather, Weather } from "./widgets/Weather";
-import { fetchEvents, reviveEvents, Agenda } from "./widgets/Agenda";
-import { fetchNews, reviveNews, News } from "./widgets/News";
+import { decodeWeather, fetchWeather, Weather } from "./widgets/Weather";
+import { decodeEvents, fetchEvents, filterAgendaEvents, Agenda } from "./widgets/Agenda";
+import { decodeNews, fetchNews, News } from "./widgets/News";
 import { Month, monthLabel } from "./widgets/Month";
-import { addDays, monthGrid, startOfDay } from "./lib/date";
+import { eventFetchRange } from "./lib/date";
 import type { Note, SourceState } from "./shell/StatusLine";
-import { fetchHomelab, reviveHomelab, Homelab } from "./widgets/Homelab";
+import { decodeHomelab, fetchHomelab, Homelab } from "./widgets/Homelab";
 import { SettingsPane } from "./shell/SettingsPane";
 
 type RowInfo = { url?: string };
@@ -61,6 +61,7 @@ export default function App() {
   const [message, setMessage] = useState<Note | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const now = useNow();
+  const calRange = useMemo(() => eventFetchRange(now, AGENDA_DAYS), [now]);
   const paneRefs = useRef<Partial<Record<PaneId, HTMLElement | null>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -84,22 +85,22 @@ export default function App() {
     `wx:${config.location.lat},${config.location.lon}`,
     () => fetchWeather(config.location),
     600_000,
-    { refetchIntervalMs: 600_000 },
+    { decode: decodeWeather, refetchIntervalMs: 600_000 },
   );
   const calQuery = useCachedQuery(
-    `cal:${JSON.stringify(config.calendars)}`,
-    () => fetchEvents(config.calendars, monthGrid(new Date()).to),
+    `cal:${JSON.stringify(config.calendars)}:${calRange.from.getTime()}:${calRange.to.getTime()}`,
+    () => fetchEvents(config.calendars, calRange.from, calRange.to),
     900_000,
-    { revive: reviveEvents, refetchIntervalMs: 900_000 },
+    { decode: decodeEvents, refetchIntervalMs: 900_000 },
   );
   const newsQuery = useCachedQuery(
     `news:${JSON.stringify(config.feeds)}`,
     () => fetchNews(config.feeds),
     900_000,
-    { revive: reviveNews, refetchIntervalMs: 900_000 },
+    { decode: decodeNews, refetchIntervalMs: 900_000 },
   );
   const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, {
-    revive: reviveHomelab, refetchIntervalMs: 60_000,
+    decode: decodeHomelab, refetchIntervalMs: 60_000,
   });
 
   // undefined bleibt undefined: „noch keine Termine" ist ein anderer Zustand als
@@ -107,10 +108,14 @@ export default function App() {
   const agendaEvents = useMemo(
     () => {
       if (!calQuery.data) return undefined;
-      const limit = addDays(startOfDay(now), AGENDA_DAYS);
-      return calQuery.data.filter((e) => e.start < limit);
+      return filterAgendaEvents(calQuery.data.items, now, AGENDA_DAYS);
     },
     [calQuery.data, now],
+  );
+
+  const monthEvents = useMemo(
+    () => calQuery.data?.items.filter((event) => event.end >= calRange.from && event.start <= calRange.to),
+    [calQuery.data, calRange],
   );
 
   const flatLinks = useMemo<FlatLink[]>(
@@ -150,7 +155,7 @@ export default function App() {
       month: [],
       links: flatLinks.map((l) => ({ url: l.url })),
       agenda: (agendaEvents ?? []).map(() => ({})),
-      news: (newsQuery.data ?? []).map((n) => ({ url: n.url || undefined })),
+      news: (newsQuery.data?.items ?? []).map((n) => ({ url: n.url || undefined })),
       // Gestoppte Gäste haben keine Konsole — Enter darf dort kein leeres noVNC öffnen.
       homelab: (labQuery.data?.guests ?? []).map((g) => (
         g.running ? { url: consoleUrl(g.vmid) } : {}
@@ -160,6 +165,20 @@ export default function App() {
     for (const id of PANE_ORDER.map((p) => p.id)) if (!visiblePanes.has(id)) rows[id] = [];
     return rows;
   }, [flatLinks, agendaEvents, newsQuery.data, labQuery.data, consoleUrl, visiblePanes]);
+
+  const rowCounts = useMemo<Record<PaneId, number>>(() => ({
+    clock: rowsByPane.clock.length,
+    weather: rowsByPane.weather.length,
+    month: rowsByPane.month.length,
+    links: rowsByPane.links.length,
+    news: rowsByPane.news.length,
+    agenda: rowsByPane.agenda.length,
+    homelab: rowsByPane.homelab.length,
+  }), [rowsByPane]);
+
+  useEffect(() => {
+    dispatch({ type: "sync", rowCounts, visiblePanes });
+  }, [rowCounts, visiblePanes]);
 
   const hintMap = hints;
 
@@ -251,8 +270,8 @@ export default function App() {
   const isSel = (pane: PaneId, i: number) => ui.mode === "NORMAL" && ui.pane === pane && ui.row === i;
   const selIndex = (pane: PaneId) => (ui.mode === "NORMAL" && ui.pane === pane ? ui.row : -1);
 
-  const queryState = (q: { isError: boolean; isStale: boolean }): SourceState =>
-    q.isError ? "crit" : q.isStale ? "warn" : "ok";
+  const queryState = (q: { isError: boolean; isStale: boolean }, partial = false): SourceState =>
+    q.isError ? "crit" : partial || q.isStale ? "warn" : "ok";
 
   const labAlerts = labQuery.data?.alerts ?? [];
   const labAlertLevel = labAlerts.some((a) => a.level === "crit") ? "crit" : "warn";
@@ -265,7 +284,13 @@ export default function App() {
     ["pve", labQuery.error],
     ["cfg", configQuery.error],
   ] as const).find(([, err]) => err !== null);
-  const problem = failed && failed[1] ? `${failed[0]}: ${failed[1].message}` : undefined;
+  const partialProblems = [
+    ...(newsQuery.data?.failures ?? []).map((label) => `news: Feed „${label}" nicht erreichbar`),
+    ...(calQuery.data?.failures ?? []).map((label) => `cal: Kalender „${label}" nicht erreichbar`),
+  ];
+  const problem = failed && failed[1]
+    ? `${failed[0]}: ${failed[1].message}`
+    : partialProblems.join(" · ") || undefined;
 
   let linkRow = -1;
 
@@ -320,7 +345,7 @@ export default function App() {
           <Pane title="Month" label="Monat" subtitle={monthLabel(now)} span={paneSpan("month")} id="pane-7"
             ref={(el: HTMLElement | null) => { paneRefs.current.month = el; }}
           >
-            <Month now={now} events={calQuery.data} />
+            <Month now={now} events={monthEvents} holidayRegion={config.holidayRegion} />
           </Pane>
           )}
 
@@ -363,7 +388,8 @@ export default function App() {
           <Pane title="News" label="Nachrichten" span={paneSpan("news")} clip id="pane-5"
             ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
           >
-            <News items={newsQuery.data} selIndex={selIndex("news")} feedCount={config.feeds.length} />
+            <News items={newsQuery.data?.items} failures={newsQuery.data?.failures}
+              selIndex={selIndex("news")} feedCount={config.feeds.length} />
           </Pane>
           )}
 
@@ -371,7 +397,8 @@ export default function App() {
           <Pane title="Agenda" label="Termine" span={paneSpan("agenda")} clip id="pane-4"
             ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
           >
-            <Agenda events={agendaEvents} selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
+            <Agenda events={agendaEvents} failures={calQuery.data?.failures}
+              selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
           </Pane>
           )}
 
@@ -404,8 +431,8 @@ export default function App() {
               .map(({ n, label, active }) => ({ n, label, active }))}
             sources={[
               { label: "wx", state: queryState(wxQuery), updatedAt: wxQuery.dataUpdatedAt },
-              { label: "news", state: queryState(newsQuery), updatedAt: newsQuery.dataUpdatedAt },
-              { label: "cal", state: queryState(calQuery), updatedAt: calQuery.dataUpdatedAt },
+              { label: "news", state: queryState(newsQuery, (newsQuery.data?.failures.length ?? 0) > 0), updatedAt: newsQuery.dataUpdatedAt },
+              { label: "cal", state: queryState(calQuery, (calQuery.data?.failures.length ?? 0) > 0), updatedAt: calQuery.dataUpdatedAt },
               {
                 label: "pve",
                 state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery),

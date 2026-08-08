@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dayKey } from "./date";
-import { easterSunday, holidayNames, holidaysNRW } from "./holidays";
+import { easterSunday, holidayNames, holidaysBW, holidaysNRW } from "./holidays";
 
 describe("easterSunday", () => {
   // Stützstellen aus dem gregorianischen Kalender: früher und später Termin, dazu ein
@@ -53,5 +53,13 @@ describe("holidayNames", () => {
     expect(map.get("2027-01-01")).toBe("Neujahr");
     expect(map.get("2026-12-24")).toBeUndefined();
   });
-});
 
+  it("unterscheidet die Feiertagssets von BW und NRW", () => {
+    const bw = new Map(holidaysBW(2026).map((h) => [h.name, dayKey(h.date)]));
+    const nrw = new Map(holidaysNRW(2026).map((h) => [h.name, dayKey(h.date)]));
+    expect(bw.get("Heilige Drei Könige")).toBe("2026-01-06");
+    expect(nrw.has("Heilige Drei Könige")).toBe(false);
+    expect(holidayNames([2026], "BW").get("2026-01-06")).toBe("Heilige Drei Könige");
+    expect(holidayNames([2026], "NRW").get("2026-01-06")).toBeUndefined();
+  });
+});

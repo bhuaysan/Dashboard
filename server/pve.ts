@@ -4,6 +4,7 @@ import { env } from "./env.ts";
 import { checkReachability, type ReachResult } from "./reachability.ts";
 import { relativeTime } from "../src/lib/relativeTime.ts";
 import type { Config } from "../src/config/schema.ts";
+import { z } from "zod";
 
 export type Level = "ok" | "warn" | "crit";
 
@@ -54,7 +55,29 @@ type Resource = {
   cpu?: number; mem?: number; maxmem?: number; template?: number;
 };
 type StorageEntry = { storage: string; total: number; used: number; active: number };
-type Task = { id?: string; starttime: number; endtime?: number; status?: string };
+type Task = { id?: string | null; starttime: number; endtime?: number; status?: string };
+
+const finite = z.number().finite();
+const nodeStatusSchema = z.object({
+  cpu: finite,
+  memory: z.object({ used: finite, total: finite }),
+  rootfs: z.object({ used: finite, total: finite }),
+  uptime: finite,
+});
+const rrdPointSchema = z.object({
+  cpu: finite.optional(), memused: finite.optional(), memtotal: finite.optional(),
+});
+const resourceSchema = z.object({
+  vmid: z.number().int().positive(), name: z.string().optional(), type: z.string(),
+  status: z.string(), cpu: finite.optional(), mem: finite.optional(),
+  maxmem: finite.optional(), template: finite.optional(),
+});
+const storageEntrySchema = z.object({
+  storage: z.string(), total: finite, used: finite, active: z.number().int(),
+});
+const taskSchema = z.object({
+  id: z.string().nullable().optional(), starttime: finite, endtime: finite.optional(), status: z.string().optional(),
+});
 
 export type PveRaw = {
   status: NodeStatus;
@@ -79,7 +102,7 @@ function pveAgent(): Agent {
   return agent;
 }
 
-async function pveGet<T>(path: string): Promise<T> {
+async function pveGet<T>(path: string, schema: z.ZodType<T>): Promise<T> {
   if (!env.pve) throw new Error("PVE nicht konfiguriert");
   const res = await undiciFetch(`${env.pve.url}/api2/json${path}`, {
     headers: { Authorization: `PVEAPIToken=${env.pve.tokenId}=${env.pve.secret}` },
@@ -87,7 +110,12 @@ async function pveGet<T>(path: string): Promise<T> {
     signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) throw new Error(`PVE ${path}: HTTP ${res.status}`);
-  return (await res.json() as { data: T }).data;
+  const raw: unknown = await res.json();
+  const envelope = z.object({ data: z.unknown() }).safeParse(raw);
+  if (!envelope.success) throw new Error(`PVE ${path}: ungültige Antwort`);
+  const data = schema.safeParse(envelope.data.data);
+  if (!data.success) throw new Error(`PVE ${path}: ungültige Daten`);
+  return data.data;
 }
 
 export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date()): HomelabData {
@@ -212,12 +240,12 @@ export async function fetchHomelab(cfg: Config): Promise<HomelabData> {
   if (!env.pve) return emptyHomelab;
   const node = cfg.homelab.node;
   const [status, rrd, resources, storages, tasks, updates, reachability] = await Promise.all([
-    pveGet<NodeStatus>(`/nodes/${node}/status`),
-    pveGet<RrdPoint[]>(`/nodes/${node}/rrddata?timeframe=hour&cf=AVERAGE`),
-    pveGet<Resource[]>(`/cluster/resources?type=vm`),
-    pveGet<StorageEntry[]>(`/nodes/${node}/storage`),
-    pveGet<Task[]>(`/nodes/${node}/tasks?typefilter=vzdump&limit=50`),
-    pveGet<unknown[]>(`/nodes/${node}/apt/update`),
+    pveGet<NodeStatus>(`/nodes/${node}/status`, nodeStatusSchema),
+    pveGet<RrdPoint[]>(`/nodes/${node}/rrddata?timeframe=hour&cf=AVERAGE`, z.array(rrdPointSchema).max(10000)),
+    pveGet<Resource[]>(`/cluster/resources?type=vm`, z.array(resourceSchema).max(10000)),
+    pveGet<StorageEntry[]>(`/nodes/${node}/storage`, z.array(storageEntrySchema).max(1000)),
+    pveGet<Task[]>(`/nodes/${node}/tasks?typefilter=vzdump&limit=50`, z.array(taskSchema).max(1000)),
+    pveGet<unknown[]>(`/nodes/${node}/apt/update`, z.array(z.unknown()).max(1000)),
     checkReachability(cfg.homelab.reachability),
   ]);
   return buildHomelab({ status, rrd, resources, storages, tasks, updates, reachability }, cfg.homelab);

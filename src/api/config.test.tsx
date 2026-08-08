@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { ConfigConflictError, useSaveConfig } from "./config";
+import { ConfigConflictError, useConfig, useSaveConfig } from "./config";
 import { defaultConfig } from "../config/defaults";
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -11,6 +11,27 @@ function wrapper({ children }: { children: ReactNode }) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  localStorage.clear();
+});
+
+describe("useConfig", () => {
+  it("revalidiert eine lokale Config sofort beim Mount", async () => {
+    localStorage.setItem("dashboard:config", JSON.stringify(defaultConfig));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...defaultConfig, theme: "dark" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useConfig(), { wrapper });
+    expect(result.current.data?.theme).toBe("system");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/config"));
+    await waitFor(() => expect(result.current.data?.theme).toBe("dark"));
+  });
+
+  it("behält den lokalen Stand, wenn die sofortige Revalidierung scheitert", async () => {
+    localStorage.setItem("dashboard:config", JSON.stringify(defaultConfig));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    const { result } = renderHook(() => useConfig(), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 3000 });
+    expect(result.current.data).toEqual(defaultConfig);
+  });
 });
 
 describe("useSaveConfig", () => {

@@ -1,6 +1,7 @@
 import { sparkline } from "../lib/sparkline";
 import { weatherText } from "../lib/weatherCodes";
 import { moonPhase } from "../lib/moon";
+import { z } from "zod";
 
 export type WeatherData = {
   temp: number;
@@ -15,20 +16,58 @@ export type WeatherData = {
   days: { label: string; hi: number; lo: number; code: number }[];
 };
 
-type OpenMeteo = {
-  timezone?: string;
-  current?: { temperature_2m?: number; apparent_temperature?: number; weather_code?: number };
-  hourly?: { time?: number[]; temperature_2m?: number[]; precipitation_probability?: number[] };
-  daily?: {
-    time?: number[];
-    temperature_2m_min?: number[];
-    temperature_2m_max?: number[];
-    weather_code?: number[];
-    sunrise?: number[];
-    sunset?: number[];
-    daylight_duration?: number[];
-  };
-};
+const finiteNumber = z.number().finite();
+function isTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("de-DE", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const openMeteoSchema = z.object({
+  timezone: z.string().refine(isTimezone),
+  current: z.object({
+    temperature_2m: finiteNumber,
+    apparent_temperature: finiteNumber,
+    weather_code: finiteNumber,
+  }),
+  hourly: z.object({
+    time: z.array(finiteNumber).min(1).max(1000),
+    temperature_2m: z.array(finiteNumber).min(1).max(1000),
+    precipitation_probability: z.array(finiteNumber).min(1).max(1000),
+  }),
+  daily: z.object({
+    time: z.array(finiteNumber).min(1).max(100),
+    temperature_2m_min: z.array(finiteNumber).min(1).max(100),
+    temperature_2m_max: z.array(finiteNumber).min(1).max(100),
+    weather_code: z.array(finiteNumber).min(1).max(100),
+    sunrise: z.array(finiteNumber).min(1).max(100),
+    sunset: z.array(finiteNumber).min(1).max(100),
+    daylight_duration: z.array(finiteNumber).min(1).max(100),
+  }),
+});
+
+const weatherDataSchema = z.object({
+  temp: finiteNumber,
+  feels: finiteNumber,
+  code: finiteNumber,
+  hours: z.array(finiteNumber).max(1000),
+  rainPct: finiteNumber,
+  sunrise: z.string(),
+  sunset: z.string(),
+  daylight: finiteNumber,
+  daylightTrend: finiteNumber,
+  days: z.array(z.object({
+    label: z.string(), hi: finiteNumber, lo: finiteNumber, code: finiteNumber,
+  })).max(100),
+});
+
+export function decodeWeather(value: unknown): WeatherData | undefined {
+  const parsed = weatherDataSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
 
 export async function fetchWeather(loc: { lat: number; lon: number }): Promise<WeatherData> {
   // timeformat=unixtime, weil die sonst gelieferten Zeitangaben ohne Zeitzone stehen und
@@ -42,7 +81,10 @@ export async function fetchWeather(loc: { lat: number; lon: number }): Promise<W
     `&timezone=auto&timeformat=unixtime&forecast_days=5`;
   const res = await fetch(`/api/proxy?url=${encodeURIComponent(target)}`);
   if (!res.ok) throw new Error(`Wetter nicht ladbar (${res.status})`);
-  const j = (await res.json()) as OpenMeteo;
+  const raw: unknown = await res.json();
+  const parsed = openMeteoSchema.safeParse(raw);
+  if (!parsed.success) throw new Error("Wetterantwort ungültig");
+  const j = parsed.data;
 
   const timeZone = j.timezone;
   const times = j.hourly?.time ?? [];

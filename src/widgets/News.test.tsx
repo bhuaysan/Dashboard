@@ -29,9 +29,10 @@ describe("fetchNews", () => {
         ? new Response(FEED, { status: 200 })
         : new Response("", { status: 502 }),
     ));
-    const items = await fetchNews(feeds);
-    expect(items).toHaveLength(1);
-    expect(items[0]?.source).toBe("eins");
+    const result = await fetchNews(feeds);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.source).toBe("eins");
+    expect(result.failures).toEqual(["zwei"]);
   });
 
   it("wertet unlesbares XML als Ausfall der Quelle", async () => {
@@ -41,7 +42,17 @@ describe("fetchNews", () => {
 
   it("bleibt ohne eingetragene Feeds leer statt zu scheitern", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 502 })));
-    await expect(fetchNews([])).resolves.toEqual([]);
+    await expect(fetchNews([])).resolves.toEqual({ items: [], failures: [] });
+  });
+
+  it("sortiert vor dem Feed-Limit, damit der neueste Artikel bleibt", async () => {
+    const ascending = `<?xml version="1.0"?><rss><channel>
+      <item><title>alt</title><link>/alt</link><pubDate>Wed, 05 Aug 2026 11:00:00 GMT</pubDate></item>
+      <item><title>neu</title><link>/neu</link><pubDate>Wed, 05 Aug 2026 12:00:00 GMT</pubDate></item>
+    </channel></rss>`;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(ascending, { status: 200 })));
+    const result = await fetchNews([{ label: "feed", url: "https://example.com/rss.xml", limit: 1 }]);
+    expect(result.items.map((item) => item.title)).toEqual(["neu"]);
   });
 });
 

@@ -34,7 +34,7 @@ type Sec = (typeof SECTIONS)[number][0];
 // den Nutzer auch zu dem Reiter bringt, der das Feld tatsächlich zeigt.
 const SECTION_BY_ROOT: Record<string, Sec> = {
   theme: "layout", layout: "layout",
-  clock: "place", location: "place",
+  clock: "place", location: "place", holidayRegion: "place",
   linkGroups: "links",
   feeds: "feeds",
   calendars: "cal",
@@ -90,9 +90,12 @@ function NumInput({ value, min, onCommit, className, ...rest }: {
 function move<T>(arr: T[], i: number, delta: number): T[] {
   const j = i + delta;
   if (j < 0 || j >= arr.length) return arr;
+  const current = arr[i];
+  const target = arr[j];
+  if (current === undefined || target === undefined) return arr;
   const next = [...arr];
-  next[i] = arr[j] as T;
-  next[j] = arr[i] as T;
+  next[i] = target;
+  next[j] = current;
   return next;
 }
 
@@ -359,6 +362,12 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                         }))}
                       />
                       <span className="rowacts">
+                        <button type="button" className="rowact" disabled={gi === 0}
+                          onClick={() => upd((d) => ({ ...d, linkGroups: move(d.linkGroups, gi, -1) }))}
+                          aria-label={`Gruppe „${g.title}" nach oben`}>↑</button>
+                        <button type="button" className="rowact" disabled={gi === draft.linkGroups.length - 1}
+                          onClick={() => upd((d) => ({ ...d, linkGroups: move(d.linkGroups, gi, 1) }))}
+                          aria-label={`Gruppe „${g.title}" nach unten`}>↓</button>
                         {(() => {
                           const armed = confirmDelGroup === gi;
                           const n = g.links.length;
@@ -524,6 +533,20 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                 <div className="field">
                   <label>Koordinaten</label>
                   <span className="dim">{draft.location.label} · {draft.location.lat} · {draft.location.lon}</span>
+                </div>
+                <div className="field">
+                  <label htmlFor="s-holiday-region">Feiertagsregion</label>
+                  <select className="inp" id="s-holiday-region" value={draft.holidayRegion}
+                    onChange={(e) => {
+                      const region = e.target.value;
+                      if (region === "BW" || region === "NRW") {
+                        upd((d) => ({ ...d, holidayRegion: region }));
+                      }
+                    }}
+                  >
+                    <option value="BW">Baden-Württemberg</option>
+                    <option value="NRW">Nordrhein-Westfalen</option>
+                  </select>
                 </div>
                 <p className="set-hint" style={{ marginTop: "1rem" }}>Zweite Zeitzonen, erscheinen unter der Uhr.</p>
                 <div className="tbl tbl--zones">

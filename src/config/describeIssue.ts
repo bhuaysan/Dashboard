@@ -13,6 +13,7 @@ const FIELD_LABEL: Record<string, string> = {
   reachability: "Erreichbarkeit", linkGroups: "Links", feeds: "Feeds",
   calendars: "Kalender", proxyAllowlist: "Proxy", layout: "Layout",
   location: "Ort", clock: "Uhr", search: "Suche", homelab: "Homelab", theme: "Theme",
+  holidayRegion: "Feiertagsregion",
 };
 
 function describeSegment(seg: string | number): string {

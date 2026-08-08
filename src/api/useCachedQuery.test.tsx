@@ -14,14 +14,24 @@ describe("useCachedQuery", () => {
   it("belebt Datumsfelder aus dem JSON-Cache wieder", async () => {
     localStorage.setItem(
       "dashboard:cache:test",
-      JSON.stringify({ t: Date.now() - 120_000, data: [{ title: "Meldung", date: "2026-08-05T12:00:00.000Z" }] }),
+      JSON.stringify({ version: 1, t: Date.now() - 120_000, data: [{ title: "Meldung", date: "2026-08-05T12:00:00.000Z" }] }),
     );
     const { result } = renderHook(
       () => useCachedQuery<Item[]>(
         "test",
         async () => [{ title: "neu", date: new Date() }],
         60_000,
-        { revive: (items) => items.map((i) => ({ ...i, date: new Date(i.date) })) },
+        { decode: (data) => {
+          if (!Array.isArray(data)) return undefined;
+          const first = data[0];
+          if (typeof first !== "object" || first === null || !("title" in first) || !("date" in first)) return undefined;
+          if (typeof first.title !== "string" || typeof first.date !== "string") return undefined;
+          return data.map((item) => {
+            if (typeof item !== "object" || item === null || !("title" in item) || !("date" in item) ||
+                typeof item.title !== "string" || typeof item.date !== "string") return undefined;
+            return { title: item.title, date: new Date(item.date) };
+          }).filter((item): item is Item => item !== undefined);
+        } },
       ),
       { wrapper },
     );
@@ -30,5 +40,22 @@ describe("useCachedQuery", () => {
     expect(first?.date).toBeInstanceOf(Date);
     expect(() => first?.date.getFullYear()).not.toThrow();
     await waitFor(() => expect(result.current.data?.[0]?.title).toBe("neu"));
+  });
+
+  it.each([
+    ["alte Version", { version: 0, t: Date.now(), data: [] }],
+    ["fehlende Daten", { version: 1, t: Date.now(), data: {} }],
+    ["ungültiger Zeitstempel", { version: 1, t: "gestern", data: [] }],
+  ])("verwirft %s aus dem Cache", async (label, entry) => {
+    const key = `invalid-${label.replaceAll(" ", "-")}`;
+    localStorage.setItem(`dashboard:cache:${key}`, JSON.stringify(entry));
+    const { result } = renderHook(
+      () => useCachedQuery<Item[]>(key, async () => [{ title: "neu", date: new Date() }], 60_000, {
+        decode: () => undefined,
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.data?.[0]?.title).toBe("neu"));
+    expect(localStorage.getItem(`dashboard:cache:${key}`)).toContain('"version":1');
   });
 });

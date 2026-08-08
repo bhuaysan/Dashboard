@@ -18,17 +18,24 @@ type Props = {
 export function CommandBar({ mode, seed, links, search, onModeChange, onCommand }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  const previousMode = useRef<Mode>(mode);
 
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
-    if (mode === "INSERT" || mode === "COMMAND") {
-      setValue(seed ?? "");
+    const wasNormal = previousMode.current === "NORMAL";
+    const isActive = mode === "INSERT" || mode === "COMMAND";
+    if (isActive) {
+      // Nur der Übergang aus NORMAL initialisiert den Wert. INSERT und COMMAND
+      // dürfen beim Tippen ineinander wechseln, ohne den bisher eingegebenen Text
+      // durch den alten Seed zu ersetzen.
+      if (wasNormal) setValue(seed ?? "");
       el.focus();
     } else {
       setValue("");
       el.blur();
     }
+    previousMode.current = mode;
   }, [mode, seed]);
 
   function close() {

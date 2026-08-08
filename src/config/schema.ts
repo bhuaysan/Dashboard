@@ -5,6 +5,8 @@ import { z } from "zod";
 // ergänzt der Server sie beim Lesen aus defaultConfig (server/config-store.ts).
 export const PANE_IDS = ["clock", "weather", "month", "links", "news", "agenda", "homelab"] as const;
 export type PaneId = (typeof PANE_IDS)[number];
+export const HOLIDAY_REGIONS = ["BW", "NRW"] as const;
+export type HolidayRegion = (typeof HOLIDAY_REGIONS)[number];
 
 const MAX_URL_LENGTH = 2048;
 const MAX_TEXT_LENGTH = 256;
@@ -115,6 +117,9 @@ const baseConfigSchema = z.object({
     lat: z.number().finite().min(-90).max(90),
     lon: z.number().finite().min(-180).max(180),
   }),
+  // Bestehende Configs ohne Feld werden deterministisch für diese Installation
+  // auf Baden-Württemberg ergänzt.
+  holidayRegion: z.enum(HOLIDAY_REGIONS).default("BW"),
   linkGroups: z.array(z.object({
     title: text(MAX_TEXT_LENGTH),
     links: z.array(linkSchema).max(100),

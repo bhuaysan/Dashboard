@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reviveHomelab } from "./Homelab";
+import { decodeHomelab, reviveHomelab } from "./Homelab";
 import type { HomelabData } from "./Homelab";
 
 describe("reviveHomelab", () => {
@@ -32,5 +32,11 @@ describe("reviveHomelab", () => {
     expect(d.node.memLevel).toBe("crit");
     expect(d.guests[0]?.memLevel).toBe("warn");
     expect(d.storage[0]?.level).toBe("crit");
+  });
+});
+
+describe("decodeHomelab", () => {
+  it("verwirft eine formal gültige, aber strukturell leere Antwort", () => {
+    expect(decodeHomelab({ configured: true, node: {}, guests: [], storage: [], alerts: [] })).toBeUndefined();
   });
 });

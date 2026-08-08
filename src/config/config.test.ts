@@ -14,6 +14,12 @@ describe("configSchema", () => {
     expect(configSchema.safeParse(rest).success).toBe(false);
   });
 
+  it("ergänzt die Feiertagsregion bei einer alten Config deterministisch", () => {
+    const { holidayRegion: _omit, ...legacy } = defaultConfig;
+    const parsed = configSchema.parse(legacy);
+    expect(parsed.holidayRegion).toBe("BW");
+  });
+
   it.each([
     ["ungültige Zeitzone", { clock: { secondary: [{ label: "x", tz: "Nicht/Real" }] } }],
     ["ungültige Koordinaten", { location: { ...defaultConfig.location, lat: 91 } }],

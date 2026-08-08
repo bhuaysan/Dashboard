@@ -55,6 +55,14 @@ describe("Month", () => {
     expect(holidays[0]?.getAttribute("title")).toBe("Tag der Deutschen Einheit");
   });
 
+  it("verwendet die ausgewählte Feiertagsregion", () => {
+    const { container } = render(<Month now={new Date(2026, 0, 10)} holidayRegion="BW" />);
+    const holidays = [...container.querySelectorAll(".cal-day.is-holiday")];
+    expect(holidays.map((el) => el.textContent)).toContain("6");
+    expect(holidays.find((el) => el.textContent === "6")?.getAttribute("title"))
+      .toBe("Heilige Drei Könige");
+  });
+
   it("markiert Tage mit Terminen", () => {
     const { container } = render(
       <Month now={AUG_7} events={[ev(new Date(2026, 7, 11, 10, 0)), ev(new Date(2026, 7, 11, 14, 0))]} />,

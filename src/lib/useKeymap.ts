@@ -18,6 +18,7 @@ export type UiAction =
   | { type: "move"; delta: number; rowCount: number }
   | { type: "hint"; buffer: string }
   | { type: "help"; show: boolean }
+  | { type: "sync"; rowCounts: Readonly<Record<PaneId, number>>; visiblePanes: ReadonlySet<PaneId> }
   | { type: "reset" };
 
 // Reihenfolge und Kürzel der Statusline. Die Ziffern 1–7 folgen dieser Liste, sie muss
@@ -47,6 +48,17 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
       return { ...state, hintBuffer: action.buffer };
     case "help":
       return { ...state, showHelp: action.show };
+    case "sync": {
+      if (state.pane === null) return state;
+      const visiblePane = action.visiblePanes.has(state.pane)
+        ? state.pane
+        : PANE_ORDER.find((entry) => action.visiblePanes.has(entry.id))?.id ?? null;
+      if (visiblePane === null) return { ...state, pane: null, row: 0 };
+      const count = action.rowCounts[visiblePane] ?? 0;
+      const row = count === 0 ? 0 : Math.max(0, Math.min(count - 1, state.row));
+      if (visiblePane === state.pane && row === state.row) return state;
+      return { ...state, pane: visiblePane, row };
+    }
     case "reset":
       return { ...state, mode: "NORMAL", hintBuffer: "", showHelp: false };
   }

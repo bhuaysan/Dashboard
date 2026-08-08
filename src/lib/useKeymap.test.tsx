@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { initialUiState, openUrl, useKeymap, type Mode, type PaneId, type UiAction, type UiState } from "./useKeymap";
+import { initialUiState, openUrl, uiReducer, useKeymap, type Mode, type PaneId, type UiAction, type UiState } from "./useKeymap";
 
 const ALL_PANES: ReadonlySet<PaneId> = new Set<PaneId>([
   "clock", "weather", "month", "links", "agenda", "news", "homelab",
@@ -54,6 +54,33 @@ describe("Kürzel", () => {
     const dispatch = setup({ hintBuffer: "g" }, { hints: { gd: "https://example.com/" } });
     press("x");
     expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "" });
+  });
+});
+
+describe("Auswahl-Synchronisierung", () => {
+  const rowCounts = {
+    clock: 0,
+    weather: 0,
+    month: 0,
+    links: 0,
+    news: 2,
+    agenda: 0,
+    homelab: 0,
+  };
+
+  it("klemmt eine Auswahl auf die letzte sichtbare Zeile", () => {
+    const state: UiState = { ...initialUiState, pane: "news", row: 4 };
+    const next = uiReducer(state, { type: "sync", rowCounts, visiblePanes: ALL_PANES });
+    expect(next.pane).toBe("news");
+    expect(next.row).toBe(1);
+  });
+
+  it("wechselt bei einem ausgeblendeten Pane deterministisch zum ersten sichtbaren", () => {
+    const state: UiState = { ...initialUiState, pane: "news", row: 1 };
+    const visible = new Set<PaneId>(["clock", "links"]);
+    const next = uiReducer(state, { type: "sync", rowCounts, visiblePanes: visible });
+    expect(next.pane).toBe("clock");
+    expect(next.row).toBe(0);
   });
 });
 

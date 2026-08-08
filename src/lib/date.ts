@@ -48,3 +48,16 @@ export function monthGrid(d: Date): { weeks: Date[][]; from: Date; to: Date } {
   to.setMilliseconds(-1);                           // letzter Moment des letzten Sonntags
   return { weeks, from: start, to };
 }
+
+/**
+ * Gemeinsamer Abrufbereich für MONTH und AGENDA. `agendaDays` zählt den heutigen
+ * Tag mit: bei 4 werden heute und die drei folgenden Tage angezeigt.
+ */
+export function eventFetchRange(now: Date, agendaDays = 4): { from: Date; to: Date } {
+  const grid = monthGrid(now);
+  const agendaTo = addDays(startOfDay(now), agendaDays);
+  return {
+    from: grid.from,
+    to: grid.to >= agendaTo ? grid.to : agendaTo,
+  };
+}

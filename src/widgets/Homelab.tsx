@@ -1,13 +1,41 @@
 import { sparkline } from "../lib/sparkline";
 import { safeHref } from "../lib/useKeymap";
 import type { HomelabData, Level } from "../../server/pve";
+import { z } from "zod";
 
 export type { HomelabData };
+
+const levelSchema = z.enum(["ok", "warn", "crit"]);
+const homelabDataSchema = z.object({
+  configured: z.boolean(),
+  node: z.object({
+    cpu: z.number().finite(), mem: z.number().finite(), root: z.number().finite(),
+    uptimeDays: z.number().finite(), cpuSpark: z.array(z.number().finite()).max(1000),
+    memSpark: z.array(z.number().finite()).max(1000), cpuLevel: levelSchema,
+    memLevel: levelSchema, rootLevel: levelSchema,
+  }),
+  guests: z.array(z.object({
+    vmid: z.number().int().positive(), name: z.string(), running: z.boolean(),
+    cpu: z.number().finite(), mem: z.number().finite(), cpuLevel: levelSchema,
+    memLevel: levelSchema,
+  })).max(1000),
+  storage: z.array(z.object({
+    name: z.string(), pct: z.number().finite(), level: levelSchema,
+  })).max(1000),
+  alerts: z.array(z.object({ level: z.enum(["warn", "crit"]), text: z.string() })).max(1000),
+});
+
+export function decodeHomelab(value: unknown): HomelabData | undefined {
+  const parsed = homelabDataSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
 
 export async function fetchHomelab(): Promise<HomelabData> {
   const res = await fetch("/api/homelab");
   if (!res.ok) throw new Error(`Homelab nicht ladbar (${res.status})`);
-  return (await res.json()) as HomelabData;
+  const data = decodeHomelab(await res.json());
+  if (data === undefined) throw new Error("Homelabantwort ungültig");
+  return data;
 }
 
 function asLevel(v: unknown): Level {
