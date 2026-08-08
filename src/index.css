@@ -127,7 +127,11 @@ body {
 
 .app { display: flex; flex-direction: column; gap: 10px; max-width: 1600px; margin: 0 auto; }
 
-.grid { display: grid; gap: 10px; grid-template-columns: 1fr; }
+/* minmax(0, 1fr), nicht 1fr: 1fr heißt minmax(auto, 1fr), und die Untergrenze auto ist die
+   Mindestbreite des Inhalts. Eine einzelne lange Zeile — etwa ein Link mit langem Namen und
+   langem Zielhost — schöbe die Spur sonst über den Rand, statt gekürzt zu werden. */
+.grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.pane { min-width: 0; }
 @media (min-width: 820px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Drei Spalten, aber keine drei gleichen: links stehen kurze Beschriftungen (längster
    Eintrag 192 px). Die Untergrenze der ersten Spalte ist die Zeitzonenzeile der Uhr —
@@ -172,6 +176,12 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .row.is-sel { background: var(--color-bg-sel); }
+/* Der Zielhost steht an der rechten Panekante. Damit sind beide Kanten der Zeile
+   verankert und der Zwischenraum liest sich als Struktur statt als Rest — vorher belegte
+   die breiteste Zeile 87 von 423 px. Der Name weicht zuerst, der Host bleibt ganz. */
+.link-label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.link-host { margin-left: auto; padding-left: .9rem; flex: none; color: var(--color-dim); }
+.row.is-sel .link-host { color: var(--color-dim); }
 
 /* Zeilen sind echte Links. Sie sollen weiter aussehen wie Text im Terminal — keine
    Unterstreichung, keine Linkfarbe —, aber unter der Maus reagieren und die ganze
@@ -337,6 +347,10 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
    Meldung, drei fassen die längsten vollständig, und die Höhe dafür ist jetzt da. */
 .news { display: grid; grid-template-columns: 5.5ch fit-content(11ch) minmax(0, 1fr);
         gap: .35rem .6rem; }
+/* Die Ausfallmeldung ist ein Satz, keine Tabellenzelle. Ohne die volle Spannweite landet
+   sie in der 5,5 Zeichen breiten Alters-Spalte und bricht auf ein Wort je Zeile um —
+   sichtbar nur dann, wenn wirklich eine Quelle ausfällt. */
+.source-warning { grid-column: 1 / -1; }
 .news-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;
             gap: 0 .6rem; align-items: baseline;
             padding: .05rem .4rem; margin: 0 -.4rem; }

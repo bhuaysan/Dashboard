@@ -23,6 +23,7 @@ import { decodeEvents, fetchEvents, filterAgendaEvents, Agenda } from "./widgets
 import { decodeNews, fetchNews, News } from "./widgets/News";
 import { Month, monthLabel } from "./widgets/Month";
 import { eventFetchRange } from "./lib/date";
+import { linkHost } from "./lib/host";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { decodeHomelab, fetchHomelab, Homelab } from "./widgets/Homelab";
 import { SettingsPane } from "./shell/SettingsPane";
@@ -377,7 +378,11 @@ export default function App() {
                             data-row
                           >
                             <span className="hint">{l.hint ?? ""}</span>
-                            <span>{l.label}</span>
+                            <span className="link-label">{l.label}</span>
+                            {/* Der Zielhost an der rechten Panekante. Er füllt nicht nur
+                                die Breite — bei „Drive" oder „NAS" sagt erst er, wohin
+                                die Zeile führt. Aus der Adresse, nicht aus der Config. */}
+                            <span className="link-host">{linkHost(l.url)}</span>
                           </a>
                         </li>
                       );
