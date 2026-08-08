@@ -1,6 +1,6 @@
 import { shortAge, spokenAge } from "../lib/relativeTime";
 
-export type SourceState = "ok" | "warn" | "crit";
+export type SourceState = "ok" | "warn" | "crit" | "unconfigured";
 
 type Source = {
   label: string;
@@ -27,6 +27,7 @@ const STATE_TEXT: Record<SourceState, string> = {
   ok: "in Ordnung",
   warn: "veraltet",
   crit: "Fehler",
+  unconfigured: "nicht konfiguriert",
 };
 
 // Bisher stand für alle drei Zustände dasselbe ● da — der Unterschied lag allein in der
@@ -36,6 +37,7 @@ const STATE_MARK: Record<SourceState, string> = {
   ok: "●",
   warn: "·",
   crit: "!",
+  unconfigured: "○",
 };
 
 export function StatusLine({ mode, panes, sources, clock, note, problem }: Props) {

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildHomelab, parsePveEnvelope, type PveRaw } from "./pve.ts";

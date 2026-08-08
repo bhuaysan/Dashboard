@@ -43,14 +43,14 @@ const SECTION_BY_ROOT: Record<string, Sec> = {
   homelab: "lab",
 };
 
-function RowActs({ first, last, onMove, onDel }: {
-  first: boolean; last: boolean; onMove: (delta: number) => void; onDel: () => void;
+function RowActs({ label, first, last, onMove, onDel }: {
+  label: string; first: boolean; last: boolean; onMove: (delta: number) => void; onDel: () => void;
 }) {
   return (
     <span className="rowacts">
-      <button type="button" className="rowact" disabled={first} onClick={() => onMove(-1)} aria-label="nach oben">↑</button>
-      <button type="button" className="rowact" disabled={last} onClick={() => onMove(1)} aria-label="nach unten">↓</button>
-      <button type="button" className="rowact rowact--del" onClick={onDel} aria-label="löschen">✕</button>
+      <button type="button" className="rowact" disabled={first} onClick={() => onMove(-1)} aria-label={`${label} nach oben`}>↑</button>
+      <button type="button" className="rowact" disabled={last} onClick={() => onMove(1)} aria-label={`${label} nach unten`}>↓</button>
+      <button type="button" className="rowact rowact--del" onClick={onDel} aria-label={`${label} löschen`}>✕</button>
     </span>
   );
 }
@@ -100,6 +100,19 @@ function move<T>(arr: T[], i: number, delta: number): T[] {
 }
 
 type BangRow = { key: string; tpl: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isGeocodingHit(value: unknown): value is { name: string; latitude: number; longitude: number } {
+  if (!isRecord(value)) return false;
+  return typeof value.name === "string" && value.name.trim() !== "" &&
+    typeof value.latitude === "number" && Number.isFinite(value.latitude) &&
+    value.latitude >= -90 && value.latitude <= 90 &&
+    typeof value.longitude === "number" && Number.isFinite(value.longitude) &&
+    value.longitude >= -180 && value.longitude <= 180;
+}
 
 export function SettingsPane({ open, config, guests, onClose, save, onSaved, onReload }: Props) {
   const [draft, setDraft] = useState<Config>(config);
@@ -151,11 +164,11 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
     if (!box) return;
     const focusable = [...box.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    )].filter((el) => el.offsetParent !== null);
+    )].filter((el) => !el.hidden && el.getAttribute("aria-hidden") !== "true");
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     if (!first || !last) return;
-    if (e.shiftKey && document.activeElement === first) {
+    if (!box.contains(document.activeElement) || (e.shiftKey && (document.activeElement === first || document.activeElement === box))) {
       last.focus();
       e.preventDefault();
     } else if (!e.shiftKey && document.activeElement === last) {
@@ -172,10 +185,20 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
     try {
       const target = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(placeQuery)}&count=1&language=de`;
       const res = await fetch(`/api/proxy?url=${encodeURIComponent(target)}`);
-      const j = (await res.json()) as { results?: { name: string; latitude: number; longitude: number }[] };
-      const hit = j.results?.[0];
-      if (!hit) {
+      if (!res.ok) {
+        setError("Ortssuche fehlgeschlagen.");
+        return;
+      }
+      const raw: unknown = await res.json();
+      if (!isRecord(raw) || !Array.isArray(raw.results)) {
+        setError("Ortssuche fehlgeschlagen.");
+        return;
+      }
+      const hit = raw.results[0];
+      if (hit === undefined) {
         setError(`Ort „${placeQuery}" nicht gefunden.`);
+      } else if (!isGeocodingHit(hit)) {
+        setError("Ortssuche fehlgeschlagen.");
       } else {
         upd((d) => ({ ...d, location: { label: hit.name, lat: hit.latitude, lon: hit.longitude } }));
       }
@@ -432,7 +455,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                               }),
                             }))}
                           />
-                          <RowActs first={li === 0} last={li === g.links.length - 1}
+                          <RowActs label={`Link „${l.label}"`} first={li === 0} last={li === g.links.length - 1}
                             onMove={(delta) => upd((d) => ({
                               ...d,
                               linkGroups: d.linkGroups.map((x, i) => i === gi ? { ...x, links: move(x.links, li, delta) } : x),
@@ -477,7 +500,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                         onChange={(e) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, url: e.target.value } : x) }))} />
                       <NumInput className="inp inp--num" value={f.limit} min={1} aria-label="Anzahl"
                         onCommit={(n) => upd((d) => ({ ...d, feeds: d.feeds.map((x, j) => j === i ? { ...x, limit: n } : x) }))} />
-                      <RowActs first={i === 0} last={i === draft.feeds.length - 1}
+                      <RowActs label={`Feed „${f.label}"`} first={i === 0} last={i === draft.feeds.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, feeds: move(d.feeds, i, delta) }))}
                         onDel={() => upd((d) => ({ ...d, feeds: d.feeds.filter((_, j) => j !== i) }))} />
                     </div>
@@ -503,7 +526,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                       <input className="inp" value={c.url} aria-label="ICS-URL"
                         onChange={(e) => upd((d) => ({ ...d, calendars: d.calendars.map((x, j) => j === i ? { ...x, url: e.target.value } : x) }))} />
                       <span />
-                      <RowActs first={i === 0} last={i === draft.calendars.length - 1}
+                      <RowActs label={`Kalender „${c.label}"`} first={i === 0} last={i === draft.calendars.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, calendars: move(d.calendars, i, delta) }))}
                         onDel={() => upd((d) => ({ ...d, calendars: d.calendars.filter((_, j) => j !== i) }))} />
                     </div>
@@ -557,7 +580,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                         onChange={(e) => upd((d) => ({ ...d, clock: { secondary: d.clock.secondary.map((x, j) => j === i ? { ...x, label: e.target.value } : x) } }))} />
                       <input className="inp" value={z.tz} aria-label="Zeitzone"
                         onChange={(e) => upd((d) => ({ ...d, clock: { secondary: d.clock.secondary.map((x, j) => j === i ? { ...x, tz: e.target.value } : x) } }))} />
-                      <RowActs first={i === 0} last={i === draft.clock.secondary.length - 1}
+                      <RowActs label={`Zeitzone „${z.label}"`} first={i === 0} last={i === draft.clock.secondary.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, clock: { secondary: move(d.clock.secondary, i, delta) } }))}
                         onDel={() => upd((d) => ({ ...d, clock: { secondary: d.clock.secondary.filter((_, j) => j !== i) } }))} />
                     </div>
@@ -577,7 +600,12 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                   <label htmlFor="s-theme">Theme</label>
                   <span>
                     <select className="inp" id="s-theme" style={{ maxWidth: "16ch" }} value={draft.theme}
-                      onChange={(e) => upd((d) => ({ ...d, theme: e.target.value as Config["theme"] }))}>
+                      onChange={(e) => {
+                        const theme = e.target.value;
+                        if (theme === "system" || theme === "dark" || theme === "light") {
+                          upd((d) => ({ ...d, theme }));
+                        }
+                      }}>
                       <option value="system">system</option>
                       <option value="dark">dark</option>
                       <option value="light">light</option>
@@ -591,15 +619,21 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                     <div className="tbl-row" key={l.id}>
                       <span>{l.id}</span>
                       <label className="check">
-                        <input type="checkbox" checked={l.visible}
-                          onChange={(e) => upd((d) => ({ ...d, layout: d.layout.map((x, j) => j === i ? { ...x, visible: e.target.checked } : x) }))} />
+                          <input type="checkbox" aria-label={`${l.id.toUpperCase()} sichtbar`} checked={l.visible}
+                            onChange={(e) => upd((d) => ({ ...d, layout: d.layout.map((x, j) => j === i ? { ...x, visible: e.target.checked } : x) }))} />
+                          <span className="check-state">{l.visible ? "an" : "aus"}</span>
                       </label>
                       {l.id === "homelab" ? (
                         <span className="dim">volle Breite</span>
                       ) : (
                         <span>
-                          <select className="inp" style={{ maxWidth: "7ch" }} value={l.span}
-                            onChange={(e) => upd((d) => ({ ...d, layout: d.layout.map((x, j) => j === i ? { ...x, span: Number(e.target.value) as 1 | 2 } : x) }))}>
+                          <select className="inp" aria-label={`Breite von ${l.id.toUpperCase()}`} style={{ maxWidth: "7ch" }} value={l.span}
+                            onChange={(e) => {
+                              const span = Number(e.target.value);
+                              if (span === 1 || span === 2) {
+                                upd((d) => ({ ...d, layout: d.layout.map((x, j) => j === i ? { ...x, span } : x) }));
+                              }
+                            }}>
                             <option value={1}>1</option>
                             <option value={2}>2</option>
                           </select>
@@ -628,7 +662,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                 <div className="checks">
                   {guests.map((g) => (
                     <label className="check" key={g.vmid}>
-                      <input type="checkbox" checked={draft.homelab.expectRunning.includes(g.vmid)}
+                      <input type="checkbox" aria-label={`${g.vmid} ${g.name} soll laufen`} checked={draft.homelab.expectRunning.includes(g.vmid)}
                         onChange={(e) => upd((d) => ({
                           ...d,
                           homelab: {
@@ -638,7 +672,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                               : d.homelab.expectRunning.filter((v) => v !== g.vmid),
                           },
                         }))} />
-                      {g.vmid} {g.name}
+                      {g.vmid} {g.name} <span className="check-state">{draft.homelab.expectRunning.includes(g.vmid) ? "an" : "aus"}</span>
                     </label>
                   ))}
                 </div>
@@ -670,7 +704,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                         onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, host: e.target.value } : x) } }))} />
                       <NumInput className="inp inp--num" value={r.port} min={1} aria-label="Port"
                         onCommit={(n) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.map((x, j) => j === i ? { ...x, port: n } : x) } }))} />
-                      <RowActs first={i === 0} last={i === draft.homelab.reachability.length - 1}
+                      <RowActs label={`Ziel „${r.label}"`} first={i === 0} last={i === draft.homelab.reachability.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: move(d.homelab.reachability, i, delta) } }))}
                         onDel={() => upd((d) => ({ ...d, homelab: { ...d.homelab, reachability: d.homelab.reachability.filter((_, j) => j !== i) } }))} />
                     </div>
@@ -700,7 +734,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                         onChange={(e) => setBangs((rows) => rows.map((x, j) => j === i ? { ...x, key: e.target.value } : x))} />
                       <input className="inp" value={b.tpl} aria-label="URL-Vorlage"
                         onChange={(e) => setBangs((rows) => rows.map((x, j) => j === i ? { ...x, tpl: e.target.value } : x))} />
-                      <RowActs first={i === 0} last={i === bangs.length - 1}
+                      <RowActs label={`Bang „!${b.key}"`} first={i === 0} last={i === bangs.length - 1}
                         onMove={(delta) => setBangs((rows) => move(rows, i, delta))}
                         onDel={() => setBangs((rows) => rows.filter((_, j) => j !== i))} />
                     </div>
@@ -721,7 +755,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                     <div className="tbl-row" key={i}>
                       <input className="inp" value={h} aria-label="Host"
                         onChange={(e) => upd((d) => ({ ...d, proxyAllowlist: d.proxyAllowlist.map((x, j) => j === i ? e.target.value : x) }))} />
-                      <RowActs first={i === 0} last={i === draft.proxyAllowlist.length - 1}
+                      <RowActs label={`Proxy-Host „${h}"`} first={i === 0} last={i === draft.proxyAllowlist.length - 1}
                         onMove={(delta) => upd((d) => ({ ...d, proxyAllowlist: move(d.proxyAllowlist, i, delta) }))}
                         onDel={() => upd((d) => ({ ...d, proxyAllowlist: d.proxyAllowlist.filter((_, j) => j !== i) }))} />
                     </div>

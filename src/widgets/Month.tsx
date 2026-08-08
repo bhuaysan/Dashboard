@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import type { CalEvent } from "../lib/ics";
 import type { HolidayRegion } from "../config/schema";
 import { dayKey, isoWeek, monthGrid, startOfDay } from "../lib/date";
@@ -22,17 +21,20 @@ export function Month({ now, events, holidayRegion = "BW" }: {
   const today = startOfDay(now);
   const todayKey = dayKey(today);
   const month = now.getMonth();
+  const dateFormatter = new Intl.DateTimeFormat("de-DE", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+  });
 
   // Ein Raster kann bis in zwei Nachbarjahre reichen — Dezember zeigt Tage im Januar.
   const holidays = holidayNames(weeks.flat().map((d) => d.getFullYear()), holidayRegion);
-  const withEvents = new Set<string>();
+  const eventCounts = new Map<string, number>();
   for (const event of events ?? []) {
     if (event.end < grid.from || event.start > grid.to) continue;
-    const end = new Date(event.end.getTime() - 1);
     const cursor = startOfDay(event.start < grid.from ? grid.from : event.start);
-    const last = startOfDay(end > grid.to ? grid.to : end);
-    for (let day = cursor; day <= last; day.setDate(day.getDate() + 1)) {
-      withEvents.add(dayKey(day));
+    const last = startOfDay(new Date(event.end.getTime() - 1) > grid.to ? grid.to : new Date(event.end.getTime() - 1));
+    for (const day = new Date(cursor); day <= last; day.setDate(day.getDate() + 1)) {
+      const key = dayKey(day);
+      eventCounts.set(key, (eventCounts.get(key) ?? 0) + 1);
     }
   }
 
@@ -44,40 +46,59 @@ export function Month({ now, events, holidayRegion = "BW" }: {
 
   return (
     <div className="cal">
-      <div className="cal-grid">
-        <span className="cal-kw">KW</span>
-        {WEEKDAYS.map((w) => (
-          <span className="cal-head" key={w}>{w}</span>
-        ))}
-        {weeks.map((week) => (
-          <Fragment key={dayKey(week[0] ?? today)}>
-            <span className="cal-kw">{isoWeek(week[0] ?? today)}</span>
-            {week.map((d) => {
-              const key = dayKey(d);
-              // Tage aus dem Nachbarmonat bleiben leer — sonst stünde etwa der 1.
-              // November als Feiertag im Oktoberraster, ohne dazuzugehören.
-              if (d.getMonth() !== month) {
-                return <span className="cal-day is-outside" key={key} aria-hidden />;
-              }
-              const holiday = holidays.get(key);
-              const cls = [
-                "cal-day",
-                d.getDay() === 0 || d.getDay() === 6 ? "is-weekend" : "",
-                holiday ? "is-holiday" : "",
-                withEvents.has(key) ? "has-event" : "",
-                key === todayKey ? "is-today" : "",
-              ].filter(Boolean).join(" ");
-              // Den Namen trägt nur der Titel: sichtbar bleibt die Pane ein Raster.
-              return (
-                <span className={cls} key={key} title={holiday}>{d.getDate()}</span>
-              );
-            })}
-          </Fragment>
-        ))}
-      </div>
+      <table className="cal-grid">
+        <caption className="sr-only">Kalender {monthLabel(now)}</caption>
+        <thead>
+          <tr>
+            <th className="cal-kw" scope="col">KW</th>
+            {WEEKDAYS.map((weekday) => (
+              <th className="cal-head" scope="col" key={weekday}>{weekday}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {weeks.map((week) => (
+            <tr key={dayKey(week[0] ?? today)}>
+              <th className="cal-kw" scope="row">{isoWeek(week[0] ?? today)}</th>
+              {week.map((d) => {
+                const key = dayKey(d);
+                // Tage aus dem Nachbarmonat bleiben leer — sonst stünde etwa der 1.
+                // November als Feiertag im Oktoberraster, ohne dazuzugehören.
+                if (d.getMonth() !== month) {
+                  return <td className="cal-day is-outside" key={key} aria-hidden="true" />;
+                }
+                const holiday = holidays.get(key);
+                const eventCount = eventCounts.get(key) ?? 0;
+                const cls = [
+                  "cal-day",
+                  d.getDay() === 0 || d.getDay() === 6 ? "is-weekend" : "",
+                  holiday ? "is-holiday" : "",
+                  eventCount > 0 ? "has-event" : "",
+                  key === todayKey ? "is-today" : "",
+                ].filter(Boolean).join(" ");
+                const details = [
+                  dateFormatter.format(d),
+                  key === todayKey ? "heute" : undefined,
+                  holiday ? `Feiertag: ${holiday}` : undefined,
+                  eventCount > 0 ? `${eventCount} ${eventCount === 1 ? "Termin" : "Termine"}` : undefined,
+                ].filter((value): value is string => value !== undefined).join(", ");
+                return (
+                  <td
+                    className={cls}
+                    key={key}
+                    title={holiday}
+                    aria-label={details}
+                    aria-current={key === todayKey ? "date" : undefined}
+                  >
+                    {d.getDate()}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
-      {/* Im Raster stehen für einen Screenreader nur Zahlen. Farbe und Fettung, die einen
-          Feiertag ausweisen, hört niemand — deshalb diese Zeile, die nichts anzeigt. */}
       <p className="sr-only">
         {spoken.length > 0 ? `Feiertage in diesem Monat: ${spoken.join(", ")}.` : "Keine Feiertage in diesem Monat."}
       </p>

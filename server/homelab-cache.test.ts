@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config/defaults";
 import { emptyHomelab, type HomelabData } from "./pve";

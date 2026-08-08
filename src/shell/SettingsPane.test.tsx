@@ -38,6 +38,36 @@ describe("SettingsPane", () => {
     expect(screen.getByDisplayValue("Datasphere")).toBeTruthy();
   });
 
+  it("benennt Layout-Checkbox, Breite und Zeilenaktionen eindeutig", () => {
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
+    expect(screen.getByRole("checkbox", { name: "CLOCK sichtbar" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Breite von CLOCK" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    expect(screen.getByRole("button", { name: 'Link „Datasphere" nach unten' })).toBeTruthy();
+    expect(screen.getByRole("button", { name: 'Link „Datasphere" löschen' })).toBeTruthy();
+  });
+
+  it("hält den Tastaturfokus im Einstellungsdialog", () => {
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} />);
+    const dialog = screen.getByRole("dialog");
+    const focusable = [...dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )];
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) throw new Error("Dialog hat keine fokussierbaren Schaltflächen");
+    last.focus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
   it("blockt das Speichern bei doppelten Kürzeln", () => {
     const save = saveSucceeds();
     const dup = structuredClone(defaultConfig);
@@ -162,6 +192,40 @@ describe("SettingsPane", () => {
     fireEvent.click(screen.getByText("Speichern"));
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("nicht erreichbar");
+  });
+
+  it("unterscheidet HTTP-Fehler, leere und ungültige Ortssuchergebnisse", async () => {
+    const responses = [
+      new Response("fehler", { status: 503 }),
+      new Response(JSON.stringify({ results: [] }), { status: 200 }),
+      new Response(JSON.stringify({ results: [{ name: "kaputt", latitude: 91, longitude: 0 }] }), { status: 200 }),
+    ];
+    const fetchMock = vi.fn(async () => responses.shift() ?? new Response(null, { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const renderPane = () => render(<SettingsPane open config={defaultConfig} guests={guests}
+        onClose={() => undefined} save={saveSucceeds()} onSaved={() => undefined} />);
+
+      let rendered = renderPane();
+      fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+      fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Ortssuche fehlgeschlagen."));
+      rendered.unmount();
+
+      rendered = renderPane();
+      fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+      fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("nicht gefunden"));
+      rendered.unmount();
+
+      rendered = renderPane();
+      fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+      fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Ortssuche fehlgeschlagen."));
+      rendered.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("übersetzt einen strukturellen Konfigurationsfehler und springt zum richtigen Abschnitt", () => {

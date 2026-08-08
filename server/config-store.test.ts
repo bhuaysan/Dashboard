@@ -1,18 +1,23 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+// @vitest-environment node
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config/defaults";
+import { createConfigStore, MAX_CONFIG_BYTES, writeAtomic } from "./config-store.ts";
 
 let dir: string;
 let configPath: string;
-let store: typeof import("./config-store.ts");
+let store: ReturnType<typeof createConfigStore>;
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "dashboard-store-"));
   configPath = join(dir, "config.json");
-  process.env.DASHBOARD_CONFIG = configPath;
-  store = await import("./config-store.ts");
+  store = createConfigStore(configPath);
+});
+
+afterAll(async () => {
+  await rm(dir, { recursive: true, force: true });
 });
 
 describe("readConfig", () => {
@@ -52,7 +57,7 @@ describe("readConfig", () => {
   });
 
   it("liest eine übergroße Config nicht vollständig ein", async () => {
-    await writeFile(configPath, Buffer.alloc(store.MAX_CONFIG_BYTES + 1, 120));
+    await writeFile(configPath, Buffer.alloc(MAX_CONFIG_BYTES + 1, 120));
     await expect(store.readConfig()).rejects.toThrow("Config-Datei ist zu groß");
   });
 });
@@ -102,7 +107,7 @@ describe("updateConfig", () => {
 describe("writeAtomic", () => {
   it("schreibt vollständig und hinterlässt keine tmp-Datei", async () => {
     const target = join(dir, "atomic.txt");
-    await store.writeAtomic(target, "inhalt");
+    await writeAtomic(target, "inhalt");
     expect(await readFile(target, "utf8")).toBe("inhalt");
     const files = await readdir(dir);
     expect(files.some((f) => f.includes(".tmp-"))).toBe(false);

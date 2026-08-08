@@ -1,6 +1,6 @@
 import { Agent, fetch as undiciFetch } from "undici";
 import { readFileSync } from "node:fs";
-import { env } from "./env.ts";
+import { env, type DashboardEnvironment } from "./env.ts";
 import { checkReachability, type ReachResult } from "./reachability.ts";
 import { relativeTime } from "../src/lib/relativeTime.ts";
 import type { Config } from "../src/config/schema.ts";
@@ -102,10 +102,10 @@ let agent: Agent | undefined;
 // Das Proxmox-Zertifikat ist selbst ausgestellt. Wir prüfen es korrekt gegen die eigene CA,
 // statt die Prüfung abzuschalten. servername ist nötig, weil wir per IP verbinden,
 // das Zertifikat aber auf pve.homelab.local lautet.
-function pveAgent(): Agent {
-  if (!env.pve) throw new Error("PVE nicht konfiguriert");
+function pveAgent(runtimeEnv: DashboardEnvironment): Agent {
+  if (!runtimeEnv.pve) throw new Error("PVE nicht konfiguriert");
   agent ??= new Agent({
-    connect: { ca: readFileSync(env.pve.caPath), servername: "pve.homelab.local" },
+    connect: { ca: readFileSync(runtimeEnv.pve.caPath), servername: "pve.homelab.local" },
   });
   return agent;
 }
@@ -119,11 +119,11 @@ export function parsePveEnvelope<T>(raw: unknown, path: string, schema: z.ZodTyp
   return data.data;
 }
 
-async function pveGet<T>(path: string, schema: z.ZodType<T>): Promise<T> {
-  if (!env.pve) throw new Error("PVE nicht konfiguriert");
-  const res = await undiciFetch(`${env.pve.url}/api2/json${path}`, {
-    headers: { Authorization: `PVEAPIToken=${env.pve.tokenId}=${env.pve.secret}` },
-    dispatcher: pveAgent(),
+async function pveGet<T>(runtimeEnv: DashboardEnvironment, path: string, schema: z.ZodType<T>): Promise<T> {
+  if (!runtimeEnv.pve) throw new Error("PVE nicht konfiguriert");
+  const res = await undiciFetch(`${runtimeEnv.pve.url}/api2/json${path}`, {
+    headers: { Authorization: `PVEAPIToken=${runtimeEnv.pve.tokenId}=${runtimeEnv.pve.secret}` },
+    dispatcher: pveAgent(runtimeEnv),
     signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) throw new Error(`PVE ${path}: HTTP ${res.status}`);
@@ -254,16 +254,16 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
   };
 }
 
-export async function fetchHomelab(cfg: Config): Promise<HomelabData> {
-  if (!env.pve) return emptyHomelab;
+export async function fetchHomelab(cfg: Config, runtimeEnv: DashboardEnvironment = env): Promise<HomelabData> {
+  if (!runtimeEnv.pve) return emptyHomelab;
   const node = cfg.homelab.node;
   const [status, rrd, resources, storages, tasks, updates, reachability] = await Promise.all([
-    pveGet<NodeStatus>(`/nodes/${node}/status`, nodeStatusSchema),
-    pveGet<RrdPoint[]>(`/nodes/${node}/rrddata?timeframe=hour&cf=AVERAGE`, z.array(rrdPointSchema).max(10000)),
-    pveGet<Resource[]>(`/cluster/resources?type=vm`, z.array(resourceSchema).max(10000)),
-    pveGet<StorageEntry[]>(`/nodes/${node}/storage`, z.array(storageEntrySchema).max(1000)),
-    pveGet<Task[]>(`/nodes/${node}/tasks?typefilter=vzdump&limit=50`, z.array(taskSchema).max(1000)),
-    pveGet<unknown[]>(`/nodes/${node}/apt/update`, z.array(z.unknown()).max(1000)),
+    pveGet<NodeStatus>(runtimeEnv, `/nodes/${node}/status`, nodeStatusSchema),
+    pveGet<RrdPoint[]>(runtimeEnv, `/nodes/${node}/rrddata?timeframe=hour&cf=AVERAGE`, z.array(rrdPointSchema).max(10000)),
+    pveGet<Resource[]>(runtimeEnv, `/cluster/resources?type=vm`, z.array(resourceSchema).max(10000)),
+    pveGet<StorageEntry[]>(runtimeEnv, `/nodes/${node}/storage`, z.array(storageEntrySchema).max(1000)),
+    pveGet<Task[]>(runtimeEnv, `/nodes/${node}/tasks?typefilter=vzdump&limit=50`, z.array(taskSchema).max(1000)),
+    pveGet<unknown[]>(runtimeEnv, `/nodes/${node}/apt/update`, z.array(z.unknown()).max(1000)),
     checkReachability(cfg.homelab.reachability),
   ]);
   return buildHomelab({ status, rrd, resources, storages, tasks, updates, reachability }, cfg.homelab);

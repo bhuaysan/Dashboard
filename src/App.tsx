@@ -60,6 +60,7 @@ export default function App() {
   const [seed, setSeed] = useState<string | null>(null);
   const [message, setMessage] = useState<Note | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const modalOpen = settingsOpen || ui.showHelp;
   const now = useNow();
   const calRange = useMemo(() => eventFetchRange(now, AGENDA_DAYS), [now]);
   const paneRefs = useRef<Partial<Record<PaneId, HTMLElement | null>>>({});
@@ -198,7 +199,11 @@ export default function App() {
 
   useKeymap({
     state: ui, dispatch, hints: hintMap, rowCount, selectedUrl, onSeed,
-    overlayOpen: settingsOpen, onOverlayEscape: () => setSettingsOpen(false),
+    overlayOpen: modalOpen,
+    onOverlayEscape: () => {
+      if (settingsOpen) setSettingsOpen(false);
+      else dispatch({ type: "help", show: false });
+    },
     visiblePanes,
   });
 
@@ -296,7 +301,7 @@ export default function App() {
 
   return (
     <>
-      <div className="app">
+      <div className="app" aria-hidden={modalOpen ? "true" : undefined} inert={modalOpen}>
         <h1 className="sr-only">Dashboard</h1>
         <PaneGrid>
           {paneVisible("clock") && (
@@ -435,7 +440,7 @@ export default function App() {
               { label: "cal", state: queryState(calQuery, (calQuery.data?.failures.length ?? 0) > 0), updatedAt: calQuery.dataUpdatedAt },
               {
                 label: "pve",
-                state: labQuery.data && !labQuery.data.configured ? "warn" : queryState(labQuery),
+                state: labQuery.data && !labQuery.data.configured ? "unconfigured" : queryState(labQuery),
                 updatedAt: labQuery.dataUpdatedAt,
                 ...(labAlerts.length > 0
                   ? { alerts: { count: labAlerts.length, level: labAlertLevel } }
@@ -450,7 +455,7 @@ export default function App() {
         </div>
       </div>
 
-      <KeymapOverlay open={ui.showHelp} />
+      <KeymapOverlay open={ui.showHelp} onClose={() => dispatch({ type: "help", show: false })} />
       <SettingsPane
         open={settingsOpen}
         config={config}

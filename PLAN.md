@@ -1047,23 +1047,30 @@ Browser sieht nie einen Token und nie eine Proxmox-URL, weil der Server aggregie
 Auf dem Proxmox-Host: **unprivilegierten** Debian-13-Container anlegen, 1 vCPU, 512 MB RAM, 4 GB
 Disk, statische IP `10.0.10.20/24`, Gateway `10.0.10.1`, DNS `10.0.10.11`, *Start at boot* an.
 
-Im Container:
+Im Container (automatisiert durch `deploy/provision.sh`):
 
 ```bash
 apt update && apt install -y curl rsync
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt install -y nodejs
+corepack enable && corepack install --global pnpm@11.20.0
 useradd -r -s /usr/sbin/nologin -d /opt/dashboard dashboard
-mkdir -p /opt/dashboard && chown dashboard:dashboard /opt/dashboard
+install -d -o root -g root -m 0755 /opt/dashboard /opt/dashboard/releases
+install -d -o dashboard -g dashboard -m 0750 /var/lib/dashboard /var/lib/dashboard/static
+install -d -o root -g root -m 0755 /etc/dashboard
 ```
 
-`config.json`, `.env` und `pve-ca.pem` per `scp` nach `/opt/dashboard/` kopieren. In der Kopie auf dem
-Server müssen `PORT=80` und `DASHBOARD_CONFIG=/opt/dashboard/config.json` stehen, `PVE_CA_PATH` auf
-`/opt/dashboard/pve-ca.pem` zeigen und `DASHBOARD_WRITE_ALLOW` die schreibberechtigten Geräte
-enthalten. Dann:
+`config.json` nach `/var/lib/dashboard/config.json`, `.env` als `/etc/dashboard/dashboard.env` und
+`pve-ca.pem` nach `/etc/dashboard/pve-ca.pem` kopieren. In der Environment-Datei müssen `PORT=80`,
+`DASHBOARD_CONFIG=/var/lib/dashboard/config.json`, `DASHBOARD_STATIC=/var/lib/dashboard/static` und
+`PVE_CA_PATH=/etc/dashboard/pve-ca.pem` stehen; `DASHBOARD_WRITE_ALLOW` enthält die
+schreibberechtigten Geräte. Code und Dependencies bleiben in root-owned Release-Verzeichnissen.
+Dann:
 
 ```bash
-chown dashboard:dashboard /opt/dashboard/{config.json,.env,pve-ca.pem}
-chmod 600 /opt/dashboard/.env
+chown dashboard:dashboard /var/lib/dashboard/config.json
+chmod 600 /etc/dashboard/dashboard.env
+chown root:dashboard /etc/dashboard/pve-ca.pem
+chmod 640 /etc/dashboard/pve-ca.pem
 ```
 
 `deploy/dashboard.service` — *Vorlage:*
@@ -1076,43 +1083,46 @@ After=network-online.target
 [Service]
 Type=simple
 User=dashboard
-WorkingDirectory=/opt/dashboard
-EnvironmentFile=/opt/dashboard/.env
-ExecStart=/usr/bin/npx tsx server/index.ts
+WorkingDirectory=/opt/dashboard/current
+EnvironmentFile=/etc/dashboard/dashboard.env
+ExecStart=/opt/dashboard/current/node_modules/.bin/tsx server/index.ts
 Restart=always
 RestartSec=3
 AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/dashboard
+ProtectHome=true
+PrivateDevices=true
+LimitCORE=0
+ReadWritePaths=/var/lib/dashboard
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 `AmbientCapabilities=CAP_NET_BIND_SERVICE` ist der Grund, warum der Dienst Port 80 belegen darf,
-ohne als root zu laufen. `EnvironmentFile` bedeutet: systemd liest die `.env` selbst ein, deshalb
-sind keine einzelnen `Environment=`-Zeilen nötig. Der `loadEnvFile()`-Aufruf im Code findet dann
-zwar keine `.env` im Arbeitsverzeichnis mehr, fällt aber genau dafür still in den `catch`-Zweig.
-Beachte: `EnvironmentFile` versteht **keine** Kommentare am Zeilenende und keine Anführungszeichen —
-die vorhandene `.env` hält sich daran.
+ohne als root zu laufen. `EnvironmentFile` bedeutet: systemd liest die Environment-Datei selbst ein.
+Der Code validiert alle Werte beim Start; Fehler nennen nur Variablennamen, niemals Secrets.
 
-`deploy/deploy.sh` — *Vorlage:*
+`deploy/deploy.sh` erstellt ein vollständiges Release unter `/opt/dashboard/releases/`: Lokal laufen
+zuerst `pnpm test`, `pnpm build` und `git diff --check`; remote folgt `pnpm install --prod
+--frozen-lockfile`. Danach wird der Symlink `/opt/dashboard/current` atomar umgeschaltet, der Dienst
+neu gestartet und `GET /api/health` geprüft. Bei Installations-, Start- oder Healthcheck-Fehlern
+wird der vorherige Symlink und die vorherige Unit wiederhergestellt.
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-HOST=root@10.0.10.20
+pnpm test
 pnpm build
-rsync -a --delete dist/ "$HOST:/opt/dashboard/dist/"
-rsync -a --delete server/ "$HOST:/opt/dashboard/server/"
-rsync -a package.json pnpm-lock.yaml "$HOST:/opt/dashboard/"
-ssh "$HOST" 'cd /opt/dashboard && npm install --omit=dev && systemctl restart dashboard'
+git diff --check
+./deploy/deploy.sh
 ```
 
-`config.json`, `.env` und `pve-ca.pem` werden **nicht** übertragen — sie gehören dem Container und
-würden sonst durch die Entwicklungswerte überschrieben. `--delete`
-darf darum nur auf `dist/` und `server/` angewendet werden, niemals auf `/opt/dashboard` selbst.
+`config.json`, `.env` und `pve-ca.pem` werden vom Deployment **nicht** übertragen — sie gehören zum
+Container-State und würden sonst durch Entwicklungswerte überschrieben. `--delete` wird nur innerhalb
+des neuen, noch nicht aktiven Release-Verzeichnisses verwendet.
 
 Im Pi-hole (`http://10.0.10.11/admin`) unter *Settings → Local DNS Records* eintragen:
 `start.home.arpa` → `10.0.10.20`.

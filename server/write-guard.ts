@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
-import { env } from "./env.ts";
+import { env, type DashboardEnvironment } from "./env.ts";
 
 function ipToInt(ip: string): number | undefined {
   const parts = ip.split(".").map(Number);
@@ -56,28 +56,32 @@ export function originAllowed(origin: string, requestHost: string | undefined, a
   return requestHost === undefined || hostnameFromHeader(requestHost) === hostnameFromHeader(parsed.host);
 }
 
-export const writeGuard: MiddlewareHandler = async (c, next) => {
-  if (c.req.method !== "PUT" && c.req.method !== "DELETE") return next();
-  const requestHost = c.req.header("host");
-  if (requestHost !== undefined && !hostAllowed(requestHost, env.writeHosts)) {
-    return c.json({ error: "Host für Schreibzugriff nicht erlaubt" }, 403);
-  }
-  const origin = c.req.header("origin");
-  if (origin !== undefined && !originAllowed(origin, requestHost, env.writeHosts)) {
-    return c.json({ error: "Origin für Schreibzugriff nicht erlaubt" }, 403);
-  }
-  let addr: string | undefined;
-  try {
-    addr = getConnInfo(c).remote.address;
-  } catch { /* keine Verbindungsinfo: unten abgelehnt */ }
-  if (addr === undefined) {
-    // Ohne bekannte Absenderadresse lässt sich die Freigabe nicht prüfen — dann nicht schreiben.
-    return c.json({ error: "Absenderadresse unbekannt — Schreiben abgelehnt" }, 403);
-  }
-  if (addr.startsWith("::ffff:")) addr = addr.slice(7);
-  if (addr === "::1") addr = "127.0.0.1";
-  if (!ipAllowed(addr, env.writeAllow)) {
-    return c.json({ error: "Schreiben von dieser Adresse nicht erlaubt" }, 403);
-  }
-  return next();
-};
+export function createWriteGuard(runtimeEnv: Pick<DashboardEnvironment, "writeAllow" | "writeHosts">): MiddlewareHandler {
+  return async (c, next) => {
+    if (c.req.method !== "PUT" && c.req.method !== "DELETE") return next();
+    const requestHost = c.req.header("host");
+    if (requestHost !== undefined && !hostAllowed(requestHost, runtimeEnv.writeHosts)) {
+      return c.json({ error: "Host für Schreibzugriff nicht erlaubt" }, 403);
+    }
+    const origin = c.req.header("origin");
+    if (origin !== undefined && !originAllowed(origin, requestHost, runtimeEnv.writeHosts)) {
+      return c.json({ error: "Origin für Schreibzugriff nicht erlaubt" }, 403);
+    }
+    let addr: string | undefined;
+    try {
+      addr = getConnInfo(c).remote.address;
+    } catch { /* keine Verbindungsinfo: unten abgelehnt */ }
+    if (addr === undefined) {
+      // Ohne bekannte Absenderadresse lässt sich die Freigabe nicht prüfen — dann nicht schreiben.
+      return c.json({ error: "Absenderadresse unbekannt — Schreiben abgelehnt" }, 403);
+    }
+    if (addr.startsWith("::ffff:")) addr = addr.slice(7);
+    if (addr === "::1") addr = "127.0.0.1";
+    if (!ipAllowed(addr, runtimeEnv.writeAllow)) {
+      return c.json({ error: "Schreiben von dieser Adresse nicht erlaubt" }, 403);
+    }
+    return next();
+  };
+}
+
+export const writeGuard = createWriteGuard(env);

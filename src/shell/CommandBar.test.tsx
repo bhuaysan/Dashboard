@@ -46,4 +46,19 @@ describe("CommandBar", () => {
     fireEvent.change(input, { target: { value: "settings" } });
     expect((input as HTMLInputElement).value).toBe("settings");
   });
+
+  it("verwendet für Vorschau und Suche dieselbe normalisierte Eingabe", () => {
+    render(<Harness onCommand={vi.fn()} />);
+    const input = screen.getByLabelText("Suche oder Kommando");
+    fireEvent.change(input, { target: { value: " Einstellungen " } });
+    expect(screen.getByText("Einstellungen")).toBeTruthy();
+  });
+
+  it("bezeichnet einen unbekannten Bang als Standardsuche", () => {
+    render(<Harness onCommand={vi.fn()} />);
+    const input = screen.getByLabelText("Suche oder Kommando");
+    fireEvent.change(input, { target: { value: "!xx foo" } });
+    expect(screen.getByText("Websuche nach „!xx foo“")).toBeTruthy();
+    expect(screen.queryByText(/Websuche mit Bang/)).toBeNull();
+  });
 });

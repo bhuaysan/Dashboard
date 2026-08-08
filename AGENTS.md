@@ -37,9 +37,9 @@ lokale, nicht versionierte Dateien.
 pnpm install
 pnpm dev:server                        # API auf :7777 (tsx watch, lädt .env)
 pnpm dev                               # Vite auf :5173, proxyt /api nach :7777
-pnpm test                              # vitest run (jsdom, auch für die server/-Tests)
+pnpm test                              # vitest run (Frontend jsdom, Servertests Node)
 pnpm build                             # tsc -b über beide Projekte + vite build
-pnpm deploy                            # baut, rsynct nach 10.0.10.20, startet den Dienst neu
+pnpm deploy                            # testet, baut, staged ein Release, Healthcheck + Rollback
 ```
 
 Beide Dev-Prozesse werden gebraucht — ohne `dev:server` bleibt jede Pane leer, weil alle Daten
@@ -52,13 +52,14 @@ pnpm vitest run -t "Kontraste"
 
 ## Architektur
 
-Ein einziger Node-Prozess (Hono, `server/index.ts`) liefert `dist/` **und** drei Endpunkte:
-`/api/config` (GET offen, PUT geschützt), `/api/proxy` und `/api/homelab`. Kein Bundling auf dem
+Ein einziger Node-Prozess (Hono, `server/index.ts` mit App-Fabrik in `server/app.ts`) liefert `dist/`
+**und** vier Endpunkte: `/api/config` (GET offen, PUT geschützt), `/api/proxy`, `/api/homelab`
+und `/api/health`. Kein Bundling auf dem
 Server — `tsx` führt `server/` direkt aus, und weil der Server aus `src/` importiert
 (`config/schema.ts`, `lib/relativeTime.ts`), wird `src/` mitdeployt. Ein Import aus `src/` in den
 Server zieht also Produktionscode nach — nichts Browserspezifisches dort hineinziehen.
 
-**Config.** `config.json` liegt nur auf dem Server und ist die Quelle der Wahrheit; ein einziges
+**Config.** `config.json` liegt nur auf dem Server-State (`/var/lib/dashboard`) und ist die Quelle der Wahrheit; ein einziges
 Zod-Schema (`src/config/schema.ts`) validiert sie auf beiden Seiten. `PUT` verlangt
 `If-Match: <updatedAt>` (optimistisches Sperren, 409 bei Konflikt) und eine Absenderadresse aus
 `DASHBOARD_WRITE_ALLOW` (`server/write-guard.ts`, versteht CIDR). Geschrieben wird atomar über

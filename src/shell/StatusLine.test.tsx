@@ -86,4 +86,10 @@ describe("StatusLine", () => {
     expect(screen.getByText("? keys")).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it("sagt bei fehlender PVE-Konfiguration nicht veraltet", () => {
+    render(<StatusLine mode="NORMAL" panes={panes}
+      sources={[{ label: "pve", state: "unconfigured" }]} clock="23:42" />);
+    expect(screen.getByLabelText("pve: nicht konfiguriert, noch nicht geladen")).toBeTruthy();
+  });
 });

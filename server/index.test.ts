@@ -1,26 +1,36 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+// @vitest-environment node
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Config } from "../src/config/schema";
+import { createApp, inertProxyResponse, readJsonBody } from "./app.ts";
+import type { DashboardEnvironment } from "./env.ts";
 
-let app: typeof import("./index.ts").app;
-let inertProxyResponse: typeof import("./index.ts").inertProxyResponse;
-let readJsonBody: typeof import("./index.ts").readJsonBody;
+let app: ReturnType<typeof createApp>;
 let configPath: string;
 let staticPath: string;
+let tempDir: string;
 
 beforeAll(async () => {
-  const dir = await mkdtemp(join(tmpdir(), "dashboard-api-"));
-  configPath = join(dir, "config.json");
-  staticPath = join(dir, "static");
+  tempDir = await mkdtemp(join(tmpdir(), "dashboard-api-"));
+  configPath = join(tempDir, "config.json");
+  staticPath = join(tempDir, "static");
   await mkdir(staticPath);
+  await mkdir(join(tempDir, "dist"));
   await writeFile(join(staticPath, "arbeit.ics"), "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
-  process.env.DASHBOARD_CONFIG = configPath;
-  process.env.DASHBOARD_STATIC = staticPath;
-  process.env.DASHBOARD_WRITE_ALLOW = "127.0.0.1";
-  process.env.DASHBOARD_WRITE_HOSTS = "start.home.arpa,10.0.10.20,localhost,127.0.0.1";
-  ({ app, inertProxyResponse, readJsonBody } = await import("./index.ts"));
+  const testEnv: DashboardEnvironment = {
+    port: 7777,
+    configPath,
+    staticPath,
+    writeAllow: ["127.0.0.1"],
+    writeHosts: ["start.home.arpa", "10.0.10.20", "localhost", "127.0.0.1"],
+  };
+  app = createApp({ env: testEnv, distRoot: join(tempDir, "dist") });
+});
+
+afterAll(async () => {
+  await rm(tempDir, { recursive: true, force: true });
 });
 
 async function getConfig(): Promise<Config> {
@@ -56,12 +66,14 @@ describe("/api/config", () => {
   it("GET enthält keine Werte aus der .env", async () => {
     const res = await app.request("/api/config");
     const text = await res.text();
-    for (const key of ["PVE_TOKEN_SECRET", "PVE_TOKEN_ID"]) {
-      const value = process.env[key];
-      if (value) expect(text.includes(value)).toBe(false);
-    }
     expect(text.toLowerCase().includes("token")).toBe(false);
     expect(text.toLowerCase().includes("secret")).toBe(false);
+  });
+
+  it("Health liefert ohne Config-Inhalt einen Readiness-Status", async () => {
+    const res = await app.request("/api/health");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok" });
   });
 
   it("PUT mit passendem If-Match schreibt und erneuert updatedAt", async () => {
@@ -179,6 +191,16 @@ describe("/api/proxy", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
     expect(await response.text()).toContain("<script>");
+  });
+
+  it("reicht einen Upstream-204 ohne unzulässigen Response-Body weiter", async () => {
+    const response = inertProxyResponse({
+      status: 204,
+      contentType: "text/plain",
+      body: new TextEncoder().encode("darf nicht im 204-Body stehen"),
+    });
+    expect(response.status).toBe(204);
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
   });
 
   it("lehnt private Adressen mit 403 ab", async () => {

@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 
-type Props = { open: boolean };
+type Props = { open: boolean; onClose: () => void };
 
-export function KeymapOverlay({ open }: Props) {
+export function KeymapOverlay({ open, onClose }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
@@ -15,6 +15,31 @@ export function KeymapOverlay({ open }: Props) {
     return () => restoreRef.current?.focus({ preventScroll: true });
   }, [open]);
 
+  function trapTab(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      onClose();
+      e.preventDefault();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const box = boxRef.current;
+    if (!box) return;
+    const focusable = [...box.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    const focusInside = box.contains(document.activeElement);
+    if (!focusInside || (e.shiftKey && (document.activeElement === first || document.activeElement === box))) {
+      last.focus();
+      e.preventDefault();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      first.focus();
+      e.preventDefault();
+    }
+  }
+
   return (
     <div className="overlay" hidden={!open}>
       <div
@@ -24,6 +49,7 @@ export function KeymapOverlay({ open }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="keymap-title"
+        onKeyDown={trapTab}
       >
         <h2 id="keymap-title">Tastenbelegung</h2>
         <dl className="keys">
@@ -38,6 +64,9 @@ export function KeymapOverlay({ open }: Props) {
           <dt>?</dt><dd>diese Übersicht</dd>
           <dt>Esc</dt><dd>zurück nach NORMAL</dd>
         </dl>
+        <p className="set-foot">
+          <button type="button" className="btn btn--primary" onClick={onClose}>Schließen</button>
+        </p>
       </div>
     </div>
   );

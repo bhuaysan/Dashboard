@@ -68,10 +68,15 @@ export function CommandBar({ mode, seed, links, search, onModeChange, onCommand 
     if (target) openUrl(target, false);
   }
 
-  const hits = value.startsWith(":") || value.startsWith("!") || value.trim() === ""
+  const normalizedValue = value.trim();
+  const isCommand = normalizedValue.startsWith(":");
+  const bangMatch = /^!(\S+)\s+/.exec(normalizedValue);
+  const bangKey = bangMatch?.[1];
+  const isKnownBang = bangKey !== undefined && Object.prototype.hasOwnProperty.call(search.bangs, bangKey);
+  const hits = isCommand || normalizedValue.startsWith("!") || normalizedValue === ""
     ? []
-    : fuzzyFilter(value, links, (l) => l.label);
-  const showResults = value.trim() !== "" && !value.startsWith(":");
+    : fuzzyFilter(normalizedValue, links, (l) => l.label);
+  const showResults = normalizedValue !== "" && !isCommand;
 
   return (
     <div className={`cmd${mode !== "NORMAL" ? " is-focused" : ""}`}>
@@ -88,7 +93,7 @@ export function CommandBar({ mode, seed, links, search, onModeChange, onCommand 
           onChange={(e) => {
             const v = e.target.value;
             setValue(v);
-            if (v.startsWith(":")) onModeChange("COMMAND");
+            if (v.trimStart().startsWith(":")) onModeChange("COMMAND");
             else if (mode !== "INSERT") onModeChange("INSERT");
           }}
           onKeyDown={(e) => {
@@ -104,13 +109,13 @@ export function CommandBar({ mode, seed, links, search, onModeChange, onCommand 
         <span className="caret" aria-hidden="true" />
       </div>
       <div className="results" hidden={!showResults}>
-        {value.startsWith("!") ? (
+        {isKnownBang ? (
           <div className="res-row is-sel">
-            <span>Websuche mit Bang <b>{value.split(" ")[0]}</b></span>
+            <span>Websuche mit Bang <b>!{bangKey}</b></span>
           </div>
         ) : hits.length === 0 ? (
           <div className="res-row is-sel">
-            <span>Websuche nach „{value.trim()}“</span>
+            <span>Websuche nach „{normalizedValue}“</span>
           </div>
         ) : (
           hits.map((l, i) => (

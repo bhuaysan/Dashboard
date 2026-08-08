@@ -1,7 +1,11 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { assertAllowed, isBlockedIp } from "./proxy.ts";
 
 const allow = ["api.open-meteo.com", "localhost", "169.254.169.254"];
+const resolveAddress = async (hostname: string): Promise<{ address: string }> => ({
+  address: hostname === "localhost" ? "127.0.0.1" : hostname === "169.254.169.254" ? hostname : "93.184.216.34",
+});
 
 describe("assertAllowed", () => {
   it("lässt erlaubte Hosts durch und liefert die geprüfte Adresse", async () => {
@@ -17,13 +21,13 @@ describe("assertAllowed", () => {
   });
 
   it("lehnt private Adressen ab", async () => {
-    await expect(assertAllowed(new URL("http://localhost:8006/"), allow)).rejects.toThrow(
+    await expect(assertAllowed(new URL("http://localhost:8006/"), allow, resolveAddress)).rejects.toThrow(
       "Private Adresse",
     );
   });
 
   it("lehnt die Metadaten-Adresse ab", async () => {
-    await expect(assertAllowed(new URL("http://169.254.169.254/latest"), allow)).rejects.toThrow(
+    await expect(assertAllowed(new URL("http://169.254.169.254/latest"), allow, resolveAddress)).rejects.toThrow(
       "Private Adresse",
     );
   });

@@ -91,4 +91,16 @@ describe("App", () => {
     typeCommand(":gibtsnicht");
     expect(screen.getByText("Unbekanntes Kommando: :gibtsnicht")).toBeTruthy();
   });
+
+  it("isoliert das Raster, solange das Settings-Dialog offen ist", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+    typeCommand(":settings");
+    const app = document.querySelector<HTMLElement>(".app");
+    expect(app?.getAttribute("aria-hidden")).toBe("true");
+    expect(app?.hasAttribute("inert")).toBe(true);
+  });
 });

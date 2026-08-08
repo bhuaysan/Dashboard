@@ -242,13 +242,14 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 /* Raster links, kommende Feiertage rechts. Unter rund 46rem Panebreite rutscht die
    Liste unter das Raster, statt auf zwei Zeichen je Zeile zusammenzuschrumpfen. */
 .cal-grid {
-  display: grid; grid-template-columns: 3ch repeat(7, 3ch);
-  gap: .1rem .45rem; justify-content: start; font-variant-numeric: tabular-nums;
+  border-collapse: separate; border-spacing: .45rem .1rem;
+  font-variant-numeric: tabular-nums;
 }
 /* Rechtsbündig wie in cal(1): sonst steht die Einerstelle einstelliger Tage vier Pixel
    neben der zweistelliger, und die Spalte zittert über den Monat hinweg. */
-.cal-grid > span { text-align: right; padding: .05rem 0; }
+.cal-grid th, .cal-grid td { min-width: 3ch; text-align: right; padding: .05rem 0; font-weight: 400; }
 .cal-kw, .cal-head { color: var(--color-dim); font-size: 12px; }
+.cal-grid .cal-kw { min-width: 3ch; }
 .cal-day.is-weekend { color: var(--color-dim); }
 /* Der Feiertag trägt seinen Namen nur im title-Attribut — im Raster muss die Zahl
    allein auffallen, deshalb Akzentfarbe und Fettung statt Farbe allein. */
@@ -449,7 +450,7 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .tbl--reach .tbl-head, .tbl--reach .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) 8ch 7ch; }
 .rowacts { display: flex; gap: .35rem; justify-content: flex-end; }
 .rowact { border: 0; background: transparent; color: var(--color-dim); font: inherit;
-          cursor: pointer; padding: 0 .15rem; }
+          cursor: pointer; padding: 0 .35rem; min-width: 2.25rem; min-height: 2.25rem; }
 .rowact:hover { color: var(--color-accent); }
 .rowact--del:hover { color: var(--color-crit); }
 /* Ohne eigene Darstellung sah ein abgeschalteter Pfeil aus wie ein benutzbarer. */
@@ -471,6 +472,7 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
                border: 1px solid var(--color-border-strong); background: var(--color-bg-alt);
                position: relative; top: .15em; flex: none; }
 .check input:checked { background: var(--color-accent); border-color: var(--color-accent); }
+.check-state { color: var(--color-dim); font-size: 12px; }
 
 .btn { border: 1px solid var(--color-border-strong); background: transparent;
        color: var(--color-fg); font: inherit; padding: .12rem .9rem; cursor: pointer; }

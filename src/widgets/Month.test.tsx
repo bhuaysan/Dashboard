@@ -45,6 +45,8 @@ describe("Month", () => {
     const today = container.querySelectorAll(".cal-day.is-today");
     expect(today).toHaveLength(1);
     expect(today[0]?.textContent).toBe("7");
+    expect(today[0]?.getAttribute("aria-current")).toBe("date");
+    expect(today[0]?.getAttribute("aria-label")).toContain("heute");
   });
 
   it("färbt Feiertage und nennt sie im Titel", () => {
@@ -69,6 +71,14 @@ describe("Month", () => {
     );
     const marked = [...container.querySelectorAll(".cal-day.has-event")];
     expect(marked.map((el) => el.textContent)).toEqual(["11"]);
+    expect(marked[0]?.getAttribute("aria-label")).toContain("2 Termine");
+  });
+
+  it("ist als Kalender-Tabelle mit Spalten- und Zeilenköpfen ausgezeichnet", () => {
+    const { container } = render(<Month now={AUG_7} />);
+    expect(container.querySelector("table")).toBeTruthy();
+    expect(container.querySelectorAll("th[scope=col]")).toHaveLength(8);
+    expect(container.querySelectorAll("th[scope=row]").length).toBeGreaterThan(0);
   });
 
   // Die Pane zeigt ausschließlich das Raster: kein Feiertagsname, kein Datum, keine
