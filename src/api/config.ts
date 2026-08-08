@@ -4,8 +4,8 @@ import { readLocalConfig, writeLocalConfig } from "../config/local";
 import { defaultConfig } from "../config/defaults";
 
 export class ConfigConflictError extends Error {
-  // Der Stand, den der Server tatsächlich hat — ohne ihn würde ein erneuter Versuch mit
-  // demselben veralteten If-Match immer wieder an genau demselben 409 scheitern.
+  // Der Stand, den der Server tatsächlich hat — die UI darf ihn anzeigen oder neu laden,
+  // aber nicht stillschweigend in den alten Entwurf übernehmen.
   readonly current: string | undefined;
   constructor(current: string | undefined) {
     super("conflict");

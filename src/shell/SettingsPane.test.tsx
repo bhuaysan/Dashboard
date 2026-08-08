@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SettingsPane, type SaveConfig } from "./SettingsPane";
 import { ConfigConflictError } from "../api/config";
 import { defaultConfig } from "../config/defaults";
@@ -132,10 +132,26 @@ describe("SettingsPane", () => {
     expect(screen.getByRole("alert").textContent).toContain("anderes Gerät");
     // Die eigene Änderung ist noch da — nicht auf den Serverstand zurückgesetzt.
     expect(screen.getByDisplayValue("SAP (bearbeitet)")).toBeTruthy();
-    // Ein erneuter Versuch würde sonst mit demselben veralteten Stempel wieder scheitern.
+    // Nach dem Konflikt wird kein veralteter Entwurf erneut gespeichert.
     fireEvent.click(screen.getByText("Speichern"));
-    const secondAttempt = (save.mutate as ReturnType<typeof vi.fn>).mock.calls[1]?.[0] as Config;
-    expect(secondAttempt.updatedAt).toBe("2026-08-06T12:00:00.000Z");
+    expect(save.mutate).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Serverstand neu laden" })).toBeTruthy();
+  });
+
+  it("lädt nach einem Konflikt den Serverstand und entsperrt den Speichervorgang", async () => {
+    const save = saveConflicts("2026-08-06T12:00:00.000Z");
+    const server: Config = {
+      ...defaultConfig,
+      linkGroups: defaultConfig.linkGroups.map((group, i) => i === 0 ? { ...group, title: "Serverstand" } : group),
+    };
+    const onReload = vi.fn(async () => server);
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} onReload={onReload} />);
+    fireEvent.click(screen.getByText("Speichern"));
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand neu laden" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Serverstand")).toBeTruthy());
+    expect(onReload).toHaveBeenCalledOnce();
+    expect((screen.getByRole("button", { name: "Speichern" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("bei einem Netzwerkfehler bleibt der Dialog offen mit einer erklärenden Meldung", () => {

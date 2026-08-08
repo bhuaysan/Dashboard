@@ -13,6 +13,14 @@ export function exportConfig(cfg: Config): void {
 
 export type ImportResult = { ok: true; config: Config } | { ok: false; message: string };
 
+/**
+ * Eine Exportdatei enthält ihren damaligen Stand nur zur Information. Beim Restore
+ * muss der aktuell bekannte ETag verwendet werden, damit der normale CAS-Schutz aktiv bleibt.
+ */
+export function restoreConfig(imported: Config, current: Config): Config {
+  return { ...imported, updatedAt: current.updatedAt };
+}
+
 export async function importConfig(file: File): Promise<ImportResult> {
   let raw: unknown;
   try {

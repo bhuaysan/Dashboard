@@ -1,17 +1,18 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Config } from "../src/config/schema";
 
 let app: typeof import("./index.ts").app;
+let inertProxyResponse: typeof import("./index.ts").inertProxyResponse;
 let configPath: string;
 
 beforeAll(async () => {
   const dir = await mkdtemp(join(tmpdir(), "dashboard-api-"));
   configPath = join(dir, "config.json");
   process.env.DASHBOARD_CONFIG = configPath;
-  ({ app } = await import("./index.ts"));
+  ({ app, inertProxyResponse } = await import("./index.ts"));
 });
 
 async function getConfig(): Promise<Config> {
@@ -80,6 +81,26 @@ describe("/api/config", () => {
     expect(body.current).toBe(firstSaved.updatedAt);
   });
 
+  it("akzeptiert bei parallelen PUTs mit demselben If-Match genau einen Gewinner", async () => {
+    const before = await getConfig();
+    const [first, second] = await Promise.all([
+      putConfig({ ...before, theme: "dark" as const }, before.updatedAt),
+      putConfig({ ...before, theme: "light" as const }, before.updatedAt),
+    ]);
+    expect([first.status, second.status].sort((a, b) => a - b)).toEqual([200, 409]);
+  });
+
+  it("stellt einen alten Export mit der aktuellen Revision CAS-geschützt wieder her", async () => {
+    const snapshot = await getConfig();
+    const changed = await putConfig({ ...snapshot, theme: "light" as const }, snapshot.updatedAt);
+    expect(changed.status).toBe(200);
+    const current = await getConfig();
+    const restored = await putConfig({ ...snapshot, updatedAt: current.updatedAt }, current.updatedAt);
+    expect(restored.status).toBe(200);
+    const saved = (await restored.json()) as Config;
+    expect(saved.theme).toBe(snapshot.theme);
+  });
+
   it("PUT mit ungültigem Body liefert 400", async () => {
     const before = await getConfig();
     const res = await putConfig({ ...before, location: undefined } as unknown as Config, before.updatedAt);
@@ -101,9 +122,35 @@ describe("/api/config", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("liefert bei einem nicht sicherbaren Config-Backup 503", async () => {
+    await rm(`${configPath}.bak`, { force: true, recursive: true });
+    await writeFile(configPath, "{");
+    await mkdir(`${configPath}.bak`);
+    try {
+      const res = await app.request("/api/config");
+      expect(res.status).toBe(503);
+    } finally {
+      await rm(`${configPath}.bak`, { force: true, recursive: true });
+      await rm(configPath, { force: true });
+    }
+  });
 });
 
 describe("/api/proxy", () => {
+  it("liefert Upstream-Inhalt inert und mit Schutz-Headern aus", async () => {
+    const response = inertProxyResponse({
+      status: 200,
+      contentType: "text/html",
+      body: new TextEncoder().encode("<script>alert(1)</script>"),
+    });
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(response.headers.get("content-disposition")).toBe("attachment");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(await response.text()).toContain("<script>");
+  });
+
   it("lehnt private Adressen mit 403 ab", async () => {
     const res = await app.request("/api/proxy?url=http://10.0.10.10:8006/");
     expect(res.status).toBe(403);

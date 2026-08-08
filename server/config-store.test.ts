@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, writeFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config/defaults";
 
 let dir: string;
@@ -25,6 +25,20 @@ describe("readConfig", () => {
     expect(await store.readConfig()).toEqual(defaultConfig);
     const bak = JSON.parse(await readFile(`${configPath}.bak`, "utf8")) as { version: number };
     expect(bak.version).toBe(99);
+  });
+
+  it("sichert auch syntaktisch kaputtes JSON vor dem Fallback", async () => {
+    await writeFile(configPath, "{");
+    expect(await store.readConfig()).toEqual(defaultConfig);
+    expect(await readFile(`${configPath}.bak`, "utf8")).toBe("{");
+  });
+
+  it("gibt einen fehlgeschlagenen Backup-Versuch als Fehler weiter", async () => {
+    await writeFile(configPath, "{");
+    await rm(`${configPath}.bak`, { force: true, recursive: true });
+    await mkdir(`${configPath}.bak`);
+    await expect(store.readConfig()).rejects.toThrow("Beschädigte Config konnte nicht gesichert werden");
+    await rm(`${configPath}.bak`, { recursive: true, force: true });
   });
 
   it("verwirft eine unbekannte Pane-Id im Layout, statt an der ganzen Config zu scheitern", async () => {
@@ -57,6 +71,26 @@ describe("writeConfig", () => {
     // und es bleiben genau sieben übrig
     const files = await readdir(dir);
     expect(files.filter((f) => /^config\.json\.\d+$/.test(f))).toHaveLength(7);
+  });
+});
+
+describe("updateConfig", () => {
+  it("serialisiert CAS-Updates und erzeugt unter gleicher Uhrzeit neue Revisionen", async () => {
+    const first = await store.readConfig();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T12:00:00.000Z"));
+    try {
+      const one = await store.updateConfig(first.updatedAt, { ...first, theme: "dark" });
+      expect(one.kind).toBe("ok");
+      if (one.kind !== "ok") return;
+      const two = await store.updateConfig(one.config.updatedAt, { ...one.config, theme: "light" });
+      expect(two.kind).toBe("ok");
+      if (two.kind !== "ok") return;
+      expect(two.config.updatedAt).not.toBe(one.config.updatedAt);
+      expect(Date.parse(two.config.updatedAt)).toBeGreaterThan(Date.parse(one.config.updatedAt));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

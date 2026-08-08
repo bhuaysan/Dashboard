@@ -40,7 +40,7 @@ function pinnedAgent(address: string): Agent {
   });
 }
 
-type ProxyResult = { status: number; contentType: string; body: Uint8Array };
+export type ProxyResult = { status: number; contentType: string; body: Uint8Array };
 type CacheEntry = ProxyResult & { t: number; ttl: number };
 
 const cache = new Map<string, CacheEntry>();

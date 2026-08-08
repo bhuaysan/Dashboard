@@ -12,6 +12,7 @@ type Props = {
   guests: Guest[];
   onClose: () => void;
   save: SaveConfig;
+  onReload?: () => Promise<Config | undefined>;
   /** Ausschließlich die Erfolgsmeldung außerhalb des Dialogs — Schließen und Fehlerfall
       übernimmt der Dialog selbst, weil nur er weiß, ob der Entwurf erhalten bleiben muss. */
   onSaved: () => void;
@@ -97,12 +98,14 @@ function move<T>(arr: T[], i: number, delta: number): T[] {
 
 type BangRow = { key: string; tpl: string };
 
-export function SettingsPane({ open, config, guests, onClose, save, onSaved }: Props) {
+export function SettingsPane({ open, config, guests, onClose, save, onSaved, onReload }: Props) {
   const [draft, setDraft] = useState<Config>(config);
   const [sec, setSec] = useState<Sec>("links");
   const [error, setError] = useState<string | undefined>(undefined);
   const [placeQuery, setPlaceQuery] = useState(config.location.label);
   const [searching, setSearching] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [reloading, setReloading] = useState(false);
   // Index der Gruppe, deren ✕ schon einmal geklickt wurde. Nur eine gleichzeitig — ein
   // zweiter Klick woanders meint eine neue Absicht, keine Bestätigung der ersten.
   const [confirmDelGroup, setConfirmDelGroup] = useState<number | null>(null);
@@ -124,6 +127,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved }: P
       setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
       setError(undefined);
       setConfirmDelGroup(null);
+      setConflict(false);
     }
     wasOpen.current = open;
   }, [open, config]);
@@ -180,6 +184,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved }: P
   }
 
   function handleSave() {
+    if (conflict) return;
     const hints = draft.linkGroups.flatMap((g) => g.links.map((l) => l.hint)).filter((h): h is string => !!h);
     if (new Set(hints).size !== hints.length) {
       setError("Doppelte Link-Kürzel — jedes Kürzel darf nur einmal vorkommen.");
@@ -255,16 +260,37 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved }: P
       },
       onError: (err) => {
         if (err instanceof ConfigConflictError) {
-          setError("Ein anderes Gerät hat zwischenzeitlich gespeichert. Erneut speichern übernimmt deinen Stand hier.");
-          // Ohne den frischen Stempel würde ein erneuter Versuch mit demselben If-Match
-          // immer wieder an genau demselben 409 scheitern — der Entwurf selbst bleibt,
-          // wie er ist.
-          if (err.current) setDraft((d) => ({ ...d, updatedAt: err.current as string }));
+          setConflict(true);
+          setError("Ein anderes Gerät hat die Einstellungen geändert. Bitte Serverstand neu laden.");
         } else {
           setError("Server nicht erreichbar — Speichern ist gesperrt. Der Entwurf bleibt in diesem Fenster erhalten.");
         }
       },
     });
+  }
+
+  async function reloadServerConfig() {
+    if (!onReload) {
+      setError("Serverstand kann hier nicht neu geladen werden.");
+      return;
+    }
+    setReloading(true);
+    try {
+      const current = await onReload();
+      if (!current) {
+        setError("Serverstand konnte nicht geladen werden.");
+        return;
+      }
+      setDraft(current);
+      setPlaceQuery(current.location.label);
+      setBangs(Object.entries(current.search.bangs).map(([key, tpl]) => ({ key, tpl })));
+      setConflict(false);
+      setError(undefined);
+    } catch {
+      setError("Serverstand konnte nicht geladen werden.");
+    } finally {
+      setReloading(false);
+    }
   }
 
   if (!open) return null;
@@ -689,9 +715,14 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved }: P
         </div>
 
         <div className="set-foot">
-          <button type="button" className="btn btn--primary" onClick={handleSave} disabled={save.isPending}>
+          <button type="button" className="btn btn--primary" onClick={handleSave} disabled={save.isPending || conflict}>
             {save.isPending ? "speichert…" : "Speichern"}
           </button>
+          {conflict && (
+            <button type="button" className="btn" onClick={() => void reloadServerConfig()} disabled={reloading}>
+              {reloading ? "lädt…" : "Serverstand neu laden"}
+            </button>
+          )}
           <button type="button" className="btn" onClick={onClose}>Abbrechen</button>
           <span className="note">Esc verlässt das Feld, noch einmal Esc verwirft</span>
           {error && <span className="set-error" role="alert">{error}</span>}

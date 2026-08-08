@@ -14,7 +14,7 @@ import {
   type Mode,
   type PaneId,
 } from "./lib/useKeymap";
-import { exportConfig, importConfig } from "./config/io";
+import { exportConfig, importConfig, restoreConfig } from "./config/io";
 import type { Config } from "./config/schema";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
 import { useCachedQuery } from "./api/useCachedQuery";
@@ -190,8 +190,9 @@ export default function App() {
     el?.querySelectorAll("[data-row]")[ui.row]?.scrollIntoView({ block: "nearest" });
   }, [ui.mode, ui.pane, ui.row]);
 
-  function updateConfig(next: Config) {
+  function updateConfig(next: Config, onSuccess?: () => void) {
     saveConfig.mutate(next, {
+      onSuccess,
       onError: (err) => {
         if (err instanceof ConfigConflictError) {
           setMessage({ text: "Ein anderes Gerät hat zuerst gespeichert. Seite neu laden.", level: "error" });
@@ -238,8 +239,9 @@ export default function App() {
     if (!file) return;
     const result = await importConfig(file);
     if (result.ok) {
-      updateConfig(result.config);
-      setMessage({ text: "Konfiguration importiert.", level: "info" });
+      updateConfig(restoreConfig(result.config, config), () => {
+        setMessage({ text: "Konfiguration importiert.", level: "info" });
+      });
     } else {
       setMessage({ text: result.message, level: "error" });
     }
@@ -428,6 +430,10 @@ export default function App() {
         guests={labQuery.data?.guests ?? []}
         onClose={() => setSettingsOpen(false)}
         save={saveConfig}
+        onReload={async () => {
+          const result = await configQuery.refetch();
+          return result.isSuccess ? result.data : undefined;
+        }}
         // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
         // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
         onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}
