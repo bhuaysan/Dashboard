@@ -23,6 +23,7 @@ import {
 } from "./proxy.ts";
 
 const HOST = "93.184.216.34";
+const REDIRECT_HOST = "93.184.216.35";
 const ALLOW = [HOST];
 const resolveAddress = async (): Promise<{ address: string }> => ({ address: HOST });
 const payload = new Uint8Array(2 * 1024 * 1024);
@@ -155,6 +156,19 @@ describe("Proxy-Cache", () => {
     }));
     await expect(proxyFetch(`http://${HOST}/redirect-fremd`, ALLOW, resolveAddress)).rejects.toThrow("Host nicht erlaubt");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("verwendet einen Redirect-Cache nicht unter einer geänderten Allowlist", async () => {
+    fetchMock.mockImplementation(async (input: string | URL) => {
+      const url = new URL(input);
+      return url.hostname === HOST
+        ? new Response(null, { status: 302, headers: { location: `http://${REDIRECT_HOST}/ziel` } })
+        : new Response("redirect-inhalt", { status: 200 });
+    });
+    const allowRedirect = [HOST, REDIRECT_HOST];
+    await expect(proxyFetch(`http://${HOST}/policy`, allowRedirect, resolveAddress)).resolves.toBeDefined();
+    await expect(proxyFetch(`http://${HOST}/policy`, [HOST], resolveAddress)).rejects.toThrow("Host nicht erlaubt");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("bricht einen zu großen gestreamten Body ab und cancelt ihn", async () => {

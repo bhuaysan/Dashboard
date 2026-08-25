@@ -8,18 +8,19 @@ import { KeymapOverlay } from "./shell/KeymapOverlay";
 import {
   initialUiState,
   PANE_ORDER,
-  safeHref,
   uiReducer,
   useKeymap,
   type Mode,
   type PaneId,
 } from "./lib/useKeymap";
+import { buildConsoleUrl, safeHref } from "./lib/url";
 import { exportConfig, importConfig, restoreConfig } from "./config/io";
 import type { Config } from "./config/schema";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
 import { useCachedQuery } from "./api/useCachedQuery";
 import { decodeWeather, fetchWeather, Weather } from "./widgets/Weather";
 import { decodeEvents, fetchEvents, filterAgendaEvents, Agenda } from "./widgets/Agenda";
+import { overlapsRange } from "./lib/ics";
 import { decodeNews, fetchNews, News } from "./widgets/News";
 import { Month, monthLabel } from "./widgets/Month";
 import { eventFetchRange } from "./lib/date";
@@ -116,7 +117,7 @@ export default function App() {
   );
 
   const monthEvents = useMemo(
-    () => calQuery.data?.items.filter((event) => event.end >= calRange.from && event.start <= calRange.to),
+    () => calQuery.data?.items.filter((event) => overlapsRange(event.start, event.end, calRange.from, calRange.to)),
     [calQuery.data, calRange],
   );
 
@@ -130,7 +131,7 @@ export default function App() {
 
   const hints = useMemo<Record<string, string>>(() => {
     const h: Record<string, string> = {};
-    for (const l of flatLinks) if (l.hint) h[l.hint] = l.url;
+    for (const l of flatLinks) if (l.hint) h[l.hint.toLowerCase()] = l.url;
     return h;
   }, [flatLinks]);
 
@@ -139,16 +140,18 @@ export default function App() {
     [config.layout],
   );
   const paneVisible = (id: PaneId) => layoutById[id]?.visible ?? true;
-  const paneSpan = (id: PaneId): 1 | 2 => layoutById[id]?.span ?? 1;
+  const paneSpan = (id: PaneId): 1 | 2 => {
+    const layout = layoutById[id];
+    return layout && "span" in layout ? layout.span : 1;
+  };
   const visiblePanes = useMemo(
     () => new Set(PANE_ORDER.map((p) => p.id).filter((id) => layoutById[id]?.visible ?? true)),
     [layoutById],
   );
 
-  const consoleBase = config.homelab.uiUrl.replace(/\/+$/, "");
   const consoleUrl = useCallback(
-    (vmid: number) => `${consoleBase}/?console=kvm&novnc=1&vmid=${vmid}&node=${config.homelab.node}`,
-    [consoleBase, config.homelab.node],
+    (vmid: number) => buildConsoleUrl(config.homelab.uiUrl, config.homelab.node, vmid),
+    [config.homelab.uiUrl, config.homelab.node],
   );
   const rowsByPane = useMemo<Record<PaneId, RowInfo[]>>(() => {
     const rows: Record<PaneId, RowInfo[]> = {
@@ -182,8 +185,6 @@ export default function App() {
     dispatch({ type: "sync", rowCounts, visiblePanes });
   }, [rowCounts, visiblePanes]);
 
-  const hintMap = hints;
-
   const rowCount = ui.pane ? (rowsByPane[ui.pane]?.length ?? 0) : 0;
   const selectedUrl = ui.pane && ui.mode === "NORMAL"
     ? rowsByPane[ui.pane]?.[ui.row]?.url
@@ -199,7 +200,7 @@ export default function App() {
   }, [ui.mode]);
 
   useKeymap({
-    state: ui, dispatch, hints: hintMap, rowCount, selectedUrl, onSeed,
+    state: ui, dispatch, hints, rowCount, selectedUrl, onSeed,
     overlayOpen: modalOpen,
     onOverlayEscape: () => {
       if (settingsOpen) setSettingsOpen(false);
@@ -343,7 +344,7 @@ export default function App() {
           <Pane title="Weather" label="Wetter" subtitle={config.location.label} span={paneSpan("weather")} id="pane-2"
             ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
           >
-            <Weather data={wxQuery.data} selIndex={selIndex("weather")} now={now} />
+            <Weather data={wxQuery.data} now={now} />
           </Pane>
           )}
 

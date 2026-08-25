@@ -186,6 +186,43 @@ describe("parseIcs", () => {
     expect(events).toHaveLength(1);
   });
 
+  it("schließt einen Termin aus, dessen exklusives DTEND genau am Fensteranfang liegt", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:end-exclusive",
+      "DTSTART:20260806T220000",
+      "DTEND:20260807T000000",
+      "SUMMARY:Gestern",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const events = parseIcs(
+      ics,
+      new Date("2026-08-07T00:00:00"),
+      new Date("2026-08-07T23:59:59"),
+    );
+    expect(events).toEqual([]);
+  });
+
+  it("behält einen Null-Dauer-Termin innerhalb des Fensters", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:instant",
+      "DTSTART:20260807T120000",
+      "DTEND:20260807T120000",
+      "SUMMARY:Zeitpunkt",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    expect(parseIcs(
+      ics,
+      new Date("2026-08-07T00:00:00"),
+      new Date("2026-08-07T23:59:59"),
+    )).toHaveLength(1);
+  });
+
   it("begrenzt eine sehr alte tägliche Serie auf den angefragten Bereich", () => {
     const ics = [
       "BEGIN:VCALENDAR",

@@ -32,12 +32,19 @@ export function requiredProxyHosts(cfg: Config): string[] {
   return hosts;
 }
 
-/** Ergänzt fehlende Quellhosts und lässt die von Hand gepflegten Einträge unangetastet. */
-export function withRequiredProxyHosts(cfg: Config): Config {
-  const vorhanden = new Set(
-    cfg.proxyAllowlist.map((entry) => canonicalHostname(entry)).filter((h) => h !== undefined),
-  );
-  const fehlend = requiredProxyHosts(cfg).filter((host) => !vorhanden.has(host));
-  if (fehlend.length === 0) return cfg;
-  return { ...cfg, proxyAllowlist: [...cfg.proxyAllowlist, ...fehlend] };
+/**
+ * Effektive Policy des Proxys. Abgeleitete Quellhosts werden bewusst nicht in config.json
+ * persistiert: Dort gilt die Obergrenze für die vom Menschen gepflegte Allowlist, während
+ * maximal 64 weitere Hosts aus Feeds und Kalendern folgen können.
+ */
+export function effectiveProxyHosts(cfg: Config): string[] {
+  const hosts: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of [...cfg.proxyAllowlist, ...requiredProxyHosts(cfg)]) {
+    const host = canonicalHostname(entry);
+    if (host === undefined || seen.has(host)) continue;
+    seen.add(host);
+    hosts.push(host);
+  }
+  return hosts;
 }

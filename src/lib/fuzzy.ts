@@ -1,5 +1,3 @@
-export type FuzzyItem<T> = { item: T; score: number };
-
 function score(needle: string, hay: string): number {
   const n = needle.toLowerCase();
   const h = hay.toLowerCase();

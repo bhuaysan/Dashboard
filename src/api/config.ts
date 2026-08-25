@@ -17,8 +17,8 @@ export class ConfigConflictError extends Error {
 export function useConfig() {
   return useQuery<Config>({
     queryKey: ["config"],
-    queryFn: async () => {
-      const res = await fetch("/api/config");
+    queryFn: async ({ signal }) => {
+      const res = await fetch("/api/config", { signal });
       if (!res.ok) throw new Error("Config nicht ladbar");
       const parsed = configSchema.parse(await res.json());
       writeLocalConfig(parsed);
@@ -52,13 +52,21 @@ export function useSaveConfig() {
       if (!res.ok) throw new Error("Speichern fehlgeschlagen");
       return configSchema.parse(await res.json());
     },
-    onSuccess: (cfg) => {
+    onSuccess: async (cfg) => {
+      // Ein Poll, der vor dem PUT begonnen hat, darf danach weder Query-Cache noch
+      // localStorage mit der alten Revision überschreiben.
+      await qc.cancelQueries({ queryKey: ["config"] });
       writeLocalConfig(cfg);
       qc.setQueryData(["config"], cfg);
-      // Homelab-Schwellwerte, erwartete Gäste und Erreichbarkeitsziele gehören zur
-      // Config-Revision. Ein erfolgreicher Save darf deshalb keinen alten PVE-Stand
-      // bis zum nächsten 60-Sekunden-Intervall anzeigen.
-      void qc.invalidateQueries({ queryKey: ["pve"] });
+      void qc.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && (
+            key === "pve" || key.startsWith("wx:") ||
+            key.startsWith("cal:") || key.startsWith("news:")
+          );
+        },
+      });
     },
   });
 }

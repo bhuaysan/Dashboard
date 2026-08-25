@@ -56,7 +56,7 @@ const cidrValue = nonEmpty.refine((value) => {
 const hostValue = nonEmpty.refine((value) => {
   if (/[^A-Za-z0-9.:-]/.test(value) || value.includes("..")) return false;
   const portMatch = /:(\d+)$/.exec(value);
-  if (portMatch && Number(portMatch[1]) > 65535) return false;
+  if (portMatch && (Number(portMatch[1]) < 1 || Number(portMatch[1]) > 65535)) return false;
   const hostname = portMatch ? value.slice(0, -portMatch[0].length) : value;
   if (hostname === "" || hostname.startsWith(".") || hostname.endsWith(".")) return false;
   return hostname.split(".").every((part) => /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(part));

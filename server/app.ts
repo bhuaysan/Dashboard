@@ -3,7 +3,8 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { resolve } from "node:path";
 import { ConfigStoreError, ConfigTooLargeError, createConfigStore, type ConfigStore } from "./config-store.ts";
 import { createWriteGuard } from "./write-guard.ts";
-import { ProxyOverloadedError, ProxyTimeoutError, proxyFetch, type ProxyResult } from "./proxy.ts";
+import { ProxyOverloadedError, ProxyPolicyError, ProxyTimeoutError, proxyFetch, type ProxyResult } from "./proxy.ts";
+import { effectiveProxyHosts } from "../src/config/proxyHosts.ts";
 import type { Config } from "../src/config/schema.ts";
 import { fetchHomelab } from "./pve.ts";
 import { createHomelabCache, type HomelabFetcher } from "./homelab-cache.ts";
@@ -64,7 +65,7 @@ export async function readJsonBody(request: Request, maxBytes: number): Promise<
 }
 
 export function inertProxyResponse(result: ProxyResult): Response {
-  const noBody = result.status === 101 || result.status === 204 || result.status === 205 || result.status === 304;
+  const noBody = result.status === 204 || result.status === 205 || result.status === 304;
   return new Response(noBody ? null : result.body, {
     status: result.status,
     headers: {
@@ -156,7 +157,7 @@ export function createApp(options: AppOptions): Hono {
       throw error;
     }
     try {
-      const result = await proxyFetch(raw, cfg.proxyAllowlist);
+      const result = await proxyFetch(raw, effectiveProxyHosts(cfg));
       return inertProxyResponse(result);
     } catch (error) {
       if (error instanceof ProxyOverloadedError) {
@@ -165,10 +166,10 @@ export function createApp(options: AppOptions): Hono {
       if (error instanceof ProxyTimeoutError) {
         return c.json({ error: error.message }, 504);
       }
-      const msg = error instanceof Error ? error.message : "Proxy-Fehler";
-      if (msg === "Schema" || msg === "Host nicht erlaubt" || msg === "Private Adresse") {
-        return c.json({ error: msg }, 403);
+      if (error instanceof ProxyPolicyError) {
+        return c.json({ error: error.message }, 403);
       }
+      const msg = error instanceof Error ? error.message : "Proxy-Fehler";
       return c.json({ error: msg }, 502);
     }
   });

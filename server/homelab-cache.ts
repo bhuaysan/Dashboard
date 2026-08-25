@@ -1,5 +1,5 @@
 import type { Config } from "../src/config/schema.ts";
-import type { HomelabData } from "./pve.ts";
+import type { HomelabData } from "../src/lib/homelab.ts";
 
 export type HomelabFetcher = (config: Config) => Promise<HomelabData>;
 
@@ -90,11 +90,5 @@ export function createHomelabCache(
     return promise;
   }
 
-  function clear(): void {
-    cache = undefined;
-    failure = undefined;
-    flight = undefined;
-  }
-
-  return { get, clear };
+  return { get };
 }

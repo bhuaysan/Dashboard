@@ -7,7 +7,9 @@ export function resolveQuery(input: string, search: Config["search"]): string | 
   if (m) {
     const key = m[1] ?? "";
     const rest = m[2] ?? "";
-    const tpl = search.bangs[key];
+    const tpl = Object.prototype.hasOwnProperty.call(search.bangs, key)
+      ? search.bangs[key]
+      : undefined;
     if (tpl) return tpl.replace("%s", encodeURIComponent(rest));
   }
   return search.default.replace("%s", encodeURIComponent(trimmed));

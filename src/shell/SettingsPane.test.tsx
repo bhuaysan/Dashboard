@@ -105,6 +105,31 @@ describe("SettingsPane", () => {
     expect(screen.getByRole("alert").textContent).toContain("muss mit g beginnen");
   });
 
+  it("normalisiert ein geleertes optionales Link-Kürzel vor dem Speichern", () => {
+    const save = saveSucceeds();
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.change(screen.getByLabelText(/Kürzel von Link „Datasphere"/), { target: { value: "" } });
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(save.mutate).toHaveBeenCalledOnce();
+    const sent = (save.mutate as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Config;
+    expect(sent.linkGroups[0]?.links[0]?.hint).toBeUndefined();
+  });
+
+  it("legt einen neuen Link ohne ungültigen Leerstring-Hint an", () => {
+    const save = saveSucceeds();
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "+ Link" })[0] as HTMLElement);
+    fireEvent.change(screen.getByLabelText(/URL von Link „Neuer Link"/), {
+      target: { value: "https://example.com/neu" },
+    });
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(save.mutate).toHaveBeenCalledOnce();
+    const sent = (save.mutate as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Config;
+    expect(sent.linkGroups[0]?.links.at(-1)?.hint).toBeUndefined();
+  });
+
   it("blockt Adressen ohne http oder https", () => {
     const save = saveSucceeds();
     const cfg = structuredClone(defaultConfig);
@@ -143,6 +168,21 @@ describe("SettingsPane", () => {
     // Eine 0 als Storage-Schwelle ließe jedes Storage Alarm schlagen.
     const sent = (save.mutate as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Config;
     expect(sent.homelab.thresholds.storage).toBe(80);
+  });
+
+  it("zeigt einen nicht mehr gelieferten erwarteten Gast und lässt ihn entfernen", () => {
+    const save = saveSucceeds();
+    const cfg = structuredClone(defaultConfig);
+    cfg.homelab.expectRunning = [999];
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Homelab" }));
+    const orphan = screen.getByRole("checkbox", { name: "999 nicht mehr vorhanden soll laufen" });
+    expect((orphan as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(orphan);
+    fireEvent.click(screen.getByText("Speichern"));
+    const sent = (save.mutate as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Config;
+    expect(sent.homelab.expectRunning).toEqual([]);
   });
 
   it("speichert eine gültige Config und schließt erst danach", () => {
@@ -237,6 +277,31 @@ describe("SettingsPane", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("lässt eine ältere Ortssuche kein neueres Ergebnis überschreiben", async () => {
+    const pending: ((response: Response) => void)[] = [];
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve))));
+    render(<SettingsPane open config={defaultConfig} guests={guests}
+      onClose={() => undefined} save={saveSucceeds()} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    const input = document.getElementById("s-city") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Erste Suche" } });
+    fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+    fireEvent.change(input, { target: { value: "Zweite Suche" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(pending).toHaveLength(2);
+
+    pending[1]?.(new Response(JSON.stringify({
+      results: [{ name: "Neuer Ort", latitude: 49, longitude: 9 }],
+    }), { status: 200 }));
+    await waitFor(() => expect(screen.getByText(/Neuer Ort/)).toBeTruthy());
+    pending[0]?.(new Response(JSON.stringify({
+      results: [{ name: "Alter Ort", latitude: 48, longitude: 8 }],
+    }), { status: 200 }));
+    await Promise.resolve();
+    expect(screen.queryByText(/Alter Ort/)).toBeNull();
+    expect(screen.getByText(/Neuer Ort/)).toBeTruthy();
   });
 
   it("übersetzt einen strukturellen Konfigurationsfehler und springt zum richtigen Abschnitt", () => {

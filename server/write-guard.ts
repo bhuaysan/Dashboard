@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
-import { env, type DashboardEnvironment } from "./env.ts";
+import type { DashboardEnvironment } from "./env.ts";
 
 function ipToInt(ip: string): number | undefined {
   const parts = ip.split(".").map(Number);
@@ -130,5 +130,3 @@ export function createWriteGuard(runtimeEnv: Pick<DashboardEnvironment, "port" |
     return next();
   };
 }
-
-export const writeGuard = createWriteGuard(env);

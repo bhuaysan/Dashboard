@@ -4,8 +4,8 @@ import { join } from "node:path";
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config/defaults";
-import type { Config } from "../src/config/schema";
-import { createConfigStore, MAX_CONFIG_BYTES, writeAtomic } from "./config-store.ts";
+import { configSchema, type Config } from "../src/config/schema";
+import { ConfigStoreError, createConfigStore, MAX_CONFIG_BYTES, writeAtomic } from "./config-store.ts";
 
 function nearLimitConfig(): Config {
   const links: Config["linkGroups"][number]["links"] = Array.from({ length: 100 }, (_, index) => ({
@@ -138,6 +138,25 @@ describe("updateConfig", () => {
       vi.useRealTimers();
     }
   });
+
+  itWithStore("persistiert keine abgeleiteten Hosts jenseits der Schema-Grenze", async ({ configPath, store }) => {
+    const current = await store.readConfig();
+    const candidate: Config = {
+      ...current,
+      proxyAllowlist: Array.from({ length: 128 }, (_, index) => `manual-${index}.example`),
+      feeds: Array.from({ length: 32 }, (_, index) => ({
+        label: `Feed ${index}`, url: `https://feed-${index}.example/rss`, limit: 5,
+      })),
+      calendars: Array.from({ length: 32 }, (_, index) => ({
+        label: `Kalender ${index}`, url: `https://cal-${index}.example/work.ics`,
+      })),
+    };
+    const result = await store.updateConfig(current.updatedAt, candidate);
+    expect(result.kind).toBe("ok");
+    const persisted: unknown = JSON.parse(await readFile(configPath, "utf8"));
+    expect(configSchema.safeParse(persisted).success).toBe(true);
+    expect((persisted as Config).proxyAllowlist).toHaveLength(128);
+  });
 });
 
 describe("writeAtomic", () => {
@@ -147,5 +166,11 @@ describe("writeAtomic", () => {
     expect(await readFile(target, "utf8")).toBe("inhalt");
     const files = await readdir(dir);
     expect(files.some((f) => f.includes(".tmp-"))).toBe(false);
+  });
+
+  itWithStore("übersetzt einen finalen Rename-Fehler in ConfigStoreError", async ({ dir }) => {
+    await expect(writeAtomic(dir, "inhalt")).rejects.toBeInstanceOf(ConfigStoreError);
+    const files = await readdir(join(dir, ".."));
+    expect(files.some((file) => file.startsWith(`${dir.split("/").at(-1) ?? ""}.tmp-`))).toBe(false);
   });
 });

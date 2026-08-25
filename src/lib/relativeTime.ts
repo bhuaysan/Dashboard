@@ -45,7 +45,3 @@ export function spokenAge(from: Date, now = new Date()): string {
   const words = UNIT_WORDS[unit];
   return `vor ${value} ${value === 1 ? words[0] : words[1]}`;
 }
-
-export function isSameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}

@@ -91,4 +91,14 @@ describe("filterAgendaEvents", () => {
     };
     expect(filterAgendaEvents([event], new Date("2026-08-07T09:00:00"))).toEqual([event]);
   });
+
+  it("zeigt einen genau um Mitternacht beendeten Termin am Folgetag nicht erneut", () => {
+    const event: CalEvent = {
+      title: "Gestern",
+      start: new Date("2026-08-06T22:00:00"),
+      end: new Date("2026-08-07T00:00:00"),
+      allDay: false,
+    };
+    expect(filterAgendaEvents([event], new Date("2026-08-07T09:00:00"))).toEqual([]);
+  });
 });

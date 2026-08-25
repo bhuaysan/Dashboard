@@ -262,7 +262,7 @@ Verwende **nicht** `gap: 1px`: weil jede Pane schon einen eigenen 1-px-Rahmen ha
 | Taste | Wirkung |
 | --- | --- |
 | Buchstabe oder Ziffer tippen, oder `/` | Fokus ins Suchfeld, Modus `INSERT` |
-| `1`–`6` | Pane fokussieren (1 clock, 2 weather, 3 links, 4 agenda, 5 news, 6 lab) |
+| `1`–`7` | Pane fokussieren (1 clock, 2 weather, 3 month, 4 links, 5 news, 6 agenda, 7 lab) |
 | `j` / `k` | eine Zeile ab / auf im fokussierten Pane |
 | `Enter` | ausgewählte Zeile öffnen |
 | `Shift+Enter` | in neuem Tab öffnen |
@@ -707,6 +707,12 @@ Weiter für `/api/proxy`: `redirect: "manual"`, maximal 3 Weiterleitungen und **
 durch `assertAllowed`; `AbortSignal.timeout(5000)`; Antwort bei 2 MB abbrechen; In-Memory-`Map` als
 Cache mit TTL nach URL (Wetter 600 s, News und Kalender 900 s).
 
+Die effektive Allowlist besteht aus `config.proxyAllowlist` plus den Hosts der eingetragenen
+Feed- und Kalender-URLs. Diese Quellhosts werden nur zur Laufzeit abgeleitet und nicht zusätzlich
+in `config.json` persistiert; dadurch bleibt die manuelle Array-Grenze auch bei vielen Quellen
+eingehalten. Cache und Single-Flight müssen die effektive Policy in ihren Schlüssel aufnehmen,
+damit entfernte Redirect-Ziele nicht aus einem älteren Cache weiter ausgeliefert werden.
+
 Weil `10.x` in `isBlockedIp` gesperrt ist, kann `/api/proxy` das Homelab nicht erreichen — das ist
 so gewollt. Die Proxmox-Daten laufen über den eigenen Endpunkt in Schritt 6.
 
@@ -865,6 +871,9 @@ Wiederholungsregel läuft sonst endlos. Ganztagstermine (`event.startDate.isDate
 separat oben in der Gruppe gelistet, ohne Uhrzeit. Die Agenda zeigt heute plus die nächsten drei
 Tage, gruppiert nach `heute` / `morgen` / Wochentag; der laufende Termin bekommt
 `--color-bg-sel` als Hintergrund.
+
+`DTEND` ist exklusiv: Ein Termin überschneidet ein Fenster am Anfang nur bei `end > from`.
+Null-Dauer-Termine werden als Zeitpunkt separat behandelt.
 
 **Hinweis zum Kalender:** Ob sich der Outlook-Kalender bei IBsolution als ICS veröffentlichen lässt,
 entscheidet eine Exchange-Richtlinie der IT und kann gesperrt sein. Falls es nicht geht: eine

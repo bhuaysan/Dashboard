@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { buildConsoleUrl } from "./lib/url";
 import { defaultConfig } from "./config/defaults";
 
 const EMPTY_HOMELAB = {
@@ -56,6 +57,13 @@ function jsonFile(value: unknown): File {
 }
 
 describe("App", () => {
+  it("baut Proxmox-Konsolenparameter als echte URL", () => {
+    const url = new URL(buildConsoleUrl("https://pve.example:8006/", "pve/home", 101));
+    expect(url.hash).toBe("");
+    expect(url.searchParams.get("console")).toBe("kvm");
+    expect(url.searchParams.get("vmid")).toBe("101");
+    expect(url.searchParams.get("node")).toBe("pve/home");
+  });
   it("rendert Panes, Suchzeile und Statusline", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>

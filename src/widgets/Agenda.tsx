@@ -1,5 +1,5 @@
 import { isSafeLocalCalendarPath, type Config } from "../config/schema";
-import { parseIcs, type CalEvent } from "../lib/ics";
+import { overlapsRange, parseIcs, type CalEvent } from "../lib/ics";
 import { z } from "zod";
 
 export type { CalEvent };
@@ -21,10 +21,6 @@ const eventFetchResultSchema = z.object({
 export function decodeEvents(value: unknown): EventFetchResult | undefined {
   const parsed = eventFetchResultSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
-}
-
-export function reviveEvents(events: CalEvent[]): CalEvent[] {
-  return events.map((e) => ({ ...e, start: new Date(e.start), end: new Date(e.end) }));
 }
 
 type CalendarSourceResult = { items: CalEvent[]; failure?: string };
@@ -72,7 +68,7 @@ export function filterAgendaEvents(events: CalEvent[], now: Date, days = 4): Cal
   const to = new Date(from);
   to.setDate(to.getDate() + days);
   to.setMilliseconds(-1);
-  return events.filter((event) => event.end >= from && event.start <= to);
+  return events.filter((event) => overlapsRange(event.start, event.end, from, to));
 }
 
 type Group = { label: string; events: { ev: CalEvent; index: number }[] };

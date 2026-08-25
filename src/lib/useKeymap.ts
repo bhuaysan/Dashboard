@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import type { PaneId } from "../config/schema";
+import { PANE_IDS, type PaneId } from "../config/schema";
+import { openUrl } from "./url";
 
 export type Mode = "NORMAL" | "INSERT" | "COMMAND";
 export type { PaneId };
@@ -23,15 +24,14 @@ export type UiAction =
 
 // Reihenfolge und Kürzel der Statusline. Die Ziffern 1–7 folgen dieser Liste, sie muss
 // deshalb dieselbe Reihenfolge haben wie PANE_IDS und die Panes in App.tsx.
-export const PANE_ORDER: { id: PaneId; label: string }[] = [
-  { id: "clock", label: "clock" },
-  { id: "weather", label: "weather" },
-  { id: "month", label: "month" },
-  { id: "links", label: "links" },
-  { id: "news", label: "news" },
-  { id: "agenda", label: "agenda" },
-  { id: "homelab", label: "lab" },
-];
+const PANE_LABELS: Record<PaneId, string> = {
+  clock: "clock", weather: "weather", month: "month", links: "links",
+  news: "news", agenda: "agenda", homelab: "lab",
+};
+export const PANE_ORDER: { id: PaneId; label: string }[] = PANE_IDS.map((id) => ({
+  id,
+  label: PANE_LABELS[id],
+}));
 
 export function uiReducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -84,28 +84,6 @@ type Params = {
   visiblePanes: ReadonlySet<PaneId>;
 };
 
-// Nur http und https: die Adressen kommen aus der Config und — bei News — aus fremden
-// Feeds. javascript: oder data: würden als Skript in der eigenen Seite landen.
-// Jedes href im Markup läuft hier durch, nicht nur die Tastatursprünge.
-export function safeHref(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  let target: URL;
-  try {
-    target = new URL(url, window.location.href);
-  } catch {
-    return undefined;
-  }
-  if (target.protocol !== "http:" && target.protocol !== "https:") return undefined;
-  return target.href;
-}
-
-export function openUrl(url: string, newTab: boolean): void {
-  const href = safeHref(url);
-  if (href === undefined) return;
-  if (newTab) window.open(href, "_blank", "noopener");
-  else window.location.assign(href);
-}
-
 export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSeed, overlayOpen, onOverlayEscape, visiblePanes }: Params): void {
   // Der Handler kennt nur den Zustand aus dem letzten Render. Kommen zwei Tasten an,
   // bevor React neu gerendert hat, sähe die zweite noch den alten Modus und würde ihn
@@ -146,15 +124,6 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
       if (live.current.mode !== "NORMAL") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      if (state.showHelp) {
-        // Nur druckbare Zeichen schließen die Übersicht. Tab und Pfeile müssen
-        // durchkommen, sonst kann sie mit der Tastatur niemand lesen.
-        if (e.key.length === 1) {
-          dispatch({ type: "help", show: false });
-          e.preventDefault();
-        }
-        return;
-      }
       if (e.key === "?") {
         dispatch({ type: "help", show: true });
         e.preventDefault();
@@ -177,7 +146,7 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
       }
       if (live.current.hintBuffer !== "") {
         if (e.key.length !== 1) return;
-        const buf = live.current.hintBuffer + e.key;
+        const buf = (live.current.hintBuffer + e.key).toLowerCase();
         const url = hints[buf];
         if (url) {
           openUrl(url, e.shiftKey);

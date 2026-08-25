@@ -1,7 +1,7 @@
 import type { Config } from "../config/schema";
 import { parseFeed, type NewsItem } from "../lib/rss";
 import { shortAge, spokenAge } from "../lib/relativeTime";
-import { safeHref } from "../lib/useKeymap";
+import { safeHref } from "../lib/url";
 import { z } from "zod";
 
 export type { NewsItem };
@@ -21,10 +21,6 @@ const newsFetchResultSchema = z.object({
 export function decodeNews(value: unknown): NewsFetchResult | undefined {
   const parsed = newsFetchResultSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
-}
-
-export function reviveNews(items: NewsItem[]): NewsItem[] {
-  return items.map((n) => ({ ...n, date: new Date(n.date) }));
 }
 
 type FeedSourceResult = { items: NewsItem[]; failure?: string };

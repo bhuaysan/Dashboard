@@ -3,8 +3,6 @@ import { copyFile, readFile, rename, stat, unlink, writeFile } from "node:fs/pro
 import type { ZodIssue } from "zod";
 import { configSchema, PANE_IDS, type Config } from "../src/config/schema.ts";
 import { defaultConfig } from "../src/config/defaults.ts";
-import { withRequiredProxyHosts } from "../src/config/proxyHosts.ts";
-import { env } from "./env.ts";
 
 const KEEP_BACKUPS = 7;
 export const MAX_CONFIG_BYTES = 512 * 1024;
@@ -62,6 +60,8 @@ export async function writeAtomic(path: string, data: string): Promise<void> {
     await writeFile(tmp, data, { mode: 0o600 });
     await rename(tmp, path);        // rename ist atomar, halbe Dateien unmöglich
     renamed = true;
+  } catch (error) {
+    throw describeStoreError("Config-Datei konnte nicht geschrieben werden", error);
   } finally {
     if (!renamed) {
       try { await unlink(tmp); } catch { /* best effort: der ursprüngliche Fehler bleibt maßgeblich */ }
@@ -135,9 +135,7 @@ export function createConfigStore(configPath: string): ConfigStore {
         parsed.data.layout.push(entry);
       }
     }
-    // Auch beim Lesen, nicht nur beim Schreiben: eine von Hand bearbeitete config.json
-    // soll ihre Quellen laden können, ohne dass erst jemand einmal speichern muss.
-    return withRequiredProxyHosts(parsed.data);
+    return parsed.data;
   }
 
   // Alle Schreibvorgänge dieses Stores laufen durch dieselbe Promise-Queue. Das ist auch
@@ -206,10 +204,7 @@ export function createConfigStore(configPath: string): ConfigStore {
         return { kind: "invalid", issues: parsed.error.issues };
       }
 
-      // Ein neu eingetragener Feed bringt seinen Host mit. Ohne das hier müsste ihn
-      // jemand ein zweites Mal von Hand in die Allowlist schreiben — und wer das
-      // vergisst, bekommt eine Quelle, die still fehlschlägt.
-      const config = withRequiredProxyHosts(parsed.data);
+      const config = parsed.data;
       await writeConfigUnlocked(config);
       return { kind: "ok", config };
     });
@@ -217,10 +212,3 @@ export function createConfigStore(configPath: string): ConfigStore {
 
   return { readConfig, writeConfig, updateConfig };
 }
-
-// Legacy-Exports für direkte Server-/Store-Nutzung. Die App-Fabrik verwendet für Tests und
-// mehrere Instanzen die explizite Factory oben.
-const defaultStore = createConfigStore(env.configPath);
-export const readConfig = defaultStore.readConfig;
-export const writeConfig = defaultStore.writeConfig;
-export const updateConfig = defaultStore.updateConfig;

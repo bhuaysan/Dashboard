@@ -147,6 +147,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
   const boxRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const wasOpen = useRef(false);
+  const placeRequest = useRef(0);
 
   // Nur beim Öffnen selbst aus config neu befüllen — config pollt alle 15 s vom Server
   // nach, und ein Effekt auf [open, config] würde bei jeder echten Änderung während
@@ -195,16 +196,23 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
   const upd = (fn: (d: Config) => Config) => setDraft((d) => fn(d));
 
   async function searchPlace() {
+    const request = placeRequest.current + 1;
+    placeRequest.current = request;
     setSearching(true);
     setError(undefined);
     try {
       const target = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(placeQuery)}&count=1&language=de`;
       const res = await fetch(`/api/proxy?url=${encodeURIComponent(target)}`);
+      if (request !== placeRequest.current) {
+        try { await res.body?.cancel(); } catch { /* veraltete Antwort wird verworfen */ }
+        return;
+      }
       if (!res.ok) {
         setError("Ortssuche fehlgeschlagen.");
         return;
       }
       const raw: unknown = await res.json();
+      if (request !== placeRequest.current) return;
       if (!isRecord(raw) || !Array.isArray(raw.results)) {
         setError("Ortssuche fehlgeschlagen.");
         return;
@@ -218,11 +226,19 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
         upd((d) => ({ ...d, location: { label: hit.name, lat: hit.latitude, lon: hit.longitude } }));
       }
     } catch {
-      setError("Ortssuche fehlgeschlagen.");
+      if (request === placeRequest.current) setError("Ortssuche fehlgeschlagen.");
     } finally {
-      setSearching(false);
+      if (request === placeRequest.current) setSearching(false);
     }
   }
+
+  const guestChoices = [...guests];
+  for (const vmid of draft.homelab.expectRunning) {
+    if (!guestChoices.some((guest) => guest.vmid === vmid)) {
+      guestChoices.push({ vmid, name: "nicht mehr vorhanden" });
+    }
+  }
+  guestChoices.sort((a, b) => a.vmid - b.vmid);
 
   function handleSave() {
     if (conflict) return;
@@ -448,7 +464,9 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                               ...d,
                               linkGroups: d.linkGroups.map((x, i) => i !== gi ? x : {
                                 ...x,
-                                links: x.links.map((y, j) => j === li ? { ...y, hint: e.target.value } : y),
+                                links: x.links.map((y, j) => j === li
+                                  ? { ...y, hint: e.target.value === "" ? undefined : e.target.value.toLowerCase() }
+                                  : y),
                               }),
                             }))}
                           />
@@ -487,7 +505,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                       <button type="button" className="btn" onClick={() => upd((d) => ({
                         ...d,
                         linkGroups: d.linkGroups.map((x, i) => i === gi
-                          ? { ...x, links: [...x.links, { label: "Neuer Link", url: "https://", hint: "" }] }
+                          ? { ...x, links: [...x.links, { label: "Neuer Link", url: "https://" }] }
                           : x),
                       }))}>+ Link</button>
                     </p>
@@ -504,7 +522,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
 
             {sec === "feeds" && (
               <section>
-                <p className="set-hint">Feeds werden über den eigenen Server geladen. Der Host muss zusätzlich in der Proxy-Allowlist stehen.</p>
+                <p className="set-hint">Feeds werden über den eigenen Server geladen. Ihr Host wird automatisch für den Proxy freigegeben.</p>
                 <div className="tbl tbl--feeds">
                   <div className="tbl-head"><span>Name</span><span>URL</span><span>Anzahl</span><span /></div>
                   {draft.feeds.map((f, i) => (
@@ -646,7 +664,12 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                             onChange={(e) => {
                               const span = Number(e.target.value);
                               if (span === 1 || span === 2) {
-                                upd((d) => ({ ...d, layout: d.layout.map((x, j) => j === i ? { ...x, span } : x) }));
+                                upd((d) => ({
+                                  ...d,
+                                  layout: d.layout.map((x, j) => j === i && x.id !== "homelab"
+                                    ? { ...x, span }
+                                    : x),
+                                }));
                               }
                             }}>
                             <option value={1}>1</option>
@@ -675,7 +698,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                 <p className="set-hint">Ziel der Konsolen-Links in der Gästetabelle. Die Daten selbst holt der Server, nicht der Browser.</p>
                 <p className="set-hint" style={{ marginTop: "1rem" }}>Gäste, die laufen sollen. Ist einer davon gestoppt, erscheint eine Alarmzeile. Alle anderen werden nur angezeigt.</p>
                 <div className="checks">
-                  {guests.map((g) => (
+                  {guestChoices.map((g) => (
                     <label className="check" key={g.vmid}>
                       <input type="checkbox" aria-label={`${g.vmid} ${g.name} soll laufen`} checked={draft.homelab.expectRunning.includes(g.vmid)}
                         onChange={(e) => upd((d) => ({

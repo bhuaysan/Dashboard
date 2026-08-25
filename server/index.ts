@@ -9,7 +9,7 @@ import { env } from "./env.ts";
 import { createApp } from "./app.ts";
 
 const distRoot = resolve(fileURLToPath(import.meta.url), "..", "..", "dist");
-export const app = createApp({ env, distRoot });
+const app = createApp({ env, distRoot });
 
 const isMain = process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false;
 if (isMain) {

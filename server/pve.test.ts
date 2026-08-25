@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildHomelab, parsePveEnvelope, pveNodePathSegment, type PveRaw } from "./pve.ts";
 import { defaultConfig } from "../src/config/defaults";
+import { homelabDataSchema } from "../src/lib/homelab";
 
 const cfg = { ...defaultConfig.homelab, expectRunning: [100, 110] };
 const NOW = new Date("2026-08-05T14:00:00Z");
@@ -149,6 +150,32 @@ describe("buildHomelab · Rest", () => {
   it("meldet nicht erreichbare Ziele als crit", () => {
     const d = buildHomelab(raw({ reachability: [{ label: "pihole", ok: false }] }), cfg, NOW);
     expect(d.alerts).toContainEqual({ level: "crit", text: "pihole nicht erreichbar" });
+  });
+
+  it("begrenzt anomale Upstream-Verhältnisse auf gültige Prozentwerte", () => {
+    const d = buildHomelab(raw({
+      status: {
+        cpu: 1,
+        memory: { used: 101, total: 100 },
+        rootfs: { used: 150, total: 100 },
+        uptime: 1,
+      },
+      resources: [guest(100, "running", { mem: 200, maxmem: 100 })],
+      storages: [{ storage: "tank", total: 100, used: 120, active: 1 }],
+    }), cfg, NOW);
+    expect(d.node.mem).toBe(100);
+    expect(d.node.root).toBe(100);
+    expect(d.guests[0]?.mem).toBe(100);
+    expect(d.storage[0]?.pct).toBe(100);
+    expect(homelabDataSchema.safeParse(d).success).toBe(true);
+  });
+
+  it("begrenzt zusammengesetzte Alarmtexte auf den gemeinsamen Clientvertrag", () => {
+    const label = "x".repeat(256);
+    const d = buildHomelab(raw({ reachability: [{ label, ok: false }] }), cfg, NOW);
+    const alert = d.alerts.find((item) => item.text.startsWith("x"));
+    expect(alert?.text.length).toBe(256);
+    expect(homelabDataSchema.safeParse(d).success).toBe(true);
   });
 });
 

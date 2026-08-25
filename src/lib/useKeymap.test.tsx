@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { initialUiState, openUrl, uiReducer, useKeymap, type Mode, type PaneId, type UiAction, type UiState } from "./useKeymap";
+import { initialUiState, uiReducer, useKeymap, type Mode, type PaneId, type UiAction, type UiState } from "./useKeymap";
+import { openUrl } from "./url";
 
 const ALL_PANES: ReadonlySet<PaneId> = new Set<PaneId>([
   "clock", "weather", "month", "links", "agenda", "news", "homelab",
@@ -45,7 +46,7 @@ describe("Kürzel", () => {
   it("erkennt gg — das zweite g gehört zum Kürzel, es beginnt keines neu", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const dispatch = setup({ hintBuffer: "g" }, { hints: { gg: "https://example.com/wiki" } });
-    press("g", { shiftKey: true });
+    press("G", { shiftKey: true });
     expect(open).toHaveBeenCalledWith("https://example.com/wiki", "_blank", "noopener");
     expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "" });
   });
@@ -103,7 +104,7 @@ describe("Schnelles Tippen", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const dispatch = setup({}, { hints: { gd: "https://example.com/" } });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "g" }));
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "d", shiftKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "D", shiftKey: true }));
     expect(dispatch.onSeed).not.toHaveBeenCalled();
     expect(open).toHaveBeenCalledWith("https://example.com/", "_blank", "noopener");
   });
@@ -182,15 +183,5 @@ describe("Esc im Einstellungsdialog", () => {
     const onOverlayEscape = setupOverlay();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(onOverlayEscape).toHaveBeenCalledOnce();
-  });
-});
-
-describe("Tastenübersicht", () => {
-  it("schließt bei einem druckbaren Zeichen, aber nicht bei Tab", () => {
-    const dispatch = setup({ showHelp: true });
-    press("Tab");
-    expect(dispatch).not.toHaveBeenCalled();
-    press("x");
-    expect(dispatch).toHaveBeenCalledWith({ type: "help", show: false });
   });
 });

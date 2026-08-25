@@ -28,12 +28,28 @@ describe("configSchema", () => {
     expect(parsed.holidayRegion).toBe("BW");
   });
 
+  it("entfernt das historische, wirkungslose Homelab-span beim Parsen", () => {
+    const legacy = {
+      ...defaultConfig,
+      layout: defaultConfig.layout.map((entry) => entry.id === "homelab"
+        ? { ...entry, span: 1 }
+        : entry),
+    };
+    const parsed = configSchema.parse(legacy);
+    expect(parsed.layout.find((entry) => entry.id === "homelab")).toEqual({
+      id: "homelab",
+      visible: true,
+    });
+  });
+
   it.each([
     ["ungültige Zeitzone", { clock: { secondary: [{ label: "x", tz: "Nicht/Real" }] } }],
     ["ungültige Koordinaten", { location: { ...defaultConfig.location, lat: 91 } }],
     ["ungültigen Port", { homelab: { ...defaultConfig.homelab, reachability: [{ label: "x", host: "localhost", port: 65536 }] } }],
     ["ungültige Suchvorlage", { search: { ...defaultConfig.search, default: "javascript:alert(%s)" } }],
     ["ungültigen Kalenderpfad", { calendars: [{ label: "x", url: "//evil.example/work.ics" }] }],
+    ["Proxmox-URL mit Fragment", { homelab: { ...defaultConfig.homelab, uiUrl: "https://pve.example/#overview" } }],
+    ["Proxmox-URL mit Pfad", { homelab: { ...defaultConfig.homelab, uiUrl: "https://pve.example/ui" } }],
   ])("weist %s zentral ab", (_name, change) => {
     expect(configSchema.safeParse({ ...defaultConfig, ...change }).success).toBe(false);
   });

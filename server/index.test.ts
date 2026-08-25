@@ -202,10 +202,7 @@ describe("/api/config", () => {
     expect(saved.proxyAllowlist[0]).toBe("api.open-meteo.com");
   });
 
-  // Ein Feed einzutragen ist die Erlaubnis für seinen Host. Ohne diese Ergänzung müsste
-  // ihn jemand ein zweites Mal von Hand eintragen — und wer das vergisst, bekommt eine
-  // Quelle, die still fehlschlägt.
-  itWithApp("nimmt den Host eines neuen Feeds in die Allowlist auf", async ({ app }) => {
+  itWithApp("persistiert einen abgeleiteten Feed-Host nicht in der manuellen Allowlist", async ({ app }) => {
     const before = await getConfig(app);
     const candidate = {
       ...before,
@@ -214,10 +211,7 @@ describe("/api/config", () => {
     const res = await putConfig(app, candidate, before.updatedAt);
     expect(res.status).toBe(200);
     const saved = (await res.json()) as Config;
-    expect(saved.proxyAllowlist).toContain("newsfeed.zeit.de");
-    // Die von Hand gepflegten Einträge bleiben, wo sie waren.
-    expect(saved.proxyAllowlist.slice(0, before.proxyAllowlist.length))
-      .toEqual(before.proxyAllowlist);
+    expect(saved.proxyAllowlist).toEqual(before.proxyAllowlist);
   });
 
   itWithApp("weist einen zu großen JSON-Body mit 413 ab", async ({ app }) => {
@@ -260,7 +254,6 @@ describe("/api/proxy", () => {
   it("liefert Upstream-Inhalt inert und mit Schutz-Headern aus", async () => {
     const response = inertProxyResponse({
       status: 200,
-      contentType: "text/html",
       body: new TextEncoder().encode("<script>alert(1)</script>"),
     });
     expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
@@ -273,7 +266,6 @@ describe("/api/proxy", () => {
   it("reicht einen Upstream-204 ohne unzulässigen Response-Body weiter", async () => {
     const response = inertProxyResponse({
       status: 204,
-      contentType: "text/plain",
       body: new TextEncoder().encode("darf nicht im 204-Body stehen"),
     });
     expect(response.status).toBe(204);

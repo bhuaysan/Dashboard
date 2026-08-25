@@ -33,6 +33,7 @@ describe("parseEnv", () => {
   it("weist kaputte CIDR- und Hostlisten ab", () => {
     expect(() => parseEnv({ ...base, DASHBOARD_WRITE_ALLOW: "10.0.0.0/33" })).toThrow("DASHBOARD_WRITE_ALLOW");
     expect(() => parseEnv({ ...base, DASHBOARD_WRITE_HOSTS: "https://evil.example" })).toThrow("DASHBOARD_WRITE_HOSTS");
+    expect(() => parseEnv({ ...base, DASHBOARD_WRITE_HOSTS: "localhost:0" })).toThrow("DASHBOARD_WRITE_HOSTS");
   });
 
   it("behandelt PVE-Felder ohne Secret als nicht konfiguriert", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "./defaults";
-import { requiredProxyHosts, withRequiredProxyHosts } from "./proxyHosts";
+import { effectiveProxyHosts, requiredProxyHosts } from "./proxyHosts";
 import type { Config } from "./schema";
 
 function cfg(over: Partial<Config>): Config {
@@ -40,23 +40,24 @@ describe("requiredProxyHosts", () => {
   });
 });
 
-describe("withRequiredProxyHosts", () => {
+describe("effectiveProxyHosts", () => {
   it("ergänzt den fehlenden Host und behält die bestehenden Einträge in ihrer Reihenfolge", () => {
     const c = cfg({
       proxyAllowlist: ["api.open-meteo.com", "www.heise.de"],
       feeds: [{ label: "zt", url: "https://newsfeed.zeit.de/index", limit: 5 }],
     });
-    expect(withRequiredProxyHosts(c).proxyAllowlist)
+    expect(effectiveProxyHosts(c))
       .toEqual(["api.open-meteo.com", "www.heise.de", "newsfeed.zeit.de"]);
   });
 
-  it("gibt dieselbe Config zurück, wenn nichts fehlt", () => {
+  it("ändert die persistierbare Config nicht", () => {
     const c = cfg({
       proxyAllowlist: ["www.heise.de"],
       feeds: [{ label: "he", url: "https://www.heise.de/rss", limit: 5 }],
       calendars: [],
     });
-    expect(withRequiredProxyHosts(c)).toBe(c);
+    expect(effectiveProxyHosts(c)).toEqual(["www.heise.de"]);
+    expect(c.proxyAllowlist).toEqual(["www.heise.de"]);
   });
 
   it("erkennt einen bereits gelisteten Host trotz abweichender Schreibweise", () => {
@@ -65,6 +66,20 @@ describe("withRequiredProxyHosts", () => {
       feeds: [{ label: "he", url: "https://www.heise.de/rss", limit: 5 }],
       calendars: [],
     });
-    expect(withRequiredProxyHosts(c)).toBe(c);
+    expect(effectiveProxyHosts(c)).toEqual(["www.heise.de"]);
+  });
+
+  it("bleibt auch bei maximaler manueller Allowlist außerhalb der Config-Grenze", () => {
+    const c = cfg({
+      proxyAllowlist: Array.from({ length: 128 }, (_, index) => `manual-${index}.example`),
+      feeds: Array.from({ length: 32 }, (_, index) => ({
+        label: `Feed ${index}`, url: `https://feed-${index}.example/rss`, limit: 5,
+      })),
+      calendars: Array.from({ length: 32 }, (_, index) => ({
+        label: `Kalender ${index}`, url: `https://cal-${index}.example/work.ics`,
+      })),
+    });
+    expect(effectiveProxyHosts(c)).toHaveLength(192);
+    expect(c.proxyAllowlist).toHaveLength(128);
   });
 });

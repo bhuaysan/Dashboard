@@ -23,4 +23,10 @@ describe("resolveQuery", () => {
     expect(resolveQuery("", search)).toBeUndefined();
     expect(resolveQuery("   ", search)).toBeUndefined();
   });
+
+  it("behandelt geerbte Objekteigenschaften als unbekannte Bangs", () => {
+    expect(resolveQuery("!toString test", search)).toBe(
+      "https://duckduckgo.com/?q=!toString%20test",
+    );
+  });
 });

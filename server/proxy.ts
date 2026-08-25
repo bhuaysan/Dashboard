@@ -20,6 +20,13 @@ export class ProxyOverloadedError extends Error {
   }
 }
 
+export class ProxyPolicyError extends Error {
+  constructor(message: "Schema" | "Host nicht erlaubt" | "Private Adresse") {
+    super(message);
+    this.name = "ProxyPolicyError";
+  }
+}
+
 export function isBlockedIp(ip: string): boolean {
   if (ip.includes(":")) return true;              // IPv6: pauschal ablehnen, nicht gebraucht
   const parts = ip.split(".").map(Number);
@@ -39,10 +46,10 @@ export function isBlockedIp(ip: string): boolean {
 // Schema und Allowlist — die Prüfung, die sich mit der Config ändert und deshalb
 // vor dem Cache steht.
 export function assertListed(url: URL, allowlist: string[]): void {
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Schema");
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new ProxyPolicyError("Schema");
   const hostname = canonicalHostname(url.hostname);
   if (hostname === undefined || !allowlist.some((entry) => canonicalHostname(entry) === hostname)) {
-    throw new Error("Host nicht erlaubt");
+    throw new ProxyPolicyError("Host nicht erlaubt");
   }
 }
 
@@ -76,7 +83,7 @@ export async function assertAllowed(
   const { address } = signal === undefined
     ? await lookupPromise
     : await withAbort(lookupPromise, signal);
-  if (isBlockedIp(address)) throw new Error("Private Adresse");
+  if (isBlockedIp(address)) throw new ProxyPolicyError("Private Adresse");
   return address;
 }
 
@@ -88,7 +95,7 @@ function pinnedAgent(address: string): Agent {
   });
 }
 
-export type ProxyResult = { status: number; contentType: string; body: Uint8Array };
+export type ProxyResult = { status: number; body: Uint8Array };
 type CacheEntry = ProxyResult & { t: number; ttl: number };
 
 const cache = new Map<string, CacheEntry>();
@@ -110,6 +117,13 @@ function cacheKey(url: URL): string {
   const normalized = new URL(url);
   normalized.hash = "";
   return normalized.toString();
+}
+
+function proxyPolicyKey(allowlist: string[]): string {
+  const canonical = allowlist
+    .map(canonicalHostname)
+    .filter((host): host is string => host !== undefined);
+  return [...new Set(canonical)].sort().join("\n");
 }
 
 function removeCacheEntry(key: string): void {
@@ -298,7 +312,6 @@ async function fetchUncached(
         }
         result = {
           status: res.status,
-          contentType: res.headers.get("content-type") ?? "application/octet-stream",
           body: await withAbort(
             readLimited(res, MAX_BYTES, deadline.signal),
             deadline.signal,
@@ -321,7 +334,9 @@ export async function proxyFetch(rawUrl: string, allowlist: string[], resolveAdd
   url.hash = "";
   assertListed(url, allowlist);   // vor dem Cache, sonst wirkt das Streichen eines Hosts erst nach der TTL
 
-  const key = cacheKey(url);
+  // Ein Cache-Eintrag und eine laufende Operation gelten nur für exakt die Policy,
+  // unter der auch ihre Redirect-Kette geprüft wurde.
+  const key = `${proxyPolicyKey(allowlist)}\u0000${cacheKey(url)}`;
   const hit = cached(key);
   if (hit) return hit;
 

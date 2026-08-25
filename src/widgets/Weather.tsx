@@ -155,8 +155,7 @@ function trendText(seconds: number): string {
   return `${sign}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, "0")} min/Tag`;
 }
 
-export function Weather({ data, selIndex, now }: { data?: WeatherData; selIndex: number; now: Date }) {
-  void selIndex;
+export function Weather({ data, now }: { data?: WeatherData; now: Date }) {
   if (!data) return <div className="dim">noch keine Wetterdaten</div>;
   const moon = moonPhase(now);
   // Ein Raster für alles: Kennwort, zwei Zahlenspalten, Text. Vorher hatte jede der drei

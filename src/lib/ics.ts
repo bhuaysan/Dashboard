@@ -40,8 +40,11 @@ function recurrenceIdKey(event: ICAL.Event): number {
   return event.recurrenceId.toUnixTime();
 }
 
-function overlaps(start: Date, end: Date, from: Date, to: Date): boolean {
-  return end >= from && start <= to;
+export function overlapsRange(start: Date, end: Date, from: Date, to: Date): boolean {
+  // DTEND ist exklusiv. Ein echter Null-Dauer-Termin ist dagegen ein Zeitpunkt und
+  // bleibt innerhalb des Fensters sichtbar.
+  if (end.getTime() === start.getTime()) return start >= from && start <= to;
+  return end > from && start <= to;
 }
 
 type EventGroup = { master?: ICAL.Component; exceptions: ICAL.Component[] };
@@ -117,12 +120,12 @@ export function parseIcs(text: string, from: Date, to: Date, options: IcsParseOp
         if (isCancelled(item)) continue;
         const start = details.startDate.toJSDate();
         const occurrenceEnd = details.endDate.toJSDate();
-        if (overlaps(start, occurrenceEnd, from, to)) out.push(toCalEvent(item, start, occurrenceEnd));
+        if (overlapsRange(start, occurrenceEnd, from, to)) out.push(toCalEvent(item, start, occurrenceEnd));
       }
     } else {
       const start = event.startDate.toJSDate();
       const end = event.endDate.toJSDate();
-      if (overlaps(start, end, from, to)) out.push(toCalEvent(event, start, end));
+      if (overlapsRange(start, end, from, to)) out.push(toCalEvent(event, start, end));
     }
   }
   return out.sort((a, b) => a.start.getTime() - b.start.getTime());

@@ -75,7 +75,7 @@ export const defaultConfig: Config = {
     { id: "links", visible: true, span: 1 },
     { id: "news", visible: true, span: 1 },
     { id: "agenda", visible: true, span: 1 },
-    { id: "homelab", visible: true, span: 1 },
+    { id: "homelab", visible: true },
   ],
   proxyAllowlist: [
     "api.open-meteo.com",

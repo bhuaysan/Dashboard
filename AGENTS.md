@@ -68,12 +68,13 @@ Browser hält `src/api/config.ts` die Config in React Query (Polling 15 s, Refet
 und spiegelt sie nach `localStorage`, damit die Seite auch ohne Server sofort rendert.
 
 **Datenpfad der Panes.** Widget-Modul → `useCachedQuery` (React Query + `localStorage`-Cache mit
-TTL) → `/api/proxy?url=...`. Der Proxy prüft Allowlist (`config.proxyAllowlist`), löst den Host
+TTL) → `/api/proxy?url=...`. Der Proxy prüft die manuelle Allowlist plus die aus Feed- und
+Kalenderquellen abgeleiteten Hosts, löst den Host
 selbst auf und blockt private Ziele, prüft jede Weiterleitung erneut, begrenzt auf 2 MB und 5 s.
 Proxmox läuft **nicht** darüber, sondern über den aggregierten `/api/homelab` (60 s Server-Cache);
 das Token verlässt den Server nie. Weil der `localStorage`-Cache reines JSON ist, brauchen Daten
-mit `Date`-Feldern eine `revive`-Funktion (`reviveEvents`, `reviveNews`) — sonst leere Seite nach
-Reload.
+mit `Date`-Feldern eine Zod-`decode`-Funktion, die ISO-Strings wieder in `Date` umwandelt — sonst
+leere Seite nach Reload.
 
 **Homelab.** `fetchHomelab` holt sieben Quellen parallel, `buildHomelab` ist eine reine Funktion
 mit Tests in `server/pve.test.ts`. Alarmregeln und Schwellwerte gehören dorthin, nicht in

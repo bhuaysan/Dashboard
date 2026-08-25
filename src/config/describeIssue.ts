@@ -19,7 +19,7 @@ const FIELD_LABEL: Record<string, string> = {
 function describeSegment(seg: string | number): string {
   // Array-Index: für Menschen ab 1 zählen, nicht ab 0.
   if (typeof seg === "number") return `#${seg + 1}`;
-  return FIELD_LABEL[seg] ?? seg;
+  return Object.prototype.hasOwnProperty.call(FIELD_LABEL, seg) ? FIELD_LABEL[seg] ?? seg : seg;
 }
 
 function describePath(path: (string | number)[]): string {

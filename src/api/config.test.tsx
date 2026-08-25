@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./config";
@@ -21,7 +21,10 @@ describe("useConfig", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useConfig(), { wrapper });
     expect(result.current.data?.theme).toBe("system");
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/config"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/config",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
     await waitFor(() => expect(result.current.data?.theme).toBe("dark"));
   });
 
@@ -35,9 +38,10 @@ describe("useConfig", () => {
 });
 
 describe("useSaveConfig", () => {
-  it("invalidiert nach einem erfolgreichen Save den Homelab-Query", async () => {
+  it("invalidiert nach einem erfolgreichen Save alle config-abhängigen Quellen", async () => {
     const client = new QueryClient();
     const invalidate = vi.spyOn(client, "invalidateQueries");
+    const cancel = vi.spyOn(client, "cancelQueries");
     const testWrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
@@ -47,7 +51,39 @@ describe("useSaveConfig", () => {
 
     result.current.mutate(defaultConfig);
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["pve"] });
+    expect(cancel).toHaveBeenCalledWith({ queryKey: ["config"] });
+    expect(invalidate).toHaveBeenCalledWith({ predicate: expect.any(Function) });
+  });
+
+  it("lässt einen älteren Config-Poll einen erfolgreichen Save nicht zurückrollen", async () => {
+    const client = new QueryClient();
+    let resolveGet: (response: Response) => void = () => undefined;
+    let getSignal: AbortSignal | undefined;
+    const getResponse = new Promise<Response>((resolve) => { resolveGet = resolve; });
+    const saved = { ...defaultConfig, theme: "dark" as const, updatedAt: "2026-08-25T12:00:00.000Z" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/config" && init?.method === "PUT") {
+        return Promise.resolve(new Response(JSON.stringify(saved), { status: 200 }));
+      }
+      getSignal = init?.signal ?? undefined;
+      return getResponse;
+    }));
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => ({ config: useConfig(), save: useSaveConfig() }), {
+      wrapper: testWrapper,
+    });
+
+    await waitFor(() => expect(getSignal).toBeDefined());
+    act(() => result.current.save.mutate(defaultConfig));
+    await waitFor(() => expect(result.current.save.isSuccess).toBe(true));
+    expect(getSignal?.aborted).toBe(true);
+
+    resolveGet(new Response(JSON.stringify({ ...defaultConfig, theme: "light" }), { status: 200 }));
+    await Promise.resolve();
+    expect(client.getQueryData(["config"])).toEqual(saved);
+    expect(JSON.parse(localStorage.getItem("dashboard:config") ?? "null")).toEqual(saved);
   });
 
   it("trägt bei 409 den frischen Stand des Servers im Fehler", async () => {

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Config } from "../config/schema";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { resolveQuery } from "../lib/bangs";
-import { openUrl, type Mode } from "../lib/useKeymap";
+import type { Mode } from "../lib/useKeymap";
+import { openUrl } from "../lib/url";
 
 export type FlatLink = { label: string; url: string; hint?: string; group: string };
 

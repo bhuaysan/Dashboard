@@ -29,6 +29,12 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isHttpBaseUrl(value: string): boolean {
+  if (!isHttpUrl(value)) return false;
+  const url = new URL(value);
+  return url.pathname === "/" && url.search === "" && url.hash === "";
+}
+
 function isSearchTemplate(value: string): boolean {
   const matches = value.match(/%s/g);
   return matches?.length === 1 && isHttpUrl(value.replace("%s", "dashboard"));
@@ -87,6 +93,10 @@ function isPveNodeName(value: string): boolean {
 
 const isoDateTime = z.string().datetime({ offset: true });
 const httpUrl = text(MAX_URL_LENGTH).refine(isHttpUrl, "Keine gültige Adresse (muss mit http:// oder https:// beginnen)");
+const httpBaseUrl = text(MAX_URL_LENGTH).refine(
+  isHttpBaseUrl,
+  "Muss eine HTTP(S)-Basisadresse ohne Pfad, Query oder Fragment sein",
+);
 const searchTemplate = text(MAX_URL_LENGTH).refine(isSearchTemplate, "Muss genau ein %s und eine HTTP(S)-Adresse enthalten");
 const hostname = text(253)
   .transform((value) => value.toLowerCase())
@@ -95,7 +105,7 @@ const pveNodeName = text(63).refine(isPveNodeName, "Ungültiger Proxmox-Node-Nam
 const timezone = text(100).refine(isTimezone, "Ungültige Zeitzone");
 const percent = z.number().finite().min(0).max(100);
 const port = z.number().int().min(1).max(65535);
-const paneId = z.enum(PANE_IDS);
+const resizablePaneId = z.enum(["clock", "weather", "month", "links", "news", "agenda"]);
 
 const linkSchema = z.object({
   label: text(MAX_TEXT_LENGTH),
@@ -103,11 +113,16 @@ const linkSchema = z.object({
   hint: z.string().regex(/^g[A-Za-z0-9]$/).optional(),
 });
 
-const layoutSchema = z.array(z.object({
-  id: paneId,
-  visible: z.boolean(),
-  span: z.union([z.literal(1), z.literal(2)]),
-})).max(PANE_IDS.length).superRefine((layout, ctx) => {
+const layoutSchema = z.array(z.discriminatedUnion("id", [
+  z.object({
+    id: resizablePaneId,
+    visible: z.boolean(),
+    span: z.union([z.literal(1), z.literal(2)]),
+  }),
+  // HOMELAB ist laut Layoutvertrag immer vollbreit. Alte Configs dürfen noch ein
+  // span-Feld enthalten; Zod entfernt es beim Parsen als unbekanntes Feld.
+  z.object({ id: z.literal("homelab"), visible: z.boolean() }),
+])).max(PANE_IDS.length).superRefine((layout, ctx) => {
   const seen = new Set<PaneId>();
   layout.forEach((entry, index) => {
     if (seen.has(entry.id)) {
@@ -156,7 +171,7 @@ const baseConfigSchema = z.object({
   proxyAllowlist: z.array(hostname).max(128),
   homelab: z.object({
     node: pveNodeName.default("pve"),
-    uiUrl: httpUrl.default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links
+    uiUrl: httpBaseUrl.default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links
     expectRunning: z.array(z.number().int().positive().max(999999)).max(128).default([]),
     thresholds: z.object({
       cpu: percent.default(90),

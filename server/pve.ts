@@ -1,23 +1,18 @@
 import { Agent, fetch as undiciFetch } from "undici";
 import { readFileSync } from "node:fs";
-import { env, type DashboardEnvironment } from "./env.ts";
+import type { DashboardEnvironment } from "./env.ts";
 import { checkReachability, type ReachResult } from "./reachability.ts";
 import { relativeTime } from "../src/lib/relativeTime.ts";
 import type { Config } from "../src/config/schema.ts";
+import {
+  homelabDataSchema,
+  MAX_HOMELAB_TEXT_LENGTH,
+  type HomelabData,
+  type Level,
+} from "../src/lib/homelab.ts";
 import { z } from "zod";
 
-export type Level = "ok" | "warn" | "crit";
-
-export type HomelabData = {
-  node: { cpu: number; mem: number; root: number; uptimeDays: number;
-          cpuSpark: number[]; memSpark: number[];
-          cpuLevel: Level; memLevel: Level; rootLevel: Level };
-  guests: { vmid: number; name: string; running: boolean; cpu: number; mem: number;
-            cpuLevel: Level; memLevel: Level }[];
-  storage: { name: string; pct: number; level: Level }[];
-  alerts: { level: "warn" | "crit"; text: string }[];
-  configured: boolean;    // false, wenn env.pve undefined ist
-};
+export type { HomelabData, Level } from "../src/lib/homelab.ts";
 
 export const emptyHomelab: HomelabData = {
   configured: false,
@@ -97,17 +92,14 @@ export type PveRaw = {
   reachability: ReachResult[];
 };
 
-let agent: Agent | undefined;
-
 // Das Proxmox-Zertifikat ist selbst ausgestellt. Wir prüfen es korrekt gegen die eigene CA,
 // statt die Prüfung abzuschalten. servername ist nötig, weil wir per IP verbinden,
 // das Zertifikat aber auf pve.homelab.local lautet.
 function pveAgent(runtimeEnv: DashboardEnvironment): Agent {
   if (!runtimeEnv.pve) throw new Error("PVE nicht konfiguriert");
-  agent ??= new Agent({
+  return new Agent({
     connect: { ca: readFileSync(runtimeEnv.pve.caPath), servername: "pve.homelab.local" },
   });
-  return agent;
 }
 
 export function parsePveEnvelope<T>(raw: unknown, path: string, schema: z.ZodType<T>): T {
@@ -119,15 +111,65 @@ export function parsePveEnvelope<T>(raw: unknown, path: string, schema: z.ZodTyp
   return data.data;
 }
 
-async function pveGet<T>(runtimeEnv: DashboardEnvironment, path: string, schema: z.ZodType<T>): Promise<T> {
+export const MAX_PVE_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+async function cancelResponseBody(res: Response): Promise<void> {
+  try { await res.body?.cancel(); } catch { /* best effort */ }
+}
+
+async function readPveJson(res: Response, path: string): Promise<unknown> {
+  const declared = res.headers.get("content-length");
+  if (declared !== null) {
+    const size = Number(declared);
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_PVE_RESPONSE_BYTES) {
+      await cancelResponseBody(res);
+      throw new Error(`PVE ${path}: Antwort zu groß`);
+    }
+  }
+  if (!res.body) throw new Error(`PVE ${path}: ungültige Antwort`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let source = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_PVE_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error(`PVE ${path}: Antwort zu groß`);
+      }
+      source += decoder.decode(value, { stream: true });
+    }
+    source += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  try {
+    return JSON.parse(source) as unknown;
+  } catch {
+    throw new Error(`PVE ${path}: ungültige Antwort`);
+  }
+}
+
+async function pveGet<T>(
+  runtimeEnv: DashboardEnvironment,
+  agent: Agent,
+  path: string,
+  schema: z.ZodType<T>,
+): Promise<T> {
   if (!runtimeEnv.pve) throw new Error("PVE nicht konfiguriert");
   const res = await undiciFetch(`${runtimeEnv.pve.url}/api2/json${path}`, {
     headers: { Authorization: `PVEAPIToken=${runtimeEnv.pve.tokenId}=${runtimeEnv.pve.secret}` },
-    dispatcher: pveAgent(runtimeEnv),
+    dispatcher: agent,
     signal: AbortSignal.timeout(5000),
   });
-  if (!res.ok) throw new Error(`PVE ${path}: HTTP ${res.status}`);
-  const raw: unknown = await res.json();
+  if (!res.ok) {
+    await cancelResponseBody(res);
+    throw new Error(`PVE ${path}: HTTP ${res.status}`);
+  }
+  const raw = await readPveJson(res, path);
   return parsePveEnvelope(raw, path, schema);
 }
 
@@ -136,7 +178,9 @@ export function pveNodePathSegment(node: string): string {
 }
 
 export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date()): HomelabData {
-  const pct = (used: number, total: number) => (total > 0 ? Math.round((used / total) * 100) : 0);
+  const pct = (used: number, total: number) => total > 0
+    ? Math.max(0, Math.min(100, Math.round((used / total) * 100)))
+    : 0;
 
   const cpuSpark = raw.rrd.filter((p) => p.cpu !== undefined).slice(-30)
     .map((p) => Math.round((p.cpu ?? 0) * 100));
@@ -170,18 +214,24 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
 
   const nameOf = (vmid: number) => guests.find((g) => g.vmid === vmid)?.name ?? `vmid ${vmid}`;
   const alerts: HomelabData["alerts"] = [];
+  const pushAlert = (level: "warn" | "crit", message: string) => {
+    const text = message.length <= MAX_HOMELAB_TEXT_LENGTH
+      ? message
+      : `${message.slice(0, MAX_HOMELAB_TEXT_LENGTH - 1)}…`;
+    alerts.push({ level, text });
+  };
 
   for (const vmid of cfg.expectRunning) {
     const g = guests.find((x) => x.vmid === vmid);
     if (!g) {
-      alerts.push({ level: "crit", text: `gast vmid ${vmid} nicht gefunden` });
+      pushAlert("crit", `gast vmid ${vmid} nicht gefunden`);
     } else if (!g.running) {
-      alerts.push({ level: "crit", text: `gast ${g.name} läuft nicht` });
+      pushAlert("crit", `gast ${g.name} läuft nicht`);
     }
   }
 
   if (raw.tasks.length === 0) {
-    alerts.push({ level: "crit", text: "keine vzdump-Backups konfiguriert" });
+    pushAlert("crit", "keine vzdump-Backups konfiguriert");
   } else {
     const latestByVmid = new Map<number, Task>();
     for (const t of raw.tasks) {
@@ -196,20 +246,20 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
       const end = new Date((task.endtime ?? 0) * 1000);
       const rel = relativeTime(end, now);
       if (task.status !== "OK") {
-        alerts.push({ level: "crit", text: `backup ${nameOf(vmid)} fehlgeschlagen ${rel}` });
+        pushAlert("crit", `backup ${nameOf(vmid)} fehlgeschlagen ${rel}`);
       } else if (now.getTime() - end.getTime() > cfg.thresholds.backupAgeHours * 3600_000) {
-        alerts.push({ level: "warn", text: `backup ${nameOf(vmid)} alt: ${rel}` });
+        pushAlert("warn", `backup ${nameOf(vmid)} alt: ${rel}`);
       }
     }
   }
 
   if (raw.updates.length > 0) {
-    alerts.push({ level: "warn", text: `pve ${raw.updates.length} updates verfügbar` });
+    pushAlert("warn", `pve ${raw.updates.length} updates verfügbar`);
   }
 
   for (const s of storage) {
     if (s.level !== "ok") {
-      alerts.push({ level: s.level, text: `storage ${s.name} zu ${s.pct}% voll` });
+      pushAlert(s.level, `storage ${s.name} zu ${s.pct}% voll`);
     }
   }
 
@@ -222,22 +272,19 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
   const nodeMemLevel = levelFor(pct(raw.status.memory.used, raw.status.memory.total),
                                 cfg.thresholds.mem);
   if (nodeMemLevel === "crit") {
-    alerts.push({
-      level: "crit",
-      text: `node speicher zu ${pct(raw.status.memory.used, raw.status.memory.total)}% belegt`,
-    });
+    pushAlert("crit", `node speicher zu ${pct(raw.status.memory.used, raw.status.memory.total)}% belegt`);
   }
   for (const g of guests) {
     if (g.memLevel === "crit") {
-      alerts.push({ level: "crit", text: `gast ${g.name} speicher zu ${g.mem}% belegt` });
+      pushAlert("crit", `gast ${g.name} speicher zu ${g.mem}% belegt`);
     }
   }
 
   for (const r of raw.reachability) {
-    if (!r.ok) alerts.push({ level: "crit", text: `${r.label} nicht erreichbar` });
+    if (!r.ok) pushAlert("crit", `${r.label} nicht erreichbar`);
   }
 
-  return {
+  return homelabDataSchema.parse({
     configured: true,
     node: {
       cpu: Math.round(raw.status.cpu * 100),
@@ -255,20 +302,25 @@ export function buildHomelab(raw: PveRaw, cfg: Config["homelab"], now = new Date
     guests,
     storage,
     alerts,
-  };
+  });
 }
 
-export async function fetchHomelab(cfg: Config, runtimeEnv: DashboardEnvironment = env): Promise<HomelabData> {
+export async function fetchHomelab(cfg: Config, runtimeEnv: DashboardEnvironment): Promise<HomelabData> {
   if (!runtimeEnv.pve) return emptyHomelab;
   const node = pveNodePathSegment(cfg.homelab.node);
-  const [status, rrd, resources, storages, tasks, updates, reachability] = await Promise.all([
-    pveGet<NodeStatus>(runtimeEnv, `/nodes/${node}/status`, nodeStatusSchema),
-    pveGet<RrdPoint[]>(runtimeEnv, `/nodes/${node}/rrddata?timeframe=hour&cf=AVERAGE`, z.array(rrdPointSchema).max(10000)),
-    pveGet<Resource[]>(runtimeEnv, `/cluster/resources?type=vm`, z.array(resourceSchema).max(10000)),
-    pveGet<StorageEntry[]>(runtimeEnv, `/nodes/${node}/storage`, z.array(storageEntrySchema).max(1000)),
-    pveGet<Task[]>(runtimeEnv, `/nodes/${node}/tasks?typefilter=vzdump&limit=50`, z.array(taskSchema).max(1000)),
-    pveGet<unknown[]>(runtimeEnv, `/nodes/${node}/apt/update`, z.array(z.unknown()).max(1000)),
-    checkReachability(cfg.homelab.reachability),
-  ]);
-  return buildHomelab({ status, rrd, resources, storages, tasks, updates, reachability }, cfg.homelab);
+  const agent = pveAgent(runtimeEnv);
+  try {
+    const [status, rrd, resources, storages, tasks, updates, reachability] = await Promise.all([
+      pveGet<NodeStatus>(runtimeEnv, agent, `/nodes/${node}/status`, nodeStatusSchema),
+      pveGet<RrdPoint[]>(runtimeEnv, agent, `/nodes/${node}/rrddata?timeframe=hour&cf=AVERAGE`, z.array(rrdPointSchema).max(10000)),
+      pveGet<Resource[]>(runtimeEnv, agent, `/cluster/resources?type=vm`, z.array(resourceSchema).max(10000)),
+      pveGet<StorageEntry[]>(runtimeEnv, agent, `/nodes/${node}/storage`, z.array(storageEntrySchema).max(1000)),
+      pveGet<Task[]>(runtimeEnv, agent, `/nodes/${node}/tasks?typefilter=vzdump&limit=50`, z.array(taskSchema).max(1000)),
+      pveGet<unknown[]>(runtimeEnv, agent, `/nodes/${node}/apt/update`, z.array(z.unknown()).max(1000)),
+      checkReachability(cfg.homelab.reachability),
+    ]);
+    return buildHomelab({ status, rrd, resources, storages, tasks, updates, reachability }, cfg.homelab);
+  } finally {
+    await agent.close();
+  }
 }

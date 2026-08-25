@@ -52,4 +52,13 @@ describe("describeIssue", () => {
     expect(issue.path).toEqual([]);
     expect(issueRootKey(issue)).toBeUndefined();
   });
+
+  it("verwendet für Prototypnamen keine geerbten Feldbeschreibungen", () => {
+    const issue = {
+      code: "custom" as const,
+      path: ["toString"],
+      message: "ist ungültig",
+    };
+    expect(describeIssue(issue)).toBe("toString ist ungültig.");
+  });
 });
