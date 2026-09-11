@@ -4,8 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { buildConsoleUrl } from "./lib/url";
 import { defaultConfig } from "./config/defaults";
+import type { Config } from "./config/schema";
+import type { HomelabData } from "./widgets/Homelab";
 
-const EMPTY_HOMELAB = {
+const EMPTY_HOMELAB: HomelabData = {
   configured: false,
   node: {
     cpu: 0, mem: 0, root: 0, uptimeDays: 0,
@@ -13,6 +15,36 @@ const EMPTY_HOMELAB = {
   },
   guests: [], storage: [], alerts: [],
 };
+
+const FULL_HOMELAB: HomelabData = {
+  configured: true,
+  node: {
+    cpu: 12, mem: 41, root: 23, uptimeDays: 34,
+    cpuSpark: [12], memSpark: [41], cpuLevel: "ok", memLevel: "ok", rootLevel: "ok",
+  },
+  guests: [{
+    vmid: 100, name: "test-guest", running: true, cpu: 2, mem: 38,
+    cpuLevel: "ok", memLevel: "ok",
+  }],
+  storage: [{ name: "local-lvm", pct: 58, level: "ok" }],
+  alerts: [{ level: "crit", text: "PVE-Alarm" }],
+};
+
+function monitoringConfig(enabled: boolean, homelabVisible = true): Config {
+  return {
+    ...defaultConfig,
+    feeds: [],
+    calendars: [],
+    homelab: { ...defaultConfig.homelab, enabled },
+    layout: defaultConfig.layout.map((entry) => entry.id === "homelab"
+      ? { ...entry, visible: homelabVisible }
+      : entry),
+  };
+}
+
+function setInitialConfig(config: Config): void {
+  localStorage.setItem("dashboard:config", JSON.stringify(config));
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -28,14 +60,14 @@ function typeCommand(cmd: string) {
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
-function stubBaseApi(config = defaultConfig, putResponse?: Response) {
+function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResponse: HomelabData = EMPTY_HOMELAB) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/config" && init?.method === "PUT") {
       return putResponse ?? new Response(JSON.stringify(defaultConfig), { status: 200 });
     }
     if (url === "/api/config") return new Response(JSON.stringify(config), { status: 200 });
-    if (url === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+    if (url === "/api/homelab") return new Response(JSON.stringify(homelabResponse), { status: 200 });
     return new Response("", { status: 502 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -65,6 +97,7 @@ describe("App", () => {
     expect(url.searchParams.get("node")).toBe("pve/home");
   });
   it("rendert Panes, Suchzeile und Statusline", () => {
+    setInitialConfig(monitoringConfig(true));
     render(
       <QueryClientProvider client={new QueryClient()}>
         <App />
@@ -75,6 +108,73 @@ describe("App", () => {
     expect(screen.getByLabelText("Suche oder Kommando")).toBeTruthy();
     expect(screen.getByText("NORMAL")).toBeTruthy();
     expect(screen.getByText("Datasphere")).toBeTruthy();
+  });
+
+  it("unterbindet bei deaktiviertem Monitoring Request, Pane, Statusquelle und Alarme", async () => {
+    const config = monitoringConfig(false);
+    setInitialConfig(config);
+    const fetchMock = stubBaseApi(config, undefined, FULL_HOMELAB);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config")).toBe(true));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/homelab")).toHaveLength(0);
+    expect(screen.queryByRole("heading", { name: /Homelab/ })).toBeNull();
+    expect(document.querySelector(".sl-panes")?.textContent).not.toContain("lab");
+    expect(screen.queryByLabelText(/^pve:/)).toBeNull();
+    expect(screen.queryByText("PVE-Alarm")).toBeNull();
+  });
+
+  it("überwacht bei aktivem Monitoring auch ohne sichtbare Pane weiter", async () => {
+    const config = monitoringConfig(true, false);
+    setInitialConfig(config);
+    const fetchMock = stubBaseApi(config, undefined, FULL_HOMELAB);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/homelab")).toBe(true));
+    await waitFor(() => expect(screen.getByLabelText(/pve: in Ordnung/)).toBeTruthy());
+    expect(screen.queryByRole("heading", { name: /Homelab/ })).toBeNull();
+    expect(document.querySelector(".sl-panes")?.textContent).not.toContain("lab");
+    expect(screen.getByText("!!1")).toBeTruthy();
+  });
+
+  it("verschiebt den Fokus nach dem Abschalten einer fokussierten Homelab-Pane auf eine sichtbare Pane", async () => {
+    const enabledConfig = monitoringConfig(true);
+    const disabledConfig = monitoringConfig(false);
+    setInitialConfig(enabledConfig);
+    const fetchMock = stubBaseApi(
+      enabledConfig,
+      new Response(JSON.stringify(disabledConfig), { status: 200 }),
+      FULL_HOMELAB,
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Homelab/ })).toBeTruthy());
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/homelab")).toBe(true));
+    if (!HTMLElement.prototype.scrollIntoView) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+    }
+    fireEvent.keyDown(window, { key: "7" });
+    typeCommand(":settings");
+    fireEvent.click(screen.getByRole("tab", { name: "Homelab" }));
+    const toggle = screen.getByRole("checkbox", { name: "Proxmox-Monitoring aktiv" });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /Homelab/ })).toBeNull());
+    expect(document.querySelector(".sl-panes .is-active")?.textContent).toContain("clock");
   });
 
   it("gibt jeder Linkzeile ein echtes href", () => {

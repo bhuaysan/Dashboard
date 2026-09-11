@@ -67,6 +67,12 @@ Zod-Schema (`src/config/schema.ts`) validiert sie auf beiden Seiten. `PUT` verla
 Browser hält `src/api/config.ts` die Config in React Query (Polling 15 s, Refetch bei Tab-Fokus)
 und spiegelt sie nach `localStorage`, damit die Seite auch ohne Server sofort rendert.
 
+`homelab.enabled` steuert das Proxmox-Monitoring und den Zugriff auf `/api/homelab`.
+`layout.homelab.visible` steuert nur die HOMELAB-Pane: Bei aktiviertem Monitoring bleibt die
+Überwachung auch bei ausgeblendeter Pane aktiv. Bei deaktiviertem Monitoring gibt es keine
+PVE-Requests und keine PVE-Status- oder Alarmanzeige. Fehlt `PVE_TOKEN_SECRET`, bleibt davon
+unabhängig der Zustand `configured: false` („nicht konfiguriert“).
+
 **Datenpfad der Panes.** Widget-Modul → `useCachedQuery` (React Query + `localStorage`-Cache mit
 TTL) → `/api/proxy?url=...`. Der Proxy prüft die manuelle Allowlist plus die aus Feed- und
 Kalenderquellen abgeleiteten Hosts, löst den Host
@@ -79,7 +85,8 @@ leere Seite nach Reload.
 **Homelab.** `fetchHomelab` holt sieben Quellen parallel, `buildHomelab` ist eine reine Funktion
 mit Tests in `server/pve.test.ts`. Alarmregeln und Schwellwerte gehören dorthin, nicht in
 `src/widgets/Homelab.tsx`. Fehlt `PVE_TOKEN_SECRET`, kommt `emptyHomelab` mit `configured: false`
-zurück — das ist kein Fehler, sondern der Zustand „nicht konfiguriert".
+zurück — das ist kein Fehler, sondern unabhängig von `homelab.enabled` der Zustand
+„nicht konfiguriert".
 
 **Tastatur.** `src/lib/useKeymap.ts` enthält den reinen Reducer plus einen globalen
 `keydown`-Listener; er kennt keine Pane-Inhalte, sondern bekommt `rowCount` und `selectedUrl` aus

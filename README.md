@@ -40,6 +40,12 @@ Deployment gelöscht. Fehlende oder unsichere Static-Pfade liefern 404.
 `GET /api/health` prüft ausschließlich, ob der Prozess läuft und die Config lesbar ist; der
 Endpunkt gibt keine Config-, URL- oder Secretwerte aus und wird vom Deployment als Readiness-Check verwendet.
 
+`homelab.enabled` steuert das Proxmox-Monitoring und den Zugriff auf `/api/homelab`.
+`layout.homelab.visible` steuert nur die HOMELAB-Pane; bei aktiviertem Monitoring läuft die
+Überwachung auch bei ausgeblendeter Pane weiter. Bei deaktiviertem Monitoring gibt es keine
+PVE-Requests und keine PVE-Status- oder Alarmanzeige. Fehlt `PVE_TOKEN_SECRET`, bleibt davon
+unabhängig `configured: false` („nicht konfiguriert“).
+
 Jedes Speichern hebt den vorherigen Stand auf: `config.json.1` ist der jüngste, `config.json.7`
 der älteste. Einen davon zurückholen:
 
@@ -51,8 +57,9 @@ ssh root@10.0.10.20 'cp /var/lib/dashboard/config.json.1 /var/lib/dashboard/conf
 
 Nur auf dem Server als `/etc/dashboard/dashboard.env`, `chmod 600`, nicht in Git. Variablen siehe `.env.example`:
 `PVE_URL`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_PATH`, `PORT`, `DASHBOARD_CONFIG`,
-`DASHBOARD_WRITE_ALLOW`, `DASHBOARD_WRITE_HOSTS` und `DASHBOARD_STATIC`. Leeres `PVE_TOKEN_SECRET` schaltet die Homelab-Pane ab
-(„nicht konfiguriert"); für diesen Zustand bleiben die übrigen PVE-Felder ebenfalls leer.
+`DASHBOARD_WRITE_ALLOW`, `DASHBOARD_WRITE_HOSTS` und `DASHBOARD_STATIC`. Leeres `PVE_TOKEN_SECRET`
+ergibt unabhängig vom Monitoring-Schalter den Zustand `configured: false` („nicht konfiguriert“);
+für diesen Zustand bleiben die übrigen PVE-Felder ebenfalls leer.
 
 ### Proxmox-Token erneuern
 
