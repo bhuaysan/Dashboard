@@ -84,6 +84,7 @@ export const defaultConfig: Config = {
     "www.tagesschau.de",
   ],
   homelab: {
+    enabled: false,
     node: "pve",
     uiUrl: "https://10.0.10.10:8006",
     expectRunning: [100, 101, 104, 105, 111, 112],

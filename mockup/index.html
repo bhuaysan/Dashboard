@@ -811,6 +811,7 @@
             <span><select class="inp" id="s-theme" style="max-width:16ch"><option>system</option><option selected>dark</option><option>light</option></select></span>
           </div>
           <p class="set-hint" style="margin-top:1rem">Reihenfolge über die Pfeile, Breite in Spalten.</p>
+          <p class="set-hint">Sichtbarkeit blendet nur die Pane aus; bei aktivem Monitoring bleiben Status und Alarme erhalten.</p>
           <div class="tbl tbl--panes">
             <div class="tbl-head"><span>Pane</span><span>Sichtbar</span><span>Breite</span></div>
             <div class="tbl-row"><span>clock</span><label class="check"><input type="checkbox" checked></label><span><select class="inp" style="max-width:7ch"><option selected>1</option><option>2</option></select></span></div>
@@ -819,11 +820,14 @@
             <div class="tbl-row"><span>links</span><label class="check"><input type="checkbox" checked></label><span><select class="inp" style="max-width:7ch"><option selected>1</option><option>2</option></select></span></div>
             <div class="tbl-row"><span>agenda</span><label class="check"><input type="checkbox" checked></label><span><select class="inp" style="max-width:7ch"><option selected>1</option><option>2</option></select></span></div>
             <div class="tbl-row"><span>news</span><label class="check"><input type="checkbox" checked></label><span><select class="inp" style="max-width:7ch"><option selected>1</option><option>2</option></select></span></div>
-            <div class="tbl-row"><span>homelab</span><label class="check"><input type="checkbox" checked></label><span class="dim">volle Breite</span></div>
+            <div class="tbl-row"><span>homelab</span><label class="check"><input type="checkbox" id="s-pane-homelab" aria-label="HOMELAB sichtbar" checked></label><span class="dim">volle Breite</span></div>
           </div>
         </section>
 
         <section class="set-sec" data-sec="lab" hidden>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="s-monitoring" aria-label="Proxmox-Monitoring aktiv" checked> Proxmox-Monitoring aktiv <span class="check-state">an</span></label>
+          </div>
           <div class="field"><label for="s-node">Node-Name</label><input class="inp" id="s-node" value="pve" style="max-width:16ch"></div>
           <p class="set-hint" style="margin-top:1rem">Gäste, die laufen sollen. Ist einer davon gestoppt, erscheint eine Alarmzeile. Alle anderen werden nur angezeigt.</p>
           <div class="checks">
@@ -910,6 +914,19 @@
   var settings= document.getElementById("settings");
   var slMode  = document.getElementById("sl-mode");
   var slPanes = document.getElementById("sl-panes");
+  var monitoringToggle = document.getElementById("s-monitoring");
+  var homelabVisibility = document.getElementById("s-pane-homelab");
+
+  function syncHomelabVisibility() {
+    if (!monitoringToggle || !homelabVisibility) return;
+    homelabVisibility.disabled = !monitoringToggle.checked;
+    var state = monitoringToggle.parentElement.querySelector(".check-state");
+    if (state) state.textContent = monitoringToggle.checked ? "an" : "aus";
+  }
+  if (monitoringToggle) {
+    monitoringToggle.addEventListener("change", syncHomelabVisibility);
+    syncHomelabVisibility();
+  }
 
   function openSettings() {
     settings.hidden = false;

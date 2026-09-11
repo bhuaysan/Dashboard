@@ -50,6 +50,14 @@ describe("readConfig", () => {
     expect(await store.readConfig()).toEqual(defaultConfig);
   });
 
+  itWithStore("liest eine alte Config ohne Homelab-Schalter als aktiviert und legt kein Backup an", async ({ configPath, dir, store }) => {
+    const { enabled: _enabled, ...legacyHomelab } = defaultConfig.homelab;
+    await writeFile(configPath, JSON.stringify({ ...defaultConfig, homelab: legacyHomelab }));
+    const config = await store.readConfig();
+    expect(config.homelab.enabled).toBe(true);
+    expect(await readdir(dir)).not.toContain("config.json.bak");
+  });
+
   itWithStore("legt bei kaputtem Inhalt eine .bak-Datei an und fällt auf Defaults zurück", async ({ configPath, store }) => {
     await writeFile(configPath, JSON.stringify({ version: 99, kaputt: true }));
     expect(await store.readConfig()).toEqual(defaultConfig);

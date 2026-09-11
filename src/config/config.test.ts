@@ -28,6 +28,13 @@ describe("configSchema", () => {
     expect(parsed.holidayRegion).toBe("BW");
   });
 
+  it("aktiviert Homelab-Monitoring bei einer alten Config ohne Schalter", () => {
+    const { enabled: _enabled, ...legacyHomelab } = defaultConfig.homelab;
+    const legacy = { ...defaultConfig, homelab: legacyHomelab };
+    expect(configSchema.parse(legacy).homelab.enabled).toBe(true);
+    expect(defaultConfig.homelab.enabled).toBe(false);
+  });
+
   it("entfernt das historische, wirkungslose Homelab-span beim Parsen", () => {
     const legacy = {
       ...defaultConfig,
