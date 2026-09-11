@@ -62,7 +62,7 @@ export function useSaveConfig() {
         predicate: (query) => {
           const key = query.queryKey[0];
           return typeof key === "string" && (
-            key === "pve" || key.startsWith("wx:") ||
+            (cfg.homelab.enabled && key === "pve") || key.startsWith("wx:") ||
             key.startsWith("cal:") || key.startsWith("news:")
           );
         },

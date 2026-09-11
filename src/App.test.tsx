@@ -162,6 +162,9 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByRole("heading", { name: /Homelab/ })).toBeTruthy());
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/homelab")).toBe(true));
+    const homelabCallsBeforeSave = fetchMock.mock.calls
+      .filter(([input]) => String(input) === "/api/homelab").length;
+    expect(homelabCallsBeforeSave).toBe(1);
     if (!HTMLElement.prototype.scrollIntoView) {
       Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
     }
@@ -174,6 +177,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
     await waitFor(() => expect(screen.queryByRole("heading", { name: /Homelab/ })).toBeNull());
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/homelab"))
+      .toHaveLength(homelabCallsBeforeSave);
     expect(document.querySelector(".sl-panes .is-active")?.textContent).toContain("clock");
   });
 
