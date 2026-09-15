@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { configSchema, type Config } from "../config/schema";
 import { readLocalConfig, writeLocalConfig } from "../config/local";
-import { DEFAULT_PROFILE_ID, type ProfileId } from "../config/schema";
+import type { ProfileId } from "../config/schema";
 import { defaultConfig } from "../config/defaults";
 import { profileApiUrl } from "./profileUrl";
 
@@ -39,16 +39,10 @@ async function conflictRevision(res: Response): Promise<string | undefined> {
   }
 }
 
-export function useConfig(profileId: ProfileId): DefinedUseQueryResult<Config>;
-export function useConfig(): DefinedUseQueryResult<Config>;
-export function useConfig(profileId?: ProfileId): DefinedUseQueryResult<Config> {
-  const resolvedProfileId = profileId ?? DEFAULT_PROFILE_ID;
-  // Keep the no-argument form available while App is migrated in the next task.
-  // Explicit profile IDs always use the profile-aware query key and URL.
-  const legacyCall = profileId === undefined;
-  const queryKey = legacyCall ? ["config"] : ["config", resolvedProfileId];
-  const url = legacyCall ? "/api/config" : profileApiUrl("/api/config", resolvedProfileId);
-  const initialConfig = readLocalConfig(resolvedProfileId) ?? defaultConfig;
+export function useConfig(profileId: ProfileId): DefinedUseQueryResult<Config> {
+  const queryKey = ["config", profileId];
+  const url = profileApiUrl("/api/config", profileId);
+  const initialConfig = readLocalConfig(profileId) ?? defaultConfig;
 
   return useQuery<Config>({
     queryKey,
@@ -59,10 +53,14 @@ export function useConfig(profileId?: ProfileId): DefinedUseQueryResult<Config> 
       const parsed = configSchema.safeParse(await res.json());
       throwIfAborted(signal);
       if (!parsed.success) throw new Error("Ungültige Config");
-      writeLocalConfig(resolvedProfileId, parsed.data);
+      writeLocalConfig(profileId, parsed.data);
       return parsed.data;
     },
     initialData: initialConfig,
+    // The default is only a render fallback. Marking the initial value stale is
+    // essential when a newly selected profile has no local snapshot yet: its
+    // server Config must be requested immediately instead of waiting 30 seconds.
+    initialDataUpdatedAt: 0,
     staleTime: 30_000,
     // Local Storage liefert sofort ein sichtbares Bild, ist aber keine Aussage
     // darüber, ob der Serverstand noch aktuell ist.
@@ -82,19 +80,10 @@ function isProfileDataSourceKey(key: string, profileId: ProfileId, config: Confi
     sourceKey.startsWith("cal:") || sourceKey.startsWith("news:");
 }
 
-function isLegacyDataSourceKey(key: string, config: Config): boolean {
-  return (config.homelab.enabled && key === "pve") || key.startsWith("wx:") ||
-    key.startsWith("cal:") || key.startsWith("news:");
-}
-
-export function useSaveConfig(profileId: ProfileId): UseMutationResult<Config, Error, Config>;
-export function useSaveConfig(): UseMutationResult<Config, Error, Config>;
-export function useSaveConfig(profileId?: ProfileId): UseMutationResult<Config, Error, Config> {
+export function useSaveConfig(profileId: ProfileId): UseMutationResult<Config, Error, Config> {
   const qc = useQueryClient();
-  const resolvedProfileId = profileId ?? DEFAULT_PROFILE_ID;
-  const legacyCall = profileId === undefined;
-  const queryKey = legacyCall ? ["config"] : ["config", resolvedProfileId];
-  const url = legacyCall ? "/api/config" : profileApiUrl("/api/config", resolvedProfileId);
+  const queryKey = ["config", profileId];
+  const url = profileApiUrl("/api/config", profileId);
 
   return useMutation<Config, Error, Config>({
     mutationFn: async (next: Config): Promise<Config> => {
@@ -115,15 +104,13 @@ export function useSaveConfig(profileId?: ProfileId): UseMutationResult<Config, 
       // Ein Poll, der vor dem PUT begonnen hat, darf danach weder Query-Cache noch
       // localStorage mit der alten Revision überschreiben.
       await qc.cancelQueries({ queryKey });
-      writeLocalConfig(resolvedProfileId, cfg);
+      writeLocalConfig(profileId, cfg);
       qc.setQueryData(queryKey, cfg);
       void qc.invalidateQueries({
         predicate: (query) => {
           const key = query.queryKey[0];
           if (typeof key !== "string") return false;
-          return legacyCall
-            ? isLegacyDataSourceKey(key, cfg)
-            : isProfileDataSourceKey(key, resolvedProfileId, cfg);
+          return isProfileDataSourceKey(key, profileId, cfg);
         },
       });
     },

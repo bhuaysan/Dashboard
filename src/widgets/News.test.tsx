@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { fetchNews, News } from "./News";
+import type { ProfileId } from "../config/schema";
+
+const PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
 
 const FEED = `<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -19,30 +22,34 @@ afterEach(() => {
 
 describe("fetchNews", () => {
   it("meldet einen Fehler, wenn keine einzige Quelle antwortet", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 502 })));
-    await expect(fetchNews(feeds)).rejects.toThrow("Kein Feed erreichbar");
+    const fetchMock = vi.fn(async () => new Response("", { status: 502 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchNews(PROFILE_ID, feeds)).rejects.toThrow("Kein Feed erreichbar");
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`profile=${PROFILE_ID}`));
   });
 
   it("liefert die erreichbaren Quellen, wenn nur eine ausfällt", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+    const fetchMock = vi.fn(async (url: string) =>
       url.includes("eins.example")
         ? new Response(FEED, { status: 200 })
         : new Response("", { status: 502 }),
-    ));
-    const result = await fetchNews(feeds);
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchNews(PROFILE_ID, feeds);
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.source).toBe("eins");
     expect(result.failures).toEqual(["zwei"]);
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes(`profile=${PROFILE_ID}`))).toBe(true);
   });
 
   it("wertet unlesbares XML als Ausfall der Quelle", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<rss><channel>", { status: 200 })));
-    await expect(fetchNews(feeds)).rejects.toThrow("Kein Feed erreichbar");
+    await expect(fetchNews(PROFILE_ID, feeds)).rejects.toThrow("Kein Feed erreichbar");
   });
 
   it("bleibt ohne eingetragene Feeds leer statt zu scheitern", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 502 })));
-    await expect(fetchNews([])).resolves.toEqual({ items: [], failures: [] });
+    await expect(fetchNews(PROFILE_ID, [])).resolves.toEqual({ items: [], failures: [] });
   });
 
   it("sortiert vor dem Feed-Limit, damit der neueste Artikel bleibt", async () => {
@@ -51,7 +58,7 @@ describe("fetchNews", () => {
       <item><title>neu</title><link>/neu</link><pubDate>Wed, 05 Aug 2026 12:00:00 GMT</pubDate></item>
     </channel></rss>`;
     vi.stubGlobal("fetch", vi.fn(async () => new Response(ascending, { status: 200 })));
-    const result = await fetchNews([{ label: "feed", url: "https://example.com/rss.xml", limit: 1 }]);
+    const result = await fetchNews(PROFILE_ID, [{ label: "feed", url: "https://example.com/rss.xml", limit: 1 }]);
     expect(result.items.map((item) => item.title)).toEqual(["neu"]);
   });
 });

@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { buildConsoleUrl } from "./lib/url";
 import { defaultConfig } from "./config/defaults";
-import type { Config } from "./config/schema";
+import { DEFAULT_PROFILE_ID, type Config, type ProfileId } from "./config/schema";
+import { writeActiveProfileId, writeLocalCatalog, writeLocalConfig, type ProfileCatalog } from "./config/local";
 import type { HomelabData } from "./widgets/Homelab";
 
 const EMPTY_HOMELAB: HomelabData = {
@@ -30,6 +31,21 @@ const FULL_HOMELAB: HomelabData = {
   alerts: [{ level: "crit", text: "PVE-Alarm" }],
 };
 
+const PROFILE_CATALOG = {
+  profilesUpdatedAt: "2026-09-15T00:00:00.000Z",
+  profiles: [{ id: DEFAULT_PROFILE_ID, name: "Standard" }],
+};
+
+const WORK_PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
+const PRIVATE_PROFILE_ID = "223e4567-e89b-42d3-a456-426614174000" as ProfileId;
+const TWO_PROFILE_CATALOG: ProfileCatalog = {
+  profilesUpdatedAt: "2026-09-15T00:00:00.000Z",
+  profiles: [
+    { id: WORK_PROFILE_ID, name: "Arbeit" },
+    { id: PRIVATE_PROFILE_ID, name: "Privat" },
+  ],
+};
+
 function monitoringConfig(enabled: boolean, homelabVisible = true): Config {
   return {
     ...defaultConfig,
@@ -43,7 +59,7 @@ function monitoringConfig(enabled: boolean, homelabVisible = true): Config {
 }
 
 function setInitialConfig(config: Config): void {
-  localStorage.setItem("dashboard:config", JSON.stringify(config));
+  localStorage.setItem("dashboard:config:default", JSON.stringify(config));
 }
 
 afterEach(() => {
@@ -63,11 +79,13 @@ function typeCommand(cmd: string) {
 function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResponse: HomelabData = EMPTY_HOMELAB) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url === "/api/config" && init?.method === "PUT") {
+    if (url === "/api/profiles") return new Response(JSON.stringify(PROFILE_CATALOG), { status: 200 });
+    const parsed = new URL(url, "http://dashboard.test");
+    if (parsed.pathname === "/api/config" && init?.method === "PUT") {
       return putResponse ?? new Response(JSON.stringify(defaultConfig), { status: 200 });
     }
-    if (url === "/api/config") return new Response(JSON.stringify(config), { status: 200 });
-    if (url === "/api/homelab") return new Response(JSON.stringify(homelabResponse), { status: 200 });
+    if (parsed.pathname === "/api/config") return new Response(JSON.stringify(config), { status: 200 });
+    if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(homelabResponse), { status: 200 });
     return new Response("", { status: 502 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -86,6 +104,24 @@ function jsonFile(value: unknown): File {
   // jsdoms File-Stub hat in dieser Vitest-Version kein implementiertes Blob.text().
   Object.defineProperty(file, "text", { value: async () => JSON.stringify(value) });
   return file;
+}
+
+function profileConfig(theme: Config["theme"], location: string, hideWeather = false): Config {
+  return {
+    ...defaultConfig,
+    theme,
+    location: { ...defaultConfig.location, label: location },
+    feeds: [],
+    calendars: [],
+    homelab: { ...defaultConfig.homelab, enabled: false },
+    layout: defaultConfig.layout.map((entry) => entry.id === "weather"
+      ? { ...entry, visible: !hideWeather }
+      : entry),
+  };
+}
+
+function rss(title: string): string {
+  return `<?xml version="1.0"?><rss version="2.0"><channel><item><title>${title}</title><link>https://example.test/${title}</link><pubDate>Sat, 08 Aug 2026 12:00:00 GMT</pubDate></item></channel></rss>`;
 }
 
 describe("App", () => {
@@ -120,8 +156,8 @@ describe("App", () => {
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config")).toBe(true));
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/homelab")).toHaveLength(0);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config?profile=default")).toBe(true));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/homelab?profile=default")).toHaveLength(0);
     expect(screen.queryByRole("heading", { name: /Homelab/ })).toBeNull();
     expect(document.querySelector(".sl-panes")?.textContent).not.toContain("lab");
     expect(screen.queryByLabelText(/^pve:/)).toBeNull();
@@ -138,7 +174,7 @@ describe("App", () => {
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/homelab")).toBe(true));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/homelab?profile=default")).toBe(true));
     await waitFor(() => expect(screen.getByLabelText(/pve: in Ordnung/)).toBeTruthy());
     expect(screen.queryByRole("heading", { name: /Homelab/ })).toBeNull();
     expect(document.querySelector(".sl-panes")?.textContent).not.toContain("lab");
@@ -161,9 +197,9 @@ describe("App", () => {
     );
 
     await waitFor(() => expect(screen.getByRole("heading", { name: /Homelab/ })).toBeTruthy());
-    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/homelab")).toBe(true));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/homelab?profile=default")).toBe(true));
     const homelabCallsBeforeSave = fetchMock.mock.calls
-      .filter(([input]) => String(input) === "/api/homelab").length;
+      .filter(([input]) => String(input) === "/api/homelab?profile=default").length;
     expect(homelabCallsBeforeSave).toBe(1);
     if (!HTMLElement.prototype.scrollIntoView) {
       Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
@@ -177,7 +213,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
 
     await waitFor(() => expect(screen.queryByRole("heading", { name: /Homelab/ })).toBeNull());
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/homelab"))
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/homelab?profile=default"))
       .toHaveLength(homelabCallsBeforeSave);
     expect(document.querySelector(".sl-panes .is-active")?.textContent).toContain("clock");
   });
@@ -273,7 +309,7 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByText("Konfiguration importiert.")).toBeTruthy());
     expect(fetchMock.mock.calls.some(([input, init]) =>
-      String(input) === "/api/config" && init?.method === "PUT",
+      String(input) === "/api/config?profile=default" && init?.method === "PUT",
     )).toBe(true);
   });
 
@@ -324,8 +360,10 @@ describe("App", () => {
     ].join("\r\n");
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/api/config") return new Response(JSON.stringify(config), { status: 200 });
-      if (url === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+      const parsed = new URL(url, "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(config), { status: 200 });
+      if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
       const target = new URL(url, "http://dashboard.test").searchParams.get("url") ?? "";
       if (target.includes("feed-ok")) return new Response(feed, { status: 200 });
       if (target.includes("calendar-ok")) return new Response(ics, { status: 200 });
@@ -345,5 +383,131 @@ describe("App", () => {
       expect(screen.getByLabelText(/news: veraltet/)).toBeTruthy();
       expect(screen.getByLabelText(/cal: veraltet/)).toBeTruthy();
     });
+  });
+
+  it("wählt die lokal aktive Profil-ID und lädt Config und Quellen profiliert", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, profileConfig("light", "Privatort", true));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(parsed.searchParams.get("profile") === WORK_PROFILE_ID ? work : defaultConfig), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/api/config?profile=${WORK_PROFILE_ID}`, expect.anything()));
+    expect(await screen.findByText(/Arbeitsort/)).toBeTruthy();
+    expect(client.getQueryCache().findAll().some((query) => String(query.queryKey[0]).startsWith(`profile:${WORK_PROFILE_ID}:`))).toBe(true);
+  });
+
+  it("fällt ohne lokale Auswahl auf das erste Serverprofil zurück und speichert es lokal", async () => {
+    localStorage.removeItem("dashboard:active-profile");
+    const privateConfig = profileConfig("light", "Privatort");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(parsed.searchParams.get("profile") === WORK_PROFILE_ID ? profileConfig("dark", "Arbeitsort") : privateConfig), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(localStorage.getItem("dashboard:active-profile")).toBe(WORK_PROFILE_ID));
+    expect(await screen.findByText(/Arbeitsort/)).toBeTruthy();
+  });
+
+  it("isoliert zwei simulierte Geräte durch die lokale aktive ID", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    const privateConfig = profileConfig("light", "Privatort");
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(parsed.searchParams.get("profile") === WORK_PROFILE_ID ? work : privateConfig), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    const first = render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
+    first.unmount();
+
+    localStorage.clear();
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(PRIVATE_PROFILE_ID);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    expect(localStorage.getItem("dashboard:active-profile")).toBe(PRIVATE_PROFILE_ID);
+    expect(localStorage.getItem(`dashboard:config:${PRIVATE_PROFILE_ID}`)).toContain("Privatort");
+    const secondClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={secondClient}><App /></QueryClientProvider>);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/config?profile=${PRIVATE_PROFILE_ID}`)).toBe(true));
+    await waitFor(() => expect(secondClient.getQueryData(["config", PRIVATE_PROFILE_ID])).toEqual(privateConfig));
+    await waitFor(() => expect(document.body.textContent).toContain("Privatort"));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/config?profile=${PRIVATE_PROFILE_ID}`)).toBe(true);
+  });
+
+  it("wechselt bei entfernter Auswahl zum ersten Profil und übernimmt Theme und Layout", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    const privateConfig = profileConfig("light", "Privatort", true);
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(parsed.searchParams.get("profile") === WORK_PROFILE_ID ? work : privateConfig), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
+
+    client.setQueryData(["profiles"], {
+      ...TWO_PROFILE_CATALOG,
+      profiles: [TWO_PROFILE_CATALOG.profiles[1]],
+    });
+    await waitFor(() => expect(screen.getByText("Profil wurde entfernt — Standardprofil aktiv.")).toBeTruthy());
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(screen.queryByRole("heading", { name: "Weather" })).toBeNull();
+    expect(localStorage.getItem("dashboard:active-profile")).toBe(PRIVATE_PROFILE_ID);
+  });
+
+  it("zeigt keine verspätete Antwort des alten Profils im neuen Profil", async () => {
+    const work = { ...profileConfig("dark", "Arbeitsort"), feeds: [{ label: "Arbeit", url: "https://work.example/rss", limit: 5 }] };
+    const privateConfig = { ...profileConfig("light", "Privatort"), feeds: [{ label: "Privat", url: "https://private.example/rss", limit: 5 }] };
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    let resolveWork: (value: Response) => void = () => undefined;
+    const workPending = new Promise<Response>((resolve) => { resolveWork = resolve; });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(parsed.searchParams.get("profile") === WORK_PROFILE_ID ? work : privateConfig), { status: 200 });
+      if (parsed.pathname === "/api/proxy" && parsed.searchParams.get("profile") === WORK_PROFILE_ID) return workPending;
+      if (parsed.pathname === "/api/proxy") return new Response(rss("Privat"), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes(`profile=${WORK_PROFILE_ID}`))).toBe(true));
+    client.setQueryData(["profiles"], { ...TWO_PROFILE_CATALOG, profiles: [TWO_PROFILE_CATALOG.profiles[1]] });
+    await waitFor(() => expect(screen.getAllByText("Privat").length).toBeGreaterThan(0));
+
+    resolveWork(new Response(rss("Arbeit"), { status: 200 }));
+    await waitFor(() => expect(screen.queryByText("Arbeit")).toBeNull());
+    expect(screen.getAllByText("Privat").length).toBeGreaterThan(0);
   });
 });

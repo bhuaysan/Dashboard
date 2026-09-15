@@ -2,20 +2,49 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../config/schema";
 import { fetchEvents, filterAgendaEvents } from "./Agenda";
 import type { CalEvent } from "../lib/ics";
+import type { ProfileId } from "../config/schema";
+
+const PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("fetchEvents", () => {
+  it("holt einen sicheren lokalen Kalender same-origin ohne Proxy", async () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:lokal",
+      "DTSTART:20260806T090000",
+      "DTEND:20260806T100000",
+      "SUMMARY:Lokaler Termin",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const fetchMock = vi.fn(async () => new Response(ics, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchEvents(
+      PROFILE_ID,
+      [{ label: "lokal", url: "/static/arbeit.ics" }],
+      new Date("2026-08-05T00:00:00"),
+      new Date("2026-08-08T23:59:59"),
+    );
+
+    expect(result.failures).toEqual([]);
+    expect(result.items.map((item) => item.title)).toEqual(["Lokaler Termin"]);
+    expect(fetchMock).toHaveBeenCalledWith("/static/arbeit.ics");
+  });
+
   it("schickt einen ungültigen protocol-relativen Kalender nie direkt an eine Fremd-Origin", async () => {
     const url = "//evil.example/arbeit.ics";
     const fetchMock = vi.fn(async () => new Response("", { status: 400 }));
     vi.stubGlobal("fetch", fetchMock);
     const calendars: Config["calendars"] = [{ label: "fremd", url }];
 
-    await expect(fetchEvents(calendars, new Date("2026-08-08T23:59:59Z"))).rejects.toThrow("Kein Kalender erreichbar");
-    expect(fetchMock).toHaveBeenCalledWith(`/api/proxy?url=${encodeURIComponent(url)}`);
+    await expect(fetchEvents(PROFILE_ID, calendars, new Date("2026-08-08T23:59:59Z"))).rejects.toThrow("Kein Kalender erreichbar");
+    expect(fetchMock).toHaveBeenCalledWith(`/api/proxy?profile=${PROFILE_ID}&url=${encodeURIComponent(url)}`);
   });
 
   it("liefert erreichbare Kalender und benennt einen partiellen Ausfall", async () => {
@@ -34,6 +63,7 @@ describe("fetchEvents", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const result = await fetchEvents(
+      PROFILE_ID,
       [{ label: "ok", url: "https://ok.example/calendar.ics" }, { label: "kaputt", url: "https://bad.example/calendar.ics" }],
       new Date("2026-08-05T00:00:00"),
       new Date("2026-08-08T23:59:59"),
@@ -69,6 +99,7 @@ describe("fetchEvents", () => {
     ));
 
     const result = await fetchEvents(
+      PROFILE_ID,
       [
         { label: "zu häufig", url: "https://calendar.example/zu-haeufig.ics" },
         { label: "gut", url: "https://calendar.example/gut.ics" },

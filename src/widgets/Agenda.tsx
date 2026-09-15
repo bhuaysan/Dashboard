@@ -1,6 +1,8 @@
 import { isSafeLocalCalendarPath, type Config } from "../config/schema";
 import { overlapsRange, parseIcs, type CalEvent } from "../lib/ics";
 import { z } from "zod";
+import type { ProfileId } from "../config/schema";
+import { profileApiUrl } from "../api/profileUrl";
 
 export type { CalEvent };
 export type EventFetchResult = { items: CalEvent[]; failures: string[] };
@@ -29,6 +31,7 @@ type CalendarSourceResult = { items: CalEvent[]; failure?: string };
 // Agenda die nächsten Tage, das Monatsraster den ganzen sichtbaren Monat. Der optionale
 // Rückwärts-kompatible Aufruf mit nur `to` bleibt für direkte Verbraucher erhalten.
 export async function fetchEvents(
+  profileId: ProfileId,
   cals: Config["calendars"],
   fromOrTo: Date,
   maybeTo?: Date,
@@ -44,7 +47,7 @@ export async function fetchEvents(
     try {
       const url = isSafeLocalCalendarPath(cal.url)
         ? cal.url
-        : `/api/proxy?url=${encodeURIComponent(cal.url)}`;
+        : profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: cal.url }));
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return { items: parseIcs(await res.text(), from, to) };

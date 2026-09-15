@@ -3,6 +3,8 @@ import { parseFeed, type NewsItem } from "../lib/rss";
 import { shortAge, spokenAge } from "../lib/relativeTime";
 import { safeHref } from "../lib/url";
 import { z } from "zod";
+import type { ProfileId } from "../config/schema";
+import { profileApiUrl } from "../api/profileUrl";
 
 export type { NewsItem };
 export type NewsFetchResult = { items: NewsItem[]; failures: string[] };
@@ -25,10 +27,10 @@ export function decodeNews(value: unknown): NewsFetchResult | undefined {
 
 type FeedSourceResult = { items: NewsItem[]; failure?: string };
 
-export async function fetchNews(feeds: Config["feeds"]): Promise<NewsFetchResult> {
+export async function fetchNews(profileId: ProfileId, feeds: Config["feeds"]): Promise<NewsFetchResult> {
   const results = await Promise.all(feeds.map(async (feed): Promise<FeedSourceResult> => {
     try {
-      const res = await fetch(`/api/proxy?url=${encodeURIComponent(feed.url)}`);
+      const res = await fetch(profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: feed.url })));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const items = parseFeed(await res.text(), feed.label, feed.url)
         .sort((a, b) => b.date.getTime() - a.date.getTime())

@@ -15,8 +15,15 @@ import {
 } from "./lib/useKeymap";
 import { buildConsoleUrl, safeHref } from "./lib/url";
 import { exportConfig, importConfig, restoreConfig } from "./config/io";
-import type { Config } from "./config/schema";
+import { DEFAULT_PROFILE_ID, type Config, type ProfileId } from "./config/schema";
+import {
+  readActiveProfileId,
+  readLocalCatalog,
+  writeActiveProfileId,
+  type ProfileCatalog,
+} from "./config/local";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
+import { useProfiles } from "./api/profiles";
 import { useCachedQuery } from "./api/useCachedQuery";
 import { decodeWeather, fetchWeather, Weather } from "./widgets/Weather";
 import { decodeEvents, fetchEvents, filterAgendaEvents, Agenda } from "./widgets/Agenda";
@@ -34,6 +41,22 @@ type RowInfo = { url?: string };
 // Die Agenda zeigt heute und die drei folgenden Tage; geholt wird für das Monatsraster
 // mehr. Beide Panes teilen sich eine Abfrage, deshalb wird hier zugeschnitten.
 const AGENDA_DAYS = 4;
+
+function profileInCatalog(catalog: ProfileCatalog | undefined, profileId: ProfileId): boolean {
+  return catalog?.profiles.some((profile) => profile.id === profileId) ?? false;
+}
+
+function resolveProfileId(catalog: ProfileCatalog | undefined, stored: ProfileId | undefined): ProfileId {
+  if (catalog !== undefined && stored !== undefined && profileInCatalog(catalog, stored)) return stored;
+  const first = catalog?.profiles[0];
+  return first?.id ?? stored ?? DEFAULT_PROFILE_ID;
+}
+
+function isProfileQuery(queryKey: readonly unknown[], profileId: ProfileId): boolean {
+  const first = queryKey[0];
+  if (first === "config") return queryKey[1] === profileId;
+  return typeof first === "string" && first.startsWith(`profile:${profileId}:`);
+}
 
 function useNow(): Date {
   const [now, setNow] = useState(() => new Date());
@@ -55,18 +78,56 @@ function useNow(): Date {
 
 export default function App() {
   const queryClient = useQueryClient();
-  const configQuery = useConfig();
-  const saveConfig = useSaveConfig();
+  const profilesQuery = useProfiles();
+  const [localCatalog] = useState<ProfileCatalog | undefined>(() => readLocalCatalog());
+  const [storedProfileId] = useState<ProfileId | undefined>(() => readActiveProfileId());
+  const [activeProfileId, setActiveProfileId] = useState<ProfileId>(() =>
+    resolveProfileId(localCatalog, storedProfileId),
+  );
+  const catalog = profilesQuery.data;
+  const profileId = resolveProfileId(catalog, activeProfileId);
+  const configQuery = useConfig(profileId);
+  const saveConfig = useSaveConfig(profileId);
   const config = configQuery.data;
   const [ui, dispatch] = useReducer(uiReducer, initialUiState);
   const [seed, setSeed] = useState<string | null>(null);
   const [message, setMessage] = useState<Note | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const previousCatalog = useRef<ProfileCatalog | undefined>(localCatalog);
   const modalOpen = settingsOpen || ui.showHelp;
   const now = useNow();
   const calRange = useMemo(() => eventFetchRange(now, AGENDA_DAYS), [now]);
   const paneRefs = useRef<Partial<Record<PaneId, HTMLElement | null>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const switchProfile = useCallback((nextProfileId: ProfileId): void => {
+    if (catalog !== undefined && !profileInCatalog(catalog, nextProfileId)) return;
+    if (nextProfileId === activeProfileId) {
+      writeActiveProfileId(nextProfileId);
+      return;
+    }
+    const previousProfileId = activeProfileId;
+    writeActiveProfileId(nextProfileId);
+    void queryClient.cancelQueries({
+      predicate: (query) => isProfileQuery(query.queryKey, previousProfileId),
+    });
+    dispatch({ type: "reset" });
+    setActiveProfileId(nextProfileId);
+  }, [activeProfileId, catalog, queryClient]);
+
+  useEffect(() => {
+    if (catalog === undefined) return;
+    const first = catalog.profiles[0];
+    if (first === undefined) return;
+    if (!profileInCatalog(catalog, activeProfileId)) {
+      const wasKnown = previousCatalog.current?.profiles.some((profile) => profile.id === activeProfileId) ?? false;
+      switchProfile(first.id);
+      if (wasKnown) setMessage({ text: "Profil wurde entfernt — Standardprofil aktiv.", level: "info" });
+    } else {
+      writeActiveProfileId(activeProfileId);
+    }
+    previousCatalog.current = catalog;
+  }, [activeProfileId, catalog, switchProfile]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -85,25 +146,25 @@ export default function App() {
   // Die Intervalle halten einen dauerhaft offenen Tab aktuell; ohne sie wird erst beim
   // nächsten Fokus nachgeladen, und eine Anzeige, die niemand fokussiert, friert ein.
   const wxQuery = useCachedQuery(
-    `wx:${config.location.lat},${config.location.lon}`,
-    () => fetchWeather(config.location),
+    `profile:${profileId}:wx:${config.location.lat},${config.location.lon}`,
+    () => fetchWeather(profileId, config.location),
     600_000,
     { decode: decodeWeather, refetchIntervalMs: 600_000 },
   );
   const calQuery = useCachedQuery(
-    `cal:${JSON.stringify(config.calendars)}:${calRange.from.getTime()}:${calRange.to.getTime()}`,
-    () => fetchEvents(config.calendars, calRange.from, calRange.to),
+    `profile:${profileId}:cal:${JSON.stringify(config.calendars)}:${calRange.from.getTime()}:${calRange.to.getTime()}`,
+    () => fetchEvents(profileId, config.calendars, calRange.from, calRange.to),
     900_000,
     { decode: decodeEvents, refetchIntervalMs: 900_000 },
   );
   const newsQuery = useCachedQuery(
-    `news:${JSON.stringify(config.feeds)}`,
-    () => fetchNews(config.feeds),
+    `profile:${profileId}:news:${JSON.stringify(config.feeds)}`,
+    () => fetchNews(profileId, config.feeds),
     900_000,
     { decode: decodeNews, refetchIntervalMs: 900_000 },
   );
   const homelabEnabled = config.homelab.enabled;
-  const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, {
+  const labQuery = useCachedQuery(`profile:${profileId}:pve`, () => fetchHomelab(profileId), 60_000, {
     decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: homelabEnabled,
   });
 
