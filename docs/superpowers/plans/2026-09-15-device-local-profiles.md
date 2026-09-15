@@ -307,11 +307,15 @@ function writeLocalCatalog(catalog: ProfileCatalog): void;
 function readLocalConfig(profileId: ProfileId): Config | undefined;
 function writeLocalConfig(profileId: ProfileId, config: Config): void;
 function useProfiles(): UseQueryResult<ProfileCatalog>;
-function useCreateProfile(): UseMutationResult<...>;
-function useRenameProfile(): UseMutationResult<...>;
-function useDeleteProfile(): UseMutationResult<...>;
+type CreateProfileInput = { name: string; sourceProfileId: ProfileId; profilesUpdatedAt: string };
+type RenameProfileInput = { profileId: ProfileId; name: string; profilesUpdatedAt: string };
+type DeleteProfileInput = { profileId: ProfileId; profilesUpdatedAt: string };
+type CatalogMutationData = { catalog: ProfileCatalog; createdId?: ProfileId };
+function useCreateProfile(): UseMutationResult<CatalogMutationData, Error, CreateProfileInput>;
+function useRenameProfile(): UseMutationResult<CatalogMutationData, Error, RenameProfileInput>;
+function useDeleteProfile(): UseMutationResult<CatalogMutationData, Error, DeleteProfileInput>;
 function useConfig(profileId: ProfileId): UseQueryResult<Config>;
-function useSaveConfig(profileId: ProfileId): UseMutationResult<Config, ...>;
+function useSaveConfig(profileId: ProfileId): UseMutationResult<Config, Error, Config>;
 ```
 
 - [ ] **Step 1: Add failing local-storage tests**
@@ -416,7 +420,9 @@ Expected: FAIL because requests and App state are not profile-aware.
 
 - [ ] **Step 4: Pass profile IDs through all widget fetchers**
 
-Use `profileApiUrl` for every `/api/proxy` and `/api/homelab` call. Keep local `/static/*.ics` requests routed through `/api/proxy`; the server still decides policy for the selected profile.
+Use `profileApiUrl` for every `/api/proxy` and `/api/homelab` call. Preserve direct same-origin
+fetches for safe `/static/*.ics` paths. Only HTTP(S) calendar URLs go through `/api/proxy` with the
+selected profile ID; the server still decides their policy.
 
 - [ ] **Step 5: Implement active-profile resolution in App**
 
@@ -632,7 +638,7 @@ Run:
 
 ```bash
 git status --short
-git diff --stat HEAD~7..HEAD
+git diff --stat 7c60a75..HEAD
 git log --oneline -10
 ```
 
