@@ -1,0 +1,13 @@
+# Nur diese eigene Tabelle verändern; NetBird und Docker behalten ihre Regeln.
+add table inet dashboard_vps
+flush table inet dashboard_vps
+table inet dashboard_vps {
+  chain ingress {
+    type filter hook prerouting priority -110; policy accept;
+    # Vor Docker-DNAT prüfen: Quelle muss aus dem authentifizierten Tunnel kommen.
+    iifname "wt0" ip saddr { 100.113.131.20, 100.113.29.51 } ip daddr 100.113.86.223 tcp dport 8080 counter accept
+    fib daddr type local tcp dport 8080 counter drop
+    # Auch direkte Routen auf die Container-IP dürfen die Prüfung nicht umgehen.
+    ip daddr 172.29.80.2 tcp dport 7777 counter drop
+  }
+}

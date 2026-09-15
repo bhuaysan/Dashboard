@@ -1,0 +1,14 @@
+# Der kleine VPS verpackt ausschließlich lokal vorbereitete Linux/x64-Artefakte.
+FROM node:24-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production PORT=7777 DASHBOARD_CONFIG=/data/config.json DASHBOARD_STATIC=/data/static
+COPY package.json ./
+COPY node_modules ./node_modules
+COPY dist ./dist
+COPY src ./src
+COPY server ./server
+COPY deploy/init-vps.ts ./deploy/init-vps.ts
+USER 1000:1000
+EXPOSE 7777
+HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:7777/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node", "--import", "tsx", "server/index.ts"]

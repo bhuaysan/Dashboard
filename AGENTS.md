@@ -152,9 +152,19 @@ Verstöße sind Fehler, auch wenn der Code läuft.
   mDNS auf und fragt den Pi-hole nicht).
 - Browser sind Firefox und Safari. **Kein Chrome** — keine Chrome-Extension bauen.
 
+## VPS-Betriebsweg (15.09.2026)
+
+Der zusätzlich freigegebene Betriebsweg ist Docker auf `ben@5.252.224.168`, ausschließlich
+über NetBird `http://100.113.86.223:8080`. `pnpm deploy:vps` verwendet eigene Skripte;
+`pnpm deploy` bleibt der Heim-LXC. Siehe README Abschnitt VPS. Proxmox bleibt dort vorerst
+deaktiviert. Kein Zugriff auf das Heimnetz und keine Übertragung der bisherigen Secrets.
+Docker und privater Fernzugriff über NetBird sind damit ausdrücklich erlaubt; öffentliche
+Dashboard-Freigaben bleiben ausgeschlossen. `.env` und die VPS-Laufzeitdatei sind weiterhin
+für das Werkzeug gesperrt. Status und Tests des tatsächlichen Deployments getrennt berichten.
+
 ## Nicht bauen
 
-To-Dos, Notizen, Drag-and-Drop-Layout, Multi-Profile, HTTPS, Zugriff von außerhalb des LAN,
-Browser-Extensions, Microsoft Graph oder OAuth, Datenbank, Docker, Login, Pi-hole-Widget,
+To-Dos, Notizen, Drag-and-Drop-Layout, Multi-Profile, HTTPS, öffentlicher Zugriff,
+Browser-Extensions, Microsoft Graph oder OAuth, Datenbank, Login, Pi-hole-Widget,
 Speedtest, SMART-Werte, Graphen pro Gast. Die vollständige Liste mit Begründungen steht am Ende
 von `PLAN.md`.

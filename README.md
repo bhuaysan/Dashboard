@@ -84,3 +84,82 @@ Snapshot von CT 113 in der Proxmox-UI zurückspielen (Snapshots → auswählen �
 Der Dienst startet per `enabled`-Unit von allein; danach einmal `./deploy/deploy.sh`, falls der
 Code-Stand neuer sein soll als der Snapshot. Komplett neu: Container anlegen (Schritt 7 in
 `PLAN.md`), `provision.sh`, `deploy.sh`, `config.json`/`.env`/`pve-ca.pem` aus dem Backup zurück.
+
+## VPS über NetBird (Docker)
+
+Der zweite Betriebsweg läuft auf `ben@5.252.224.168`. Zugriff ausschließlich mit aktivem
+NetBird unter `http://100.113.86.223:8080`, optional über
+`http://netcup.netbird.selfhosted:8080`, sofern NetBird-DNS auf dem Client funktioniert.
+Port 80/443 und der vorhandene NetBird-Traefik werden nicht verändert.
+
+### Einmalige Einrichtung
+
+Die Dateien `deploy/provision-vps.sh`, `deploy/dashboard-vps-run`,
+`deploy/dashboard-vps.service`, `deploy/dashboard-vps-firewall.service` und
+`deploy/dashboard-vps.nft` gemeinsam auf den VPS kopieren und dort
+`sudo bash deploy/provision-vps.sh` ausführen. Voraussetzung: Debian mit Docker Compose,
+NetBird-Hostdienst, Benutzer `ben` (UID/GID 1000, Gruppe docker). Das Skript installiert bei
+Bedarf nftables, richtet nur Dashboard-Verzeichnisse und die eigene Firewall-Tabelle ein und
+gewährt ben ausschließlich `systemctl restart/stop dashboard-vps.service` über sudo.
+
+- `/opt/dashboard/releases/`: versionierte Quellen und Compose-Dateien; `current` zeigt auf das aktive Release.
+- `/opt/dashboard/backups/`: State-Sicherung vor jedem Wechsel.
+- `/var/lib/dashboard/`: dauerhaftes Datenverzeichnis, einschließlich `static/`.
+- `/etc/dashboard/dashboard.env`: geschützte Laufzeitvariablen, nie ins Image aufnehmen.
+
+Die Config wird bei der ersten Installation aus den Defaults angelegt, mit ausgeschalteter
+HOMELAB-Pane und deaktiviertem Monitoring. Bestehende Configs bleiben unverändert. Es werden
+keine Daten vom Heim-LXC und keine Proxmox-Zugangsdaten übertragen.
+
+### Updates und Betrieb
+
+`pnpm deploy:vps` testet und baut lokal, überträgt ausschließlich eine explizite Liste von
+Anwendungsdateien, bereitet Linux/x64-Produktionsabhängigkeiten lokal vor und verpackt sie auf dem VPS in ein versioniertes Image und schaltet nach Datensicherung um.
+Es gibt keine Registry-Pushes. Der VPS braucht nur für das Node-Basisimage Internetzugriff; Paketinstallation und Frontend-Build laufen lokal.
+`Dockerfile.vps` enthält keine Paketinstallation und keine Build-Prozesse. Zusätzlich gelten
+256 MB RAM je Build-Schritt, ohne zusätzlichen Swap und höchstens eine halbe CPU.
+Das mehrstufige `Dockerfile` bleibt für eigenständige Builds auf größeren Rechnern verfügbar. Das erfordert Docker Buildx mit `--resource`-Unterstützung;
+auf dem Ziel ist Buildx 0.37.0 vorhanden.
+Healthchecks prüfen API und Frontend. Bei Fehlern aktiviert das Skript das vorherige Image
+über dessen Release-Verzeichnis; bei einer fehlgeschlagenen Erstinstallation bleibt der Dienst
+gestoppt. Die Daten werden beim automatischen Rollback nicht zurückgesetzt, damit zwischenzeitliche
+Änderungen nicht verloren gehen. Ein Restore aus dem Backup erfolgt bewusst bei gestopptem Dienst.
+Keine automatische Löschung alter Releases, Images oder Backups; Speicherverbrauch im Blick behalten.
+
+```bash
+ssh ben@5.252.224.168 'systemctl status dashboard-vps.service --no-pager'
+ssh ben@5.252.224.168 'sudo systemctl restart dashboard-vps.service'
+ssh ben@5.252.224.168 'sudo systemctl stop dashboard-vps.service'
+```
+
+Der laufende Container ist auf 192 MB RAM, 128 Prozesse und eine halbe CPU begrenzt.
+Docker selbst verwendet `restart: "no"`; systemd startet Compose nach geladenen Firewall-Regeln
+und wartet auf die NetBird-Adresse an `wt0`. Ein Prozessabbruch startet den Dienst neu. Ein
+ungesunder, noch laufender Container wird nur beim Deployment automatisch zurückgerollt, nicht
+später durch den Docker-Healthcheck neu gestartet. Nach einem manuellen Neustart des Docker-Dienstes
+auch den Dashboard-Dienst neu starten. Beim regulären VPS-Boot ist er aktiviert.
+Änderungen an Firewall oder systemd-Dateien erfordern erneute Provisionierung mit sudo.
+
+### Zugriffsschutz
+
+Die Portbindung ist fest `100.113.86.223:8080:7777`. Die eigene nftables-Tabelle
+`inet dashboard_vps` prüft vor Docker-DNAT nur MacBook `100.113.131.20` und Pixel
+`100.113.29.51` auf dem Interface `wt0`. Andere Zugriffe auf lokale Adressen an Port 8080
+(IPv4 und IPv6) sowie direkt auf `172.29.80.2:7777` werden verworfen. Das Subnetz
+`172.29.80.0/24` ist für das Dashboard reserviert. Host-Administratoren bleiben vertrauenswürdig.
+NetBird muss die Peer-Verbindung zum VPS zusätzlich erlauben; breite vorhandene Policies werden
+nicht für andere Dienste verändert. Ein neuer Client benötigt sowohl eine passende NetBird-Policy
+als auch eine Ergänzung der eigenen Firewall; für Schreibzugriff zusätzlich `DASHBOARD_WRITE_ALLOW`.
+`DASHBOARD_WRITE_HOSTS` enthält nur die private Adresse und den NetBird-Namen mit Port 8080.
+
+HTTP läuft im verschlüsselten NetBird-Tunnel. Es gibt keinen öffentlichen Dashboard-Router,
+keinen Login in der Anwendung und keine öffentliche Fallback-Adresse. GET-Endpunkte setzen
+vollständig auf diesen Netzwerkschutz. Vor Freigabe immer privat positiv und öffentlich über
+IPv4/IPv6 negativ testen; ein Test vom VPS selbst ersetzt keine externe Gegenprobe.
+
+### Proxmox später einschalten
+
+Erst eine gezielte NetBird-Route aus dem VPS zum Heimnetz einrichten. Danach Proxmox-Variablen
+in der geschützten Umgebungsdatei ergänzen und das CA-Zertifikat schreibgeschützt in den Container
+mounten (Pfad über `PVE_CA_PATH`). Den Dienst neu starten und Monitoring/Pane in den Einstellungen
+aktivieren. Der allgemeine `/api/proxy` bleibt für private Ziele gesperrt.

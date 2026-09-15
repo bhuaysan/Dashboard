@@ -1250,7 +1250,7 @@ Alles muss zutreffen:
 
 ---
 
-## Ausdrücklich nicht Teil dieses Auftrags
+## Ausdrücklich nicht Teil des ursprünglichen Auftrags
 
 Nicht einbauen, auch nicht „schnell mit dazu":
 
@@ -1258,7 +1258,15 @@ To-Dos, Notizen, Drag-and-Drop-Layout, Multi-Profile, HTTPS, Zugriff von außerh
 Chrome-Extension, Firefox-Add-on, Microsoft Graph oder OAuth, Datenbank, Docker,
 Authentifizierung/Login, Pi-hole-Widget, Speedtest, SMART-Werte, Graphen pro Gast.
 
-### Für später vorgemerkt (nicht jetzt bauen)
+### Erweiterung vom 15.09.2026
+
+Docker auf dem VPS und privater Fernzugriff ausschließlich über NetBird wurden separat
+freigegeben. Umsetzung: `Dockerfile`, `compose.vps.yaml`, `deploy/*vps*`, Anleitung in README.
+Proxmox bleibt vorerst deaktiviert. Der folgende alte Docker-Entwurf ist historisch:
+Aktuell wird das ganze Datenverzeichnis statt einer einzelnen Config-Datei eingebunden
+(atomisches rename), Healthcheck über `/api/health`, Node 24 als Runtime.
+
+### Für später vorgemerkt (historischer Stand)
 
 - **Pi-hole-Widget** — Queries, Blockrate, 24-Stunden-Verlauf über die v6-API
   (`POST /api/auth` liefert eine Session, dann `/api/stats/summary` und `/api/history`).
