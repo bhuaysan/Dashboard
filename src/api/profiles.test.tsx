@@ -32,6 +32,12 @@ function wrapperFor(client: QueryClient) {
   };
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -78,6 +84,31 @@ describe("useProfiles", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(result.current.isSuccess).toBe(true);
     expect(fetchMock.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("does not persist a catalog whose JSON finishes after cancellation", async () => {
+    writeLocalCatalog(catalog);
+    const pendingJson = deferred<unknown>();
+    const jsonStarted = deferred<void>();
+    const response = new Response(null, { status: 200 });
+    Object.defineProperty(response, "json", {
+      configurable: true,
+      value: () => {
+        jsonStarted.resolve(undefined);
+        return pendingJson.promise;
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => response));
+    const client = createClient();
+    renderHook(() => useProfiles(), { wrapper: wrapperFor(client) });
+
+    await jsonStarted.promise;
+    const cancellation = client.cancelQueries({ queryKey: ["profiles"] });
+    pendingJson.resolve({ ...catalog, profilesUpdatedAt: "2026-09-16T00:00:00.000Z" });
+    await cancellation;
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(JSON.parse(localStorage.getItem("dashboard:profiles") ?? "null")).toEqual(catalog);
   });
 });
 

@@ -89,6 +89,7 @@ export function useProfiles(): UseQueryResult<ProfileCatalog> {
       throwIfAborted(signal);
       if (!response.ok) throw new Error("Profile nicht ladbar");
       const parsed = profileCatalogSchema.safeParse(await response.json());
+      throwIfAborted(signal);
       if (!parsed.success) throw new Error("Ungültiger Profilkatalog");
       writeLocalCatalog(parsed.data);
       return parsed.data;

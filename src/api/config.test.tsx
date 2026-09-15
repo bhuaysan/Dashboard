@@ -8,6 +8,12 @@ import { DEFAULT_PROFILE_ID, type ProfileId } from "../config/schema";
 
 const WORK_PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>;
 }
@@ -37,6 +43,35 @@ describe("useConfig", () => {
     const { result } = renderHook(() => useConfig(DEFAULT_PROFILE_ID), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 3000 });
     expect(result.current.data).toEqual(defaultConfig);
+  });
+
+  it("schreibt keine Config, deren JSON erst nach dem Abbruch fertig wird", async () => {
+    const local = { ...defaultConfig, theme: "light" as const };
+    localStorage.setItem("dashboard:config:default", JSON.stringify(local));
+    const pendingJson = deferred<unknown>();
+    const jsonStarted = deferred<void>();
+    const response = new Response(null, { status: 200 });
+    Object.defineProperty(response, "json", {
+      configurable: true,
+      value: () => {
+        jsonStarted.resolve(undefined);
+        return pendingJson.promise;
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => response));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    renderHook(() => useConfig(DEFAULT_PROFILE_ID), { wrapper: testWrapper });
+
+    await jsonStarted.promise;
+    const cancellation = client.cancelQueries({ queryKey: ["config", DEFAULT_PROFILE_ID] });
+    pendingJson.resolve({ ...defaultConfig, theme: "dark" });
+    await cancellation;
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(JSON.parse(localStorage.getItem("dashboard:config:default") ?? "null")).toEqual(local);
   });
 });
 

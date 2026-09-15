@@ -57,6 +57,7 @@ export function useConfig(profileId?: ProfileId): DefinedUseQueryResult<Config> 
       throwIfAborted(signal);
       if (!res.ok) throw new Error("Config nicht ladbar");
       const parsed = configSchema.safeParse(await res.json());
+      throwIfAborted(signal);
       if (!parsed.success) throw new Error("Ungültige Config");
       writeLocalConfig(resolvedProfileId, parsed.data);
       return parsed.data;
