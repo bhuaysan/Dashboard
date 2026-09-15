@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import type { Config } from "../src/config/schema";
+import { DEFAULT_PROFILE_ID, type Config, type ProfileDocument, type ProfileId } from "../src/config/schema";
 import { defaultConfig } from "../src/config/defaults";
 import { createApp, inertProxyResponse, readJsonBody } from "./app.ts";
 import type { DashboardEnvironment } from "./env.ts";
@@ -18,8 +18,11 @@ type AppFixture = {
 
 type FixtureOptions = {
   config?: Config;
+  document?: ProfileDocument;
   homelabFetcher?: HomelabFetcher;
 };
+
+const secondProfileId = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
 
 const homelabFetcher = vi.fn<HomelabFetcher>(async () => emptyHomelab);
 
@@ -31,7 +34,8 @@ async function createFixture(options: FixtureOptions = {}): Promise<AppFixture> 
   await mkdir(join(tempDir, "dist"));
   await writeFile(join(tempDir, "dist", "index.html"), '<html><body><div id="root">Dashboard</div></body></html>');
   await writeFile(join(staticPath, "arbeit.ics"), "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
-  if (options.config) await writeFile(configPath, JSON.stringify(options.config));
+  if (options.document) await writeFile(configPath, JSON.stringify(options.document));
+  else if (options.config) await writeFile(configPath, JSON.stringify(options.config));
   const testEnv: DashboardEnvironment = {
     port: 7777,
     configPath,
@@ -62,7 +66,7 @@ function itWithApp(name: string, test: (fixture: AppFixture) => Promise<void>, o
 }
 
 async function getConfig(app: ReturnType<typeof createApp>): Promise<Config> {
-  const res = await app.request("/api/config");
+  const res = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`);
   expect(res.status).toBe(200);
   return (await res.json()) as Config;
 }
@@ -75,7 +79,7 @@ function connInfo(address: string) {
 
 function putConfig(app: ReturnType<typeof createApp>, cfg: Config, ifMatch: string, from = "127.0.0.1", extraHeaders: Record<string, string> = {}) {
   return app.request(
-    "/api/config",
+    `/api/config?profile=${DEFAULT_PROFILE_ID}`,
     {
       method: "PUT",
       headers: { "content-type": "application/json", "If-Match": ifMatch, host: "localhost:7777", ...extraHeaders },
@@ -100,6 +104,25 @@ function nearLimitConfig(base: Config): Config {
   };
 }
 
+function twoProfileDocument(defaultOverrides: Partial<Config> = {}, secondOverrides: Partial<Config> = {}): ProfileDocument {
+  return {
+    version: 2,
+    profilesUpdatedAt: "2026-08-08T12:00:00.000Z",
+    profiles: [
+      {
+        id: DEFAULT_PROFILE_ID,
+        name: "Standard",
+        config: { ...defaultConfig, ...defaultOverrides },
+      },
+      {
+        id: secondProfileId,
+        name: "Arbeit",
+        config: { ...defaultConfig, ...secondOverrides },
+      },
+    ],
+  };
+}
+
 describe("/api/config", () => {
   itWithApp("GET liefert die Config", async ({ app }) => {
     const cfg = await getConfig(app);
@@ -107,7 +130,7 @@ describe("/api/config", () => {
   });
 
   itWithApp("GET enthält keine Werte aus der .env", async ({ app }) => {
-    const res = await app.request("/api/config");
+    const res = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`);
     const text = await res.text();
     expect(text.toLowerCase().includes("token")).toBe(false);
     expect(text.toLowerCase().includes("secret")).toBe(false);
@@ -178,7 +201,7 @@ describe("/api/config", () => {
 
   itWithApp("PUT ohne erkennbare Absenderadresse liefert 403", async ({ app }) => {
     const before = await getConfig(app);
-    const res = await app.request("/api/config", {
+    const res = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`, {
       method: "PUT",
       headers: { "content-type": "application/json", "If-Match": before.updatedAt, host: "localhost:7777" },
       body: JSON.stringify(before),
@@ -236,7 +259,7 @@ describe("/api/config", () => {
   itWithApp("weist einen zu großen JSON-Body mit 413 ab", async ({ app }) => {
     const before = await getConfig(app);
     const padding = "x".repeat(600 * 1024);
-    const res = await app.request("/api/config", {
+    const res = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`, {
       method: "PUT",
       headers: { "content-type": "application/json", "If-Match": before.updatedAt, host: "localhost:7777" },
       body: JSON.stringify({ padding }),
@@ -260,18 +283,198 @@ describe("/api/config", () => {
     await writeFile(configPath, "{");
     await mkdir(`${configPath}.bak`);
     try {
-      const res = await app.request("/api/config");
+      const res = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`);
       expect(res.status).toBe(503);
     } finally {
       await rm(`${configPath}.bak`, { force: true, recursive: true });
       await rm(configPath, { force: true });
     }
   });
+
+  itWithApp("verlangt, validiert und verwendet die Profil-ID", async ({ app }) => {
+    const missing = await app.request("/api/config");
+    expect(missing.status).toBe(400);
+
+    const malformed = await app.request("/api/config?profile=ungueltig");
+    expect(malformed.status).toBe(400);
+
+    const unknown = await app.request("/api/config?profile=123e4567-e89b-42d3-a456-426614174000");
+    expect(unknown.status).toBe(404);
+  });
+
+  itWithApp("liefert die Config des ausgewählten Profils", async ({ app }) => {
+    const response = await app.request(`/api/config?profile=${secondProfileId}`);
+    expect(response.status).toBe(200);
+    const config = (await response.json()) as Config;
+    expect(config.location.label).toBe("Arbeit");
+  }, {
+    document: twoProfileDocument(
+      { location: { label: "Standard", lat: 1, lon: 2 } },
+      { location: { label: "Arbeit", lat: 3, lon: 4 } },
+    ),
+  });
+});
+
+describe("/api/profiles", () => {
+  itWithApp("liefert nur den Profilkatalog", async ({ app }) => {
+    const response = await app.request("/api/profiles");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      profilesUpdatedAt: defaultConfig.updatedAt,
+      profiles: [{ id: DEFAULT_PROFILE_ID, name: "Standard" }],
+    });
+  });
+
+  itWithApp("legt ein Profil an, benennt es um und löscht es", async ({ app }) => {
+    const initial = await app.request("/api/profiles");
+    const initialCatalog = await initial.json() as { profilesUpdatedAt: string };
+    const created = await app.request("/api/profiles", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "If-Match": initialCatalog.profilesUpdatedAt,
+        host: "localhost:7777",
+      },
+      body: JSON.stringify({ name: "Arbeit", sourceProfileId: DEFAULT_PROFILE_ID }),
+    }, connInfo("127.0.0.1"));
+    expect(created.status).toBe(200);
+    const createdBody = await created.json() as {
+      createdId?: string;
+      catalog: { profilesUpdatedAt: string; profiles: Array<{ id: string; name: string }> };
+    };
+    expect(createdBody.createdId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createdBody.catalog.profiles).toContainEqual({ id: createdBody.createdId, name: "Arbeit" });
+
+    const renamed = await app.request(`/api/profiles/${createdBody.createdId}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "If-Match": createdBody.catalog.profilesUpdatedAt,
+        host: "localhost:7777",
+      },
+      body: JSON.stringify({ name: "Privat" }),
+    }, connInfo("127.0.0.1"));
+    expect(renamed.status).toBe(200);
+    const renamedBody = await renamed.json() as { catalog: { profilesUpdatedAt: string; profiles: Array<{ id: string; name: string }> } };
+    expect(renamedBody.catalog.profiles).toContainEqual({ id: createdBody.createdId, name: "Privat" });
+
+    const deleted = await app.request(`/api/profiles/${createdBody.createdId}`, {
+      method: "DELETE",
+      headers: { "If-Match": renamedBody.catalog.profilesUpdatedAt, host: "localhost:7777" },
+    }, connInfo("127.0.0.1"));
+    expect(deleted.status).toBe(200);
+    const deletedBody = await deleted.json() as { catalog: { profilesUpdatedAt: string; profiles: Array<{ id: string; name: string }> } };
+    expect(deletedBody.catalog.profiles).toEqual([{ id: DEFAULT_PROFILE_ID, name: "Standard" }]);
+    expect(deletedBody.catalog.profilesUpdatedAt).not.toBe(renamedBody.catalog.profilesUpdatedAt);
+  });
+
+  itWithApp("meldet Katalogkonflikte, Duplikate und unbekannte Profile stabil", async ({ app }) => {
+    const initial = await app.request("/api/profiles");
+    const initialCatalog = await initial.json() as { profilesUpdatedAt: string };
+    const stale = await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json", "If-Match": "1999-01-01T00:00:00.000Z", host: "localhost:7777" },
+      body: JSON.stringify({ name: "Arbeit", sourceProfileId: DEFAULT_PROFILE_ID }),
+    }, connInfo("127.0.0.1"));
+    expect(stale.status).toBe(409);
+
+    const created = await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json", "If-Match": initialCatalog.profilesUpdatedAt, host: "localhost:7777" },
+      body: JSON.stringify({ name: "Arbeit", sourceProfileId: DEFAULT_PROFILE_ID }),
+    }, connInfo("127.0.0.1"));
+    expect(created.status).toBe(200);
+    const createdBody = await created.json() as { catalog: { profilesUpdatedAt: string }; createdId: string };
+
+    const duplicate = await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json", "If-Match": createdBody.catalog.profilesUpdatedAt, host: "localhost:7777" },
+      body: JSON.stringify({ name: "arbeit", sourceProfileId: DEFAULT_PROFILE_ID }),
+    }, connInfo("127.0.0.1"));
+    expect(duplicate.status).toBe(400);
+
+    const unknownSource = await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json", "If-Match": createdBody.catalog.profilesUpdatedAt, host: "localhost:7777" },
+      body: JSON.stringify({ name: "Privat", sourceProfileId: "223e4567-e89b-42d3-a456-426614174000" }),
+    }, connInfo("127.0.0.1"));
+    expect(unknownSource.status).toBe(404);
+
+    const unknownTarget = await app.request("/api/profiles/223e4567-e89b-42d3-a456-426614174000", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "If-Match": createdBody.catalog.profilesUpdatedAt, host: "localhost:7777" },
+      body: JSON.stringify({ name: "Privat" }),
+    }, connInfo("127.0.0.1"));
+    expect(unknownTarget.status).toBe(404);
+  });
+
+  itWithApp("verweigert das Löschen des letzten Profils", async ({ app }) => {
+    const initial = await app.request("/api/profiles");
+    const catalog = await initial.json() as { profilesUpdatedAt: string };
+    const response = await app.request(`/api/profiles/${DEFAULT_PROFILE_ID}`, {
+      method: "DELETE",
+      headers: { "If-Match": catalog.profilesUpdatedAt, host: "localhost:7777" },
+    }, connInfo("127.0.0.1"));
+    expect(response.status).toBe(409);
+  });
+
+  itWithApp("weist ungültige JSON- und zu große Katalog-Bodies ab", async ({ app }) => {
+    const malformed = await app.request("/api/profiles", {
+      method: "POST",
+      headers: { "content-type": "application/json", "If-Match": defaultConfig.updatedAt, host: "localhost:7777" },
+      body: "{",
+    }, connInfo("127.0.0.1"));
+    expect(malformed.status).toBe(400);
+
+    const tooLarge = await app.request(`/api/profiles/${DEFAULT_PROFILE_ID}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "If-Match": defaultConfig.updatedAt, host: "localhost:7777" },
+      body: JSON.stringify({ name: "x".repeat(600 * 1024) }),
+    }, connInfo("127.0.0.1"));
+    expect(tooLarge.status).toBe(413);
+  });
+
+  itWithApp("wendet Host-, Origin- und CIDR-Schutz auf POST, PATCH und DELETE an", async ({ app }) => {
+    const methods = ["POST", "PATCH", "DELETE"] as const;
+    for (const method of methods) {
+      const path = method === "POST" ? "/api/profiles" : `/api/profiles/${DEFAULT_PROFILE_ID}`;
+      const body = method === "DELETE" ? undefined : JSON.stringify(method === "POST"
+        ? { name: "Arbeit", sourceProfileId: DEFAULT_PROFILE_ID }
+        : { name: "Privat" });
+      const headers: Record<string, string> = {
+        ...(body ? { "content-type": "application/json" } : {}),
+        "If-Match": defaultConfig.updatedAt,
+        host: "evil.example",
+      };
+      const response = await app.request(path, { method, headers, ...(body ? { body } : {}) }, connInfo("127.0.0.1"));
+      expect(response.status).toBe(403);
+
+      headers.host = "localhost:7777";
+      headers.origin = "http://evil.example";
+      const foreignOrigin = await app.request(path, { method, headers, ...(body ? { body } : {}) }, connInfo("127.0.0.1"));
+      expect(foreignOrigin.status).toBe(403);
+
+      delete headers.origin;
+      const foreignAddress = await app.request(path, { method, headers, ...(body ? { body } : {}) }, connInfo("10.0.99.99"));
+      expect(foreignAddress.status).toBe(403);
+    }
+  });
 });
 
 describe("/api/homelab", () => {
+  itWithApp("verlangt und validiert die Profil-ID", async ({ app }) => {
+    const missing = await app.request("/api/homelab");
+    expect(missing.status).toBe(400);
+
+    const malformed = await app.request("/api/homelab?profile=ungueltig");
+    expect(malformed.status).toBe(400);
+
+    const unknown = await app.request("/api/homelab?profile=223e4567-e89b-42d3-a456-426614174000");
+    expect(unknown.status).toBe(404);
+  });
+
   itWithApp("weist deaktiviertes Monitoring ab, ohne den Fetcher aufzurufen", async ({ app }) => {
-    const response = await app.request("/api/homelab");
+    const response = await app.request(`/api/homelab?profile=${DEFAULT_PROFILE_ID}`);
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: "Homelab deaktiviert" });
     expect(homelabFetcher).not.toHaveBeenCalled();
@@ -282,9 +485,51 @@ describe("/api/homelab", () => {
     },
     homelabFetcher: homelabFetcher,
   });
+
+  itWithApp("isoliert die Homelab-Aktivierung nach Profil", async ({ app }) => {
+    homelabFetcher.mockClear();
+    const disabled = await app.request(`/api/homelab?profile=${DEFAULT_PROFILE_ID}`);
+    expect(disabled.status).toBe(404);
+    const enabled = await app.request(`/api/homelab?profile=${secondProfileId}`);
+    expect(enabled.status).toBe(200);
+    expect(homelabFetcher).toHaveBeenCalledTimes(1);
+  }, {
+    document: twoProfileDocument(
+      { homelab: { ...defaultConfig.homelab, enabled: false } },
+      { homelab: { ...defaultConfig.homelab, enabled: true } },
+    ),
+    homelabFetcher,
+  });
 });
 
 describe("/api/proxy", () => {
+  itWithApp("verlangt und validiert die Profil-ID", async ({ app }) => {
+    const missing = await app.request("/api/proxy?url=https%3A%2F%2Fexample.com%2F");
+    expect(missing.status).toBe(400);
+
+    const malformed = await app.request("/api/proxy?profile=ungueltig&url=https%3A%2F%2Fexample.com%2F");
+    expect(malformed.status).toBe(400);
+
+    const unknown = await app.request("/api/proxy?profile=223e4567-e89b-42d3-a456-426614174000&url=https%3A%2F%2Fexample.com%2F");
+    expect(unknown.status).toBe(404);
+  });
+
+  itWithApp("berechnet die Allowlist ausschließlich aus dem ausgewählten Profil", async ({ app }) => {
+    const privateUrl = "http://10.0.10.10:8006/";
+    const allowed = await app.request(`/api/proxy?profile=${DEFAULT_PROFILE_ID}&url=${encodeURIComponent(privateUrl)}`);
+    expect(allowed.status).toBe(403);
+    expect(await allowed.json()).toEqual({ error: "Private Adresse" });
+
+    const rejected = await app.request(`/api/proxy?profile=${secondProfileId}&url=${encodeURIComponent(privateUrl)}`);
+    expect(rejected.status).toBe(403);
+    expect(await rejected.json()).toEqual({ error: "Host nicht erlaubt" });
+  }, {
+    document: twoProfileDocument(
+      { proxyAllowlist: [...defaultConfig.proxyAllowlist, "10.0.10.10"] },
+      { proxyAllowlist: defaultConfig.proxyAllowlist },
+    ),
+  });
+
   it("liefert Upstream-Inhalt inert und mit Schutz-Headern aus", async () => {
     const response = inertProxyResponse({
       status: 200,
@@ -307,27 +552,27 @@ describe("/api/proxy", () => {
   });
 
   itWithApp("lehnt private Adressen mit 403 ab", async ({ app }) => {
-    const res = await app.request("/api/proxy?url=http://10.0.10.10:8006/");
+    const res = await app.request(`/api/proxy?profile=${DEFAULT_PROFILE_ID}&url=http://10.0.10.10:8006/`);
     expect(res.status).toBe(403);
   });
 
   itWithApp("lehnt die Metadaten-Adresse mit 403 ab", async ({ app }) => {
-    const res = await app.request("/api/proxy?url=http://169.254.169.254/");
+    const res = await app.request(`/api/proxy?profile=${DEFAULT_PROFILE_ID}&url=http://169.254.169.254/`);
     expect(res.status).toBe(403);
   });
 
   itWithApp("lehnt nicht erlaubte Hosts mit 403 ab", async ({ app }) => {
-    const res = await app.request("/api/proxy?url=https://example.com/");
+    const res = await app.request(`/api/proxy?profile=${DEFAULT_PROFILE_ID}&url=https://example.com/`);
     expect(res.status).toBe(403);
   });
 
   itWithApp("meldet fehlenden url-Parameter mit 400", async ({ app }) => {
-    const res = await app.request("/api/proxy");
+    const res = await app.request(`/api/proxy?profile=${DEFAULT_PROFILE_ID}`);
     expect(res.status).toBe(400);
   });
 
   itWithApp("meldet kaputte Prozentkodierung mit 400 statt 500", async ({ app }) => {
-    const res = await app.request("/api/proxy?url=%zz");
+    const res = await app.request(`/api/proxy?profile=${DEFAULT_PROFILE_ID}&url=%zz`);
     expect(res.status).toBe(400);
   });
 
@@ -335,7 +580,7 @@ describe("/api/proxy", () => {
   // Anfrage ginge hinaus, statt am nicht erlaubten Host aus url zu scheitern.
   itWithApp("nimmt den url-Parameter, nicht einen Parameter der auf url endet", async ({ app }) => {
     const res = await app.request(
-      "/api/proxy?callbackurl=https%3A%2F%2Fapi.open-meteo.com%2F&url=https%3A%2F%2Fexample.com%2F",
+      `/api/proxy?profile=${DEFAULT_PROFILE_ID}&callbackurl=https%3A%2F%2Fapi.open-meteo.com%2F&url=https%3A%2F%2Fexample.com%2F`,
     );
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "Host nicht erlaubt" });
