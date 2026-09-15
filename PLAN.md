@@ -1258,6 +1258,11 @@ To-Dos, Notizen, Drag-and-Drop-Layout, Multi-Profile, HTTPS, Zugriff von außerh
 Chrome-Extension, Firefox-Add-on, Microsoft Graph oder OAuth, Datenbank, Docker,
 Authentifizierung/Login, Pi-hole-Widget, Speedtest, SMART-Werte, Graphen pro Gast.
 
+> **Historischer Hinweis:** Der ursprüngliche Ausschluss von Multi-Profilen in diesem abgeschlossenen Plan wurde
+> durch die spätere ausdrückliche Produktentscheidung für gerätebezogene Dashboard-Profile aufgehoben. Maßgeblich
+> ist die [Spezifikation für Geräteprofile](docs/superpowers/specs/2026-09-15-device-local-profiles-design.md);
+> die zehn Schritte dieses Plans bleiben als historische Umsetzungsanleitung unverändert.
+
 ### Für später vorgemerkt (nicht jetzt bauen)
 
 - **Pi-hole-Widget** — Queries, Blockrate, 24-Stunden-Verlauf über die v6-API
