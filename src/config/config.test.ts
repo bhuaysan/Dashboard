@@ -171,9 +171,16 @@ describe("profileDocumentSchema", () => {
   it("weist Profilnamen ab, die sich unabhängig von Groß-/Kleinschreibung wiederholen", () => {
     const profiles = [
       { id: "default", name: "Privat", config: defaultConfig },
-      { id: "123e4567-e89b-42d3-a456-426614174000", name: "privat", config: defaultConfig },
+      { id: "123e4567-e89b-42d3-a456-426614174000", name: " privat ", config: defaultConfig },
     ];
     expect(profileDocumentSchema.safeParse({ ...validDocument, profiles }).success).toBe(false);
+  });
+
+  it("trimmt Profilnamen im geparsten Dokument", () => {
+    const profiles = [{ id: "default", name: " Standard ", config: defaultConfig }];
+    const parsed = profileDocumentSchema.safeParse({ ...validDocument, profiles });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.profiles[0]?.name).toBe("Standard");
   });
 
   it.each([

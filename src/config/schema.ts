@@ -223,7 +223,7 @@ export type ProfileId = z.infer<typeof profileIdSchema>;
 
 export const profileMetaSchema = z.object({
   id: profileIdSchema,
-  name: text(64),
+  name: text(64).transform((value) => value.trim()),
 });
 export type ProfileMeta = z.infer<typeof profileMetaSchema>;
 
