@@ -582,6 +582,45 @@ describe("App", () => {
     expect(localStorage.getItem("dashboard:active-profile")).toBe(PRIVATE_PROFILE_ID);
   });
 
+  it("bewahrt einen offenen Settings-Entwurf bei entfernter aktiver Auswahl bis zur Bestätigung", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    const privateConfig = profileConfig("light", "Privatort");
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") {
+        return new Response(JSON.stringify(parsed.searchParams.get("profile") === WORK_PROFILE_ID ? work : privateConfig), { status: 200 });
+      }
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
+
+    typeCommand(":settings");
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Entwurf Arbeit" } });
+    expect(screen.getByDisplayValue("Entwurf Arbeit")).toBeTruthy();
+
+    client.setQueryData(["profiles"], {
+      ...TWO_PROFILE_CATALOG,
+      profiles: [TWO_PROFILE_CATALOG.profiles[1]],
+    });
+    await waitFor(() => expect(localStorage.getItem("dashboard:active-profile")).toBe(PRIVATE_PROFILE_ID));
+    expect(screen.getByDisplayValue("Entwurf Arbeit")).toBeTruthy();
+    expect(screen.getAllByRole("alert").some((alert) => alert.textContent?.includes("Entwurf"))).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /Entwurf verwerfen und Profil laden/ }));
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Privatort")).toBeTruthy());
+    expect(screen.queryByDisplayValue("Entwurf Arbeit")).toBeNull();
+  });
+
   it("zeigt keine verspätete Antwort des alten Profils im neuen Profil", async () => {
     const work = { ...profileConfig("dark", "Arbeitsort"), feeds: [{ label: "Arbeit", url: "https://work.example/rss", limit: 5 }] };
     const privateConfig = { ...profileConfig("light", "Privatort"), feeds: [{ label: "Privat", url: "https://private.example/rss", limit: 5 }] };

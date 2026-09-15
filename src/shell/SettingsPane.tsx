@@ -179,7 +179,8 @@ function profileNameError(name: string, profiles: ProfileCatalog, excludedId?: P
 
 type DiscardAction =
   | { kind: "switch"; profileId: ProfileId }
-  | { kind: "delete"; profileId: ProfileId };
+  | { kind: "delete"; profileId: ProfileId }
+  | { kind: "external-switch"; profileId: ProfileId };
 
 export function SettingsPane({
   open,
@@ -213,6 +214,7 @@ export function SettingsPane({
   const [renameNames, setRenameNames] = useState<Record<string, string>>({});
   const [confirmDelProfile, setConfirmDelProfile] = useState<ProfileId | null>(null);
   const [discardAction, setDiscardAction] = useState<DiscardAction | undefined>(undefined);
+  const [orphanedDraft, setOrphanedDraft] = useState(false);
   // Index der Gruppe, deren ✕ schon einmal geklickt wurde. Nur eine gleichzeitig — ein
   // zweiter Klick woanders meint eine neue Absicht, keine Bestätigung der ersten.
   const [confirmDelGroup, setConfirmDelGroup] = useState<number | null>(null);
@@ -226,8 +228,19 @@ export function SettingsPane({
   const restoreRef = useRef<HTMLElement | null>(null);
   const wasOpen = useRef(false);
   const placeRequest = useRef(0);
+  const profileContextRef = useRef<{ profileId: ProfileId; activeProfileId: ProfileId | undefined }>({ profileId, activeProfileId });
+  const profileContextEpoch = useRef(0);
+  if (profileContextRef.current.profileId !== profileId || profileContextRef.current.activeProfileId !== activeProfileId) {
+    profileContextRef.current = { profileId, activeProfileId };
+    profileContextEpoch.current += 1;
+    placeRequest.current += 1;
+  }
   const configSnapshot = useRef(serializeConfig(config));
   const activeProfileSnapshot = useRef<ProfileId | undefined>(activeProfileId);
+  const profileIdSnapshot = useRef(profileId);
+  const expectedProfileChange = useRef<ProfileId | undefined>(undefined);
+  const saveRequest = useRef(0);
+  const reloadRequest = useRef(0);
 
   const selectedProfile = profiles?.profiles.find((profile) => profile.id === activeProfileId);
   const profileReady = profiles !== undefined && activeProfileId !== undefined && selectedProfile !== undefined;
@@ -241,6 +254,20 @@ export function SettingsPane({
   const draftDirty = serializeConfig(draftForComparison) !== configSnapshot.current;
   const draftDirtyRef = useRef(draftDirty);
   draftDirtyRef.current = draftDirty;
+  const profileActionsBlocked = save.isPending || reloading;
+
+  function adoptConfig(nextConfig: Config) {
+    setDraft(nextConfig);
+    configSnapshot.current = serializeConfig(nextConfig);
+    setPlaceQuery(nextConfig.location.label);
+    setBangs(Object.entries(nextConfig.search.bangs).map(([key, tpl]) => ({ key, tpl })));
+    setOrphanedDraft(false);
+  }
+
+  function switchToProfile(nextProfileId: ProfileId) {
+    expectedProfileChange.current = nextProfileId;
+    onSwitchProfile(nextProfileId);
+  }
 
   // Nur beim Öffnen selbst aus config neu befüllen — config pollt alle 15 s vom Server
   // nach, und ein Effekt auf [open, config] würde bei jeder echten Änderung während
@@ -250,6 +277,8 @@ export function SettingsPane({
       setDraft(config);
       configSnapshot.current = serializeConfig(config);
       activeProfileSnapshot.current = activeProfileId;
+      profileIdSnapshot.current = profileId;
+      expectedProfileChange.current = undefined;
       setPlaceQuery(config.location.label);
       setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
       setSec(initialSection ?? "links");
@@ -259,6 +288,7 @@ export function SettingsPane({
       setConfirmDelGroup(null);
       setConfirmDelProfile(null);
       setDiscardAction(undefined);
+      setOrphanedDraft(false);
       setConflict(false);
       setCatalogConflict(false);
     }
@@ -270,18 +300,28 @@ export function SettingsPane({
   // spätere Polls desselben Profils dürfen eine laufende Bearbeitung weiterhin nicht
   // überschreiben.
   useEffect(() => {
-    if (!open || !profileReady || activeProfileSnapshot.current === activeProfileId) return;
+    if (!open || !profileReady || (activeProfileSnapshot.current === activeProfileId && profileIdSnapshot.current === profileId)) return;
+    const expected = expectedProfileChange.current === activeProfileId;
     activeProfileSnapshot.current = activeProfileId;
-    setDraft(config);
-    configSnapshot.current = serializeConfig(config);
-    setPlaceQuery(config.location.label);
-    setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
+    profileIdSnapshot.current = profileId;
+    expectedProfileChange.current = undefined;
+    if (!expected && draftDirty && activeProfileId !== undefined) {
+      setOrphanedDraft(true);
+      setDiscardAction({ kind: "external-switch", profileId: activeProfileId });
+      setError("Das aktive Profil wurde außerhalb dieses Fensters geändert. Bitte den Entwurf bewusst verwerfen oder behalten.");
+      return;
+    }
+    adoptConfig(config);
     setConfirmDelGroup(null);
     setConfirmDelProfile(null);
     setDiscardAction(undefined);
     setError(undefined);
     setConflict(false);
-  }, [activeProfileId, config, open, profileReady]);
+  }, [activeProfileId, config, draftDirty, open, profileId, profileReady]);
+
+  useEffect(() => {
+    if (open) setSearching(false);
+  }, [activeProfileId, open, profileId]);
 
   // Fokus in den Dialog und beim Schließen zurück auf die Stelle, von der er kam.
   useEffect(() => {
@@ -289,7 +329,7 @@ export function SettingsPane({
     restoreRef.current = document.activeElement as HTMLElement | null;
     boxRef.current?.focus();
     return () => restoreRef.current?.focus({ preventScroll: true });
-  }, [open]);
+  }, [open, profileReady]);
 
   // Tab darf den Dialog nicht verlassen: dahinter liegt die ganze Seite, und wer
   // hinausfällt, tippt unsichtbar weiter, während der Dialog noch offen ist.
@@ -303,10 +343,13 @@ export function SettingsPane({
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     if (!first || !last) return;
-    if (!box.contains(document.activeElement) || (e.shiftKey && (document.activeElement === first || document.activeElement === box))) {
-      last.focus();
+    const active = document.activeElement;
+    if (!box.contains(active) ||
+      (e.shiftKey && (active === first || active === box)) ||
+      (!e.shiftKey && active === box)) {
+      (e.shiftKey ? last : first).focus();
       e.preventDefault();
-    } else if (!e.shiftKey && document.activeElement === last) {
+    } else if (!e.shiftKey && active === last) {
       first.focus();
       e.preventDefault();
     }
@@ -317,12 +360,19 @@ export function SettingsPane({
   async function searchPlace() {
     const request = placeRequest.current + 1;
     placeRequest.current = request;
+    const originEpoch = profileContextEpoch.current;
+    const originProfileId = profileId;
+    const originActiveProfileId = activeProfileId;
+    const isCurrentRequest = () => request === placeRequest.current &&
+      originEpoch === profileContextEpoch.current &&
+      profileContextRef.current.profileId === originProfileId &&
+      profileContextRef.current.activeProfileId === originActiveProfileId;
     setSearching(true);
     setError(undefined);
     try {
       const target = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(placeQuery)}&count=1&language=de`;
       const res = await fetch(profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: target })));
-      if (request !== placeRequest.current) {
+      if (!isCurrentRequest()) {
         try { await res.body?.cancel(); } catch { /* veraltete Antwort wird verworfen */ }
         return;
       }
@@ -331,7 +381,7 @@ export function SettingsPane({
         return;
       }
       const raw: unknown = await res.json();
-      if (request !== placeRequest.current) return;
+      if (!isCurrentRequest()) return;
       if (!isRecord(raw) || !Array.isArray(raw.results)) {
         setError("Ortssuche fehlgeschlagen.");
         return;
@@ -345,9 +395,9 @@ export function SettingsPane({
         upd((d) => ({ ...d, location: { label: hit.name, lat: hit.latitude, lon: hit.longitude } }));
       }
     } catch {
-      if (request === placeRequest.current) setError("Ortssuche fehlgeschlagen.");
+      if (isCurrentRequest()) setError("Ortssuche fehlgeschlagen.");
     } finally {
-      if (request === placeRequest.current) setSearching(false);
+      if (isCurrentRequest()) setSearching(false);
     }
   }
 
@@ -362,16 +412,16 @@ export function SettingsPane({
   }
 
   function handleSwitchProfile(nextProfileId: ProfileId) {
-    if (!profileReady || catalogConflict || nextProfileId === activeProfileId) return;
+    if (!profileReady || catalogConflict || profileActionsBlocked || nextProfileId === activeProfileId) return;
     if (draftDirty) {
       setDiscardAction({ kind: "switch", profileId: nextProfileId });
       return;
     }
-    onSwitchProfile(nextProfileId);
+    switchToProfile(nextProfileId);
   }
 
   function submitCreateProfile() {
-    if (!profileReady || profiles === undefined || activeProfileId === undefined || catalogConflict) return;
+    if (!profileReady || profiles === undefined || activeProfileId === undefined || catalogConflict || profileActionsBlocked) return;
     const name = createName.trim();
     const nameError = profileNameError(name, profiles);
     if (nameError !== undefined) {
@@ -394,7 +444,7 @@ export function SettingsPane({
           if (draftDirtyRef.current) {
             setDiscardAction({ kind: "switch", profileId: createdId });
           } else {
-            onSwitchProfile(createdId);
+            switchToProfile(createdId);
           }
         },
         onError: handleProfileError,
@@ -403,7 +453,7 @@ export function SettingsPane({
   }
 
   function submitRenameProfile(profileIdToRename: ProfileId) {
-    if (!profileReady || profiles === undefined || catalogConflict) return;
+    if (!profileReady || profiles === undefined || catalogConflict || profileActionsBlocked) return;
     const current = profiles.profiles.find((profile) => profile.id === profileIdToRename);
     if (current === undefined) return;
     const name = (renameNames[profileIdToRename] ?? current.name).trim();
@@ -432,7 +482,7 @@ export function SettingsPane({
   }
 
   function performDeleteProfile(profileIdToDelete: ProfileId) {
-    if (!profileReady || profiles === undefined || catalogConflict || profiles.profiles.length <= 1) return;
+    if (!profileReady || profiles === undefined || catalogConflict || profileActionsBlocked || profiles.profiles.length <= 1) return;
     setError(undefined);
     setProfileBusy(true);
     onDeleteProfile(
@@ -443,7 +493,7 @@ export function SettingsPane({
           setConfirmDelProfile(null);
           if (profileIdToDelete === activeProfileId) {
             const firstRemaining = data.catalog.profiles[0];
-            if (firstRemaining !== undefined) onSwitchProfile(firstRemaining.id);
+            if (firstRemaining !== undefined) switchToProfile(firstRemaining.id);
           }
         },
         onError: handleProfileError,
@@ -452,6 +502,7 @@ export function SettingsPane({
   }
 
   function requestDeleteProfile(profileIdToDelete: ProfileId) {
+    if (profileActionsBlocked) return;
     if (profileIdToDelete === activeProfileId && draftDirty) {
       setDiscardAction({ kind: "delete", profileId: profileIdToDelete });
       return;
@@ -461,13 +512,18 @@ export function SettingsPane({
 
   function confirmDiscard() {
     const action = discardAction;
-    setDiscardAction(undefined);
     if (action === undefined) return;
+    if (profileActionsBlocked) return;
+    setDiscardAction(undefined);
     if (action.kind === "switch") {
-      onSwitchProfile(action.profileId);
-    } else {
+      switchToProfile(action.profileId);
+    } else if (action.kind === "delete") {
       setConfirmDelProfile(null);
       performDeleteProfile(action.profileId);
+    } else {
+      adoptConfig(config);
+      setError(undefined);
+      setConflict(false);
     }
   }
 
@@ -475,6 +531,9 @@ export function SettingsPane({
     const action = discardAction;
     setDiscardAction(undefined);
     if (action?.kind === "delete") setConfirmDelProfile(null);
+    if (action?.kind === "external-switch") {
+      setError("Der alte Entwurf bleibt erhalten, kann aber erst nach dem Verwerfen gespeichert werden.");
+    }
   }
 
   const guestChoices = [...guests];
@@ -486,7 +545,7 @@ export function SettingsPane({
   guestChoices.sort((a, b) => a.vmid - b.vmid);
 
   function handleSave() {
-    if (conflict) return;
+    if (conflict || orphanedDraft || save.isPending || reloading) return;
     const hints = draft.linkGroups.flatMap((g) => g.links.map((l) => l.hint)).filter((h): h is string => !!h);
     if (new Set(hints).size !== hints.length) {
       setError("Doppelte Link-Kürzel — jedes Kürzel darf nur einmal vorkommen.");
@@ -555,12 +614,23 @@ export function SettingsPane({
       return;
     }
     setError(undefined);
+    const request = saveRequest.current + 1;
+    saveRequest.current = request;
+    const originEpoch = profileContextEpoch.current;
+    const originProfileId = profileId;
+    const originActiveProfileId = activeProfileId;
+    const isCurrentSave = () => request === saveRequest.current &&
+      originEpoch === profileContextEpoch.current &&
+      profileContextRef.current.profileId === originProfileId &&
+      profileContextRef.current.activeProfileId === originActiveProfileId;
     save.mutate(parsed.data, {
       onSuccess: () => {
+        if (!isCurrentSave()) return;
         onSaved();
         onClose();
       },
       onError: (err) => {
+        if (!isCurrentSave()) return;
         if (err instanceof ConfigConflictError) {
           setConflict(true);
           setError("Ein anderes Gerät hat die Einstellungen geändert. Bitte Serverstand neu laden.");
@@ -576,23 +646,30 @@ export function SettingsPane({
       setError("Serverstand kann hier nicht neu geladen werden.");
       return;
     }
+    const request = reloadRequest.current + 1;
+    reloadRequest.current = request;
+    const originEpoch = profileContextEpoch.current;
+    const originProfileId = profileId;
+    const originActiveProfileId = activeProfileId;
+    const isCurrentReload = () => request === reloadRequest.current &&
+      originEpoch === profileContextEpoch.current &&
+      profileContextRef.current.profileId === originProfileId &&
+      profileContextRef.current.activeProfileId === originActiveProfileId;
     setReloading(true);
     try {
       const current = await onReload();
+      if (!isCurrentReload()) return;
       if (!current) {
         setError("Serverstand konnte nicht geladen werden.");
         return;
       }
-      setDraft(current);
-      configSnapshot.current = serializeConfig(current);
-      setPlaceQuery(current.location.label);
-      setBangs(Object.entries(current.search.bangs).map(([key, tpl]) => ({ key, tpl })));
+      adoptConfig(current);
       setConflict(false);
       setError(undefined);
     } catch {
-      setError("Serverstand konnte nicht geladen werden.");
+      if (isCurrentReload()) setError("Serverstand konnte nicht geladen werden.");
     } finally {
-      setReloading(false);
+      if (request === reloadRequest.current) setReloading(false);
     }
   }
 
@@ -622,7 +699,8 @@ export function SettingsPane({
   if (!profileReady) {
     return (
       <div className="overlay">
-        <div className="overlay-box set-box" role="dialog" aria-modal="true" aria-labelledby="set-title">
+        <div className="overlay-box set-box" ref={boxRef} tabIndex={-1} role="dialog" aria-modal="true"
+          aria-labelledby="set-title" onKeyDown={trapTab}>
           <div className="set-head">
             <h2 id="set-title">Einstellungen</h2>
           </div>
@@ -718,7 +796,7 @@ export function SettingsPane({
                           <button
                             type="button"
                             className="rowact"
-                            disabled={active || profileBusy || catalogConflict}
+                            disabled={active || profileBusy || catalogConflict || profileActionsBlocked}
                             onClick={() => handleSwitchProfile(profile.id)}
                             aria-label={active ? `Profil „${profile.name}" aktiv` : `Profil „${profile.name}" wechseln`}
                           >
@@ -727,7 +805,7 @@ export function SettingsPane({
                           <button
                             type="button"
                             className="rowact"
-                            disabled={profileBusy || catalogConflict}
+                            disabled={profileBusy || catalogConflict || profileActionsBlocked}
                             onClick={() => submitRenameProfile(profile.id)}
                             aria-label={`Profil „${profile.name}" umbenennen`}
                           >
@@ -736,8 +814,10 @@ export function SettingsPane({
                           <button
                             type="button"
                             className={`rowact rowact--del${armed ? " is-confirm" : ""}`}
-                            disabled={!canDelete || profileBusy || catalogConflict}
-                            onClick={armed ? () => requestDeleteProfile(profile.id) : () => setConfirmDelProfile(profile.id)}
+                            disabled={!canDelete || profileBusy || catalogConflict || profileActionsBlocked}
+                            onClick={armed ? () => requestDeleteProfile(profile.id) : () => {
+                              if (!profileActionsBlocked) setConfirmDelProfile(profile.id);
+                            }}
                             onBlur={() => setConfirmDelProfile((current) => current === profile.id ? null : current)}
                             onKeyDown={(e) => {
                               if (e.key === "Escape" && armed) {
@@ -769,7 +849,7 @@ export function SettingsPane({
                       maxLength={64}
                       onChange={(e) => setCreateName(e.target.value)}
                     />
-                    <button type="button" className="btn" disabled={profileBusy || catalogConflict} onClick={submitCreateProfile}>
+                    <button type="button" className="btn" disabled={profileBusy || catalogConflict || profileActionsBlocked} onClick={submitCreateProfile}>
                       Profil duplizieren
                     </button>
                   </span>
@@ -1203,7 +1283,7 @@ export function SettingsPane({
         </div>
 
         <div className="set-foot">
-          <button type="button" className="btn btn--primary" onClick={handleSave} disabled={save.isPending || conflict}>
+          <button type="button" className="btn btn--primary" onClick={handleSave} disabled={save.isPending || reloading || conflict || orphanedDraft}>
             {save.isPending ? "speichert…" : "Speichern"}
           </button>
           {conflict && (
@@ -1220,11 +1300,15 @@ export function SettingsPane({
         {discardAction && (
           <div className="profile-discard" aria-live="assertive">
             <p role="alert">
-              Ungespeicherter Entwurf würde beim {discardAction.kind === "switch" ? "Profilwechsel" : "Löschen des Profils"} verworfen.
+              {discardAction.kind === "external-switch"
+                ? "Das aktive Profil wurde außerhalb dieses Fensters geändert. Der Entwurf bleibt erhalten, bis du ihn ausdrücklich verwirfst."
+                : `Ungespeicherter Entwurf würde beim ${discardAction.kind === "switch" ? "Profilwechsel" : "Löschen des Profils"} verworfen.`}
             </p>
             <div className="profile-discard-actions">
-              <button type="button" className="btn btn--primary" onClick={confirmDiscard}>
-                Entwurf verwerfen und Profil {discardAction.kind === "switch" ? "wechseln" : "löschen"}
+              <button type="button" className="btn btn--primary" onClick={confirmDiscard} disabled={profileActionsBlocked}>
+                {discardAction.kind === "external-switch"
+                  ? "Entwurf verwerfen und Profil laden"
+                  : `Entwurf verwerfen und Profil ${discardAction.kind === "switch" ? "wechseln" : "löschen"}`}
               </button>
               <button type="button" className="btn" onClick={cancelDiscard}>Entwurf behalten</button>
             </div>

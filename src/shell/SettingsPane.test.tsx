@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   SettingsPane as SettingsPaneComponent,
   type ProfileMutationOptions,
@@ -406,6 +406,138 @@ describe("SettingsPane", () => {
     await Promise.resolve();
     expect(screen.queryByText(/Alter Ort/)).toBeNull();
     expect(screen.getByText(/Neuer Ort/)).toBeTruthy();
+  });
+
+  it("verwirft ein Ortssuchergebnis des vorherigen Profils", async () => {
+    const pending: ((response: Response) => void)[] = [];
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve))));
+    const { rerender } = renderProfiles({ profileId: PROFILE_ID, activeProfileId: PROFILE_ID, initialSection: "place" });
+    const city = document.getElementById("s-city") as HTMLInputElement;
+    fireEvent.change(city, { target: { value: "Ort A" } });
+    fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+    expect(pending).toHaveLength(1);
+
+    const profileBConfig: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Ort B" },
+    };
+    rerender(<SettingsPane open config={profileBConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} initialSection="place" />);
+    await waitFor(() => expect(screen.getByText(/Ort B ·/)).toBeTruthy());
+
+    const cancel = vi.fn(async () => undefined);
+    const response = new Response(JSON.stringify({
+      results: [{ name: "Ort A", latitude: 48, longitude: 8 }],
+    }), { status: 200 });
+    Object.defineProperty(response, "body", {
+      configurable: true,
+      value: { cancel },
+    });
+    await act(async () => {
+      pending[0]?.(response);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(screen.getByText(/Ort B ·/)).toBeTruthy();
+    expect(screen.queryByText(/Ort A ·/)).toBeNull();
+  });
+
+  it("hält Profilaktionen während eines ausstehenden Config-Speicherns gesperrt", () => {
+    const onSwitchProfile = vi.fn();
+    const onRenameProfile = vi.fn();
+    const onDeleteProfile = vi.fn();
+    const save: SaveConfig = { mutate: vi.fn(), isPending: true };
+    renderProfiles({ save, onSwitchProfile, onRenameProfile, onDeleteProfile, initialSection: "profile" });
+
+    expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: 'Profil „Arbeit" umbenennen' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: 'Profil „Privat" löschen' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Profil duplizieren" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+    expect(onSwitchProfile).not.toHaveBeenCalled();
+  });
+
+  it("ignoriert einen verspäteten Save-Erfolg nach einem Profilwechsel", () => {
+    let finishSave: { onSuccess?: () => void; onError?: (error: unknown) => void } | undefined;
+    const save = fakeSave((_config, options) => { finishSave = options; });
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    const onSwitchProfile = vi.fn();
+    const { rerender } = renderProfiles({ save, onClose, onSaved, onSwitchProfile, initialSection: "profile" });
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Entwurf A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    expect(finishSave).toBeDefined();
+
+    const profileBConfig: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Ort B" },
+    };
+    rerender(<SettingsPane open config={profileBConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={onClose}
+      save={{ ...save, isPending: true }} onSaved={onSaved} />);
+    finishSave?.onSuccess?.();
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    expect(screen.getByText(/Ort B ·/)).toBeTruthy();
+  });
+
+  it("sperrt Profilwechsel beim Config-Reload und verwirft keine alte Antwort im neuen Profil", async () => {
+    let resolveReload: (config: Config) => void = () => undefined;
+    const reloadPending = new Promise<Config>((resolve) => { resolveReload = resolve; });
+    const onReload = vi.fn(() => reloadPending);
+    const onSwitchProfile = vi.fn();
+    const { rerender } = renderProfiles({
+      save: saveConflicts("other-revision"),
+      onReload,
+      onSwitchProfile,
+      initialSection: "profile",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand neu laden" }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+    expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+
+    const profileBConfig: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Ort B" },
+    };
+    rerender(<SettingsPane open config={profileBConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onReload={onReload} onSwitchProfile={onSwitchProfile}
+      onSaved={() => undefined} initialSection="profile" />);
+    expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveReload({ ...defaultConfig, location: { ...defaultConfig.location, label: "Alter Serverstand" } });
+    await Promise.resolve();
+    expect(screen.getByRole("tab", { name: "PROFILE", selected: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    await waitFor(() => expect(screen.getByText(/Ort B ·/)).toBeTruthy());
+    expect(screen.queryByDisplayValue("Alter Serverstand")).toBeNull();
+  });
+
+  it("fokussiert und begrenzt auch den Readiness-Dialog vor dem Katalog", async () => {
+    const { rerender } = render(<SettingsPaneComponent open config={defaultConfig} profileId={PROFILE_ID}
+      profiles={undefined} activeProfileId={undefined} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    const loadingDialog = screen.getByRole("dialog");
+    await waitFor(() => expect(document.activeElement).toBe(loadingDialog));
+    fireEvent.keyDown(loadingDialog, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Abbrechen" }));
+
+    rerender(<SettingsPaneComponent open config={defaultConfig} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("dialog")));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("übersetzt einen strukturellen Konfigurationsfehler und springt zum richtigen Abschnitt", () => {
