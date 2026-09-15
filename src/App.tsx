@@ -47,7 +47,9 @@ function profileInCatalog(catalog: ProfileCatalog | undefined, profileId: Profil
 }
 
 function resolveProfileId(catalog: ProfileCatalog | undefined, stored: ProfileId | undefined): ProfileId | undefined {
-  if (catalog === undefined) return undefined;
+  // Keep a syntactically valid local selection pending while the first catalog is fetched;
+  // the caller still gates all profile-dependent requests until the catalog validates it.
+  if (catalog === undefined) return stored;
   if (stored !== undefined && profileInCatalog(catalog, stored)) return stored;
   const first = catalog.profiles[0];
   return first?.id;
@@ -91,7 +93,7 @@ export default function App() {
   // only a hook key placeholder; all profile-dependent queries stay disabled until a local
   // catalog or the server catalog provides a validated first/selected ID.
   const profileId = resolvedProfileId ?? DEFAULT_PROFILE_ID;
-  const profileReady = resolvedProfileId !== undefined;
+  const profileReady = catalog !== undefined && resolvedProfileId !== undefined;
   const configQuery = useConfig(profileId, { enabled: profileReady });
   const saveConfig = useSaveConfig(profileId);
   const config = configQuery.data;

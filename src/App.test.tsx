@@ -453,6 +453,36 @@ describe("App", () => {
     expect(await screen.findByText(/Arbeitsort/)).toBeTruthy();
   });
 
+  it("bewahrt eine gespeicherte Profil-ID ohne Katalog bis zur Serverauflösung", async () => {
+    const privateConfig = profileConfig("light", "Privatort");
+    writeActiveProfileId(PRIVATE_PROFILE_ID);
+    let resolveProfiles: (value: Response) => void = () => undefined;
+    const profilesPending = new Promise<Response>((resolve) => { resolveProfiles = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return profilesPending;
+      if (parsed.pathname === "/api/config") {
+        return new Response(JSON.stringify(parsed.searchParams.get("profile") === PRIVATE_PROFILE_ID ? privateConfig : profileConfig("dark", "Arbeitsort")), { status: 200 });
+      }
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/profiles")).toBe(true));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/config?"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const path = new URL(String(input), "http://dashboard.test").pathname;
+      return path === "/api/proxy" || path === "/api/homelab";
+    })).toBe(false);
+
+    resolveProfiles(new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 }));
+    await waitFor(() => expect(localStorage.getItem("dashboard:active-profile")).toBe(PRIVATE_PROFILE_ID));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/config?profile=${PRIVATE_PROFILE_ID}`)).toBe(true));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/config?profile=${WORK_PROFILE_ID}`)).toBe(false);
+    expect(await screen.findByText(/Privatort/)).toBeTruthy();
+  });
+
   it("isoliert zwei simulierte Geräte durch die lokale aktive ID", async () => {
     const work = profileConfig("dark", "Arbeitsort");
     const privateConfig = profileConfig("light", "Privatort");
