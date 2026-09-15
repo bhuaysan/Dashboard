@@ -60,7 +60,8 @@ sowie `/api/health`. Kein Bundling auf dem Server — `tsx` führt `server/` dir
 Server zieht also Produktionscode nach — nichts Browserspezifisches dort hineinziehen.
 
 **Config und Profile.** `config.json` liegt nur auf dem Server-State (`/var/lib/dashboard`) und ist die Quelle der Wahrheit;
-ein einziges Zod-Schema (`src/config/schema.ts`) validiert das Version-2-Dokument auf beiden Seiten:
+`profileDocumentSchema` validiert das Version-2-Dokument auf dem Server, während der Browser Katalog und aktive Config
+getrennt mit `profileCatalogSchema` beziehungsweise `configSchema` validiert:
 `{ version: 2, profilesUpdatedAt, profiles: [{ id, name, config }] }`. Die IDs sind serverseitige UUIDs (für die
 Migration ist `default` reserviert), Namen werden getrimmt und ohne Beachtung der Groß-/Kleinschreibung eindeutig
 gehalten; es gibt mindestens ein und höchstens 16 Profile. `GET /api/profiles` liefert nur den Katalog aus IDs und
@@ -70,11 +71,13 @@ die Schreibschutzprüfungen aus `DASHBOARD_WRITE_ALLOW` und `DASHBOARD_WRITE_HOS
 Eine gültige alte Einzel-Config wird beim Lesen verlustfrei im Speicher zum Profil `default` / `Standard` migriert;
 das reine Lesen schreibt nicht um. Der erste erfolgreiche Profil- oder Config-Schreibvorgang persistiert Version 2.
 Unbekannte Panes werden je Profil entfernt, fehlende Panes je Profil aus den Defaults ergänzt. Eine syntaktisch oder
-semantisch unlesbare Datei wird als `config.json.bak` gesichert und durch ein einzelnes Standardprofil ersetzt.
-Jede Mutation läuft durch die Schreibqueue, rotiert das vollständige Profildokument in `config.json.1` bis
-`config.json.7` und schreibt atomar über `rename`. Die Profil-Revision `profilesUpdatedAt` und die Config-Revision
-`config.updatedAt` sind getrennte optimistische Sperren; ein Konflikt liefert 409, eine Größen- oder
-Validierungsverletzung ändert Datei und Backups nicht.
+semantisch unlesbare Datei wird nach `config.json.bak` kopiert; zunächst gelten die Defaults nur im Speicher. Erst
+eine spätere erfolgreiche Mutation persistiert das Ersatzdokument als Version 2. Jede Mutation läuft durch die
+Schreibqueue, rotiert das vollständige Profildokument in `config.json.1` bis `config.json.7` und schreibt atomar über
+`rename`. Die Profil-Revision `profilesUpdatedAt` und die Config-Revision `config.updatedAt` sind getrennte
+optimistische Sperren; ein Konflikt liefert 409, eine ungültige Mutation 400. Überschreitet der Request-Body oder das
+resultierende Dokument 512 KiB, liefert die Mutation 413 ohne Änderung an Datei oder Backups; eine bereits beim Lesen
+zu große aktive Datei führt dagegen zu 503.
 
 Die profilabhängigen Endpunkte sind `GET /api/config?profile=<id>`, `PUT /api/config?profile=<id>`,
 `GET /api/proxy?profile=<id>&url=<url>` und `GET /api/homelab?profile=<id>`. Die Profil-ID ist verpflichtend;

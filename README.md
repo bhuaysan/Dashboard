@@ -52,10 +52,10 @@ mindestens ein und höchstens 16 Profile. `profilesUpdatedAt` schützt Katalogmu
 Eine gültige alte Einzel-Config wird beim Lesen automatisch und verlustfrei im Speicher zu `{ id: "default", name:
 "Standard" }` migriert. Das reine Lesen schreibt die Datei nicht um; der erste erfolgreiche Profil- oder
 Config-Schreibvorgang persistiert Version 2. Unbekannte Panes werden pro Profil entfernt, fehlende Panes pro Profil
-aus den Defaults ergänzt. Eine syntaktisch oder semantisch unlesbare Datei wird als `config.json.bak` gesichert und
-durch ein einzelnes Standardprofil ersetzt. Eine zu große oder ungültige Mutation wird vor der Backup-Rotation
-abgelehnt. Jede erfolgreiche Mutation sichert das vollständige Profildokument in der Rotation `config.json.1` bis
-`config.json.7` und schreibt anschließend atomar.
+aus den Defaults ergänzt. Eine syntaktisch oder semantisch unlesbare Datei wird nach `config.json.bak` kopiert; zunächst
+gelten die Defaults nur im Speicher. Erst eine spätere erfolgreiche Mutation persistiert das Ersatzdokument als
+Version 2. Eine ungültige Mutation wird vor der Backup-Rotation abgelehnt. Jede erfolgreiche Mutation sichert das
+vollständige Profildokument in der Rotation `config.json.1` bis `config.json.7` und schreibt anschließend atomar.
 
 Der Profilkatalog und die profilabhängigen Daten sind getrennt:
 
@@ -72,8 +72,9 @@ GET    /api/homelab?profile=<id>
 
 Bei allen profilabhängigen Endpunkten ist `profile` verpflichtend. Fehlende oder syntaktisch ungültige IDs liefern
 400, unbekannte Profile 404. Katalogmutationen verlangen `If-Match: <profilesUpdatedAt>`; `PUT /api/config` verlangt
-`If-Match: <config.updatedAt>`. Konflikte liefern 409, das letzte Profil kann nicht gelöscht werden, und ein zu
-großes Gesamtdokument liefert 413. Katalog- und Config-Schreibzugriffe bleiben durch Host-, Origin- und
+`If-Match: <config.updatedAt>`. Konflikte liefern 409, das letzte Profil kann nicht gelöscht werden. Ein zu großer
+Request-Body oder ein zu großes resultierendes Dokument liefert 413 vor der Backup-Rotation; eine bereits zu große
+aktive Datei lässt Reads mit 503 scheitern. Katalog- und Config-Schreibzugriffe bleiben durch Host-, Origin- und
 `DASHBOARD_WRITE_ALLOW`-Prüfungen geschützt. `GET /api/health` validiert das vollständige Dokument, gibt aber nur
 einen Status zurück.
 
@@ -111,8 +112,9 @@ Profildokument.
 
 ## config.json (weitere Betriebsdetails)
 
-Der Aufbau wird durch `src/config/schema.ts` (Zod) auf Server und Browser validiert. Der Proxy verwendet nur die
-Allowlist des angeforderten Profils plus die Hosts von dessen Feeds und Kalendern; private Ziele bleiben unabhängig
+Auf dem Server validiert `profileDocumentSchema` das vollständige Version-2-Dokument; der Browser validiert den
+Profilkatalog und die aktive Config getrennt mit `profileCatalogSchema` beziehungsweise `configSchema`. Der Proxy
+verwendet nur die Allowlist des angeforderten Profils plus die Hosts von dessen Feeds und Kalendern; private Ziele bleiben unabhängig
 von der Allowlist gesperrt. Proxmox-Daten laufen ausschließlich über den aggregierten
 `/api/homelab?profile=<id>`-Endpunkt. Bei deaktiviertem `homelab.enabled` des aktiven Profils gibt es dafür keine
 PVE-Anfrage und keine Status- oder Alarmanzeige. Fehlt `PVE_TOKEN_SECRET`, bleibt der Zustand unabhängig davon
