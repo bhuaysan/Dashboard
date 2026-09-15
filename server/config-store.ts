@@ -1,10 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { copyFile, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import type { ZodIssue } from "zod";
-import { configSchema, PANE_IDS, type Config } from "../src/config/schema.ts";
-import { defaultConfig } from "../src/config/defaults.ts";
+import {
+  configSchema,
+  DEFAULT_PROFILE_ID,
+  PANE_IDS,
+  profileDocumentSchema,
+  profileIdSchema,
+  profileMetaSchema,
+  type Config,
+  type ProfileDocument,
+  type ProfileId,
+  type ProfileMeta,
+} from "../src/config/schema.ts";
+import { defaultConfig, defaultProfileDocument } from "../src/config/defaults.ts";
 
 const KEEP_BACKUPS = 7;
+const MAX_PROFILES = 16;
 export const MAX_CONFIG_BYTES = 512 * 1024;
 
 // Panes, die das Schema nicht mehr kennt (z. B. "music" nach dessen Entfernung), lässt das
@@ -18,7 +30,11 @@ function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function dropUnknownPanes(raw: unknown): unknown {
+function clone<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function dropUnknownPanesFromConfig(raw: unknown): unknown {
   if (!isRecord(raw) || !Array.isArray(raw.layout)) return raw;
   return {
     ...raw,
@@ -26,6 +42,54 @@ function dropUnknownPanes(raw: unknown): unknown {
       isRecord(entry) && typeof entry.id === "string" && KNOWN_PANE_IDS.has(entry.id),
     ),
   };
+}
+
+function dropUnknownPanes(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  if (!Array.isArray(raw.profiles)) return dropUnknownPanesFromConfig(raw);
+  return {
+    ...raw,
+    profiles: raw.profiles.map((profile) => {
+      if (!isRecord(profile)) return profile;
+      return { ...profile, config: dropUnknownPanesFromConfig(profile.config) };
+    }),
+  };
+}
+
+function addMissingPanes(config: Config): Config {
+  const normalized = clone(config);
+  const layout = normalized.layout.map((entry) => clone(entry));
+  for (const defaultEntry of defaultConfig.layout) {
+    if (!layout.some((entry) => entry.id === defaultEntry.id)) {
+      layout.push(clone(defaultEntry));
+    }
+  }
+  normalized.layout = layout;
+  return normalized;
+}
+
+function normalizeDocument(document: ProfileDocument): ProfileDocument {
+  const normalized = clone(document);
+  normalized.profiles = normalized.profiles.map((profile) => ({
+    ...profile,
+    config: addMissingPanes(profile.config),
+  }));
+  return normalized;
+}
+
+function freshDefaultDocument(): ProfileDocument {
+  return normalizeDocument(clone(defaultProfileDocument));
+}
+
+function catalogFromDocument(document: ProfileDocument): ProfileCatalog {
+  return {
+    profilesUpdatedAt: document.profilesUpdatedAt,
+    profiles: document.profiles.map(({ id, name }) => ({ id, name })),
+  };
+}
+
+function customIssue(message: string, path: Array<string | number> = []): ZodIssue {
+  return { code: "custom", path, message };
 }
 
 export class ConfigStoreError extends Error {
@@ -69,15 +133,62 @@ export async function writeAtomic(path: string, data: string): Promise<void> {
   }
 }
 
+export type ProfileCatalog = {
+  profilesUpdatedAt: string;
+  profiles: ProfileMeta[];
+};
+
+export type ConfigReadResult =
+  | { kind: "ok"; config: Config }
+  | { kind: "not-found" };
+
+export type CatalogMutationResult =
+  | { kind: "ok"; catalog: ProfileCatalog; createdId?: ProfileId }
+  | { kind: "conflict"; current: string }
+  | { kind: "not-found" }
+  | { kind: "invalid"; issues: ZodIssue[] }
+  | { kind: "last-profile" };
+
 export type ConfigUpdateResult =
   | { kind: "ok"; config: Config }
   | { kind: "conflict"; current: string }
   | { kind: "invalid"; issues: ZodIssue[] };
 
+export type ProfileConfigUpdateResult = ConfigUpdateResult | { kind: "not-found" };
+
+export type CreateProfileFunction = {
+  (ifMatch: string | undefined, name: unknown, sourceProfileId: unknown): Promise<CatalogMutationResult>;
+  (ifMatch: string | undefined, input: { name: unknown; sourceProfileId: unknown }): Promise<CatalogMutationResult>;
+};
+
+export type RenameProfileFunction = {
+  (profileId: ProfileId, ifMatch: string | undefined, name: unknown): Promise<CatalogMutationResult>;
+  (profileId: ProfileId, ifMatch: string | undefined, input: { name: unknown }): Promise<CatalogMutationResult>;
+};
+
+export type UpdateConfigFunction = {
+  (profileId: ProfileId, ifMatch: string | undefined, candidate: unknown): Promise<ProfileConfigUpdateResult>;
+  (ifMatch: string | undefined, candidate: unknown): Promise<ConfigUpdateResult>;
+};
+
+type CreateProfileArgs =
+  | [ifMatch: string | undefined, name: unknown, sourceProfileId: unknown]
+  | [ifMatch: string | undefined, input: { name: unknown; sourceProfileId: unknown }];
+
+type UpdateConfigArgs =
+  | [profileId: ProfileId, ifMatch: string | undefined, candidate: unknown]
+  | [ifMatch: string | undefined, candidate: unknown];
+
 export type ConfigStore = {
+  // Compatibility methods remain available while the profile-aware routes are migrated.
   readConfig: () => Promise<Config>;
   writeConfig: (cfg: Config) => Promise<void>;
-  updateConfig: (ifMatch: string | undefined, candidate: unknown) => Promise<ConfigUpdateResult>;
+  readCatalog: () => Promise<ProfileCatalog>;
+  readProfileConfig: (profileId: ProfileId) => Promise<ConfigReadResult>;
+  createProfile: CreateProfileFunction;
+  renameProfile: RenameProfileFunction;
+  deleteProfile: (profileId: ProfileId, ifMatch: string | undefined) => Promise<CatalogMutationResult>;
+  updateConfig: UpdateConfigFunction;
 };
 
 export function createConfigStore(configPath: string): ConfigStore {
@@ -89,14 +200,14 @@ export function createConfigStore(configPath: string): ConfigStore {
     }
   }
 
-  async function readConfigUnlocked(): Promise<Config> {
+  async function readDocumentUnlocked(): Promise<ProfileDocument> {
     try {
       const info = await stat(configPath);
       if (info.size > MAX_CONFIG_BYTES) {
         throw new ConfigStoreError("Config-Datei ist zu groß");
       }
     } catch (error) {
-      if (isMissing(error)) return defaultConfig;
+      if (isMissing(error)) return freshDefaultDocument();
       if (error instanceof ConfigStoreError) throw error;
       throw describeStoreError("Config-Datei nicht lesbar", error);
     }
@@ -105,7 +216,7 @@ export function createConfigStore(configPath: string): ConfigStore {
     try {
       text = await readFile(configPath, "utf8");
     } catch (error) {
-      if (isMissing(error)) return defaultConfig;
+      if (isMissing(error)) return freshDefaultDocument();
       throw describeStoreError("Config-Datei nicht lesbar", error);
     }
     if (Buffer.byteLength(text, "utf8") > MAX_CONFIG_BYTES) {
@@ -114,28 +225,34 @@ export function createConfigStore(configPath: string): ConfigStore {
 
     let raw: unknown;
     try {
-      raw = dropUnknownPanes(JSON.parse(text));
+      raw = JSON.parse(text);
     } catch (error) {
       await preserveBrokenConfig();
-      if (error instanceof SyntaxError) return defaultConfig;
+      if (error instanceof SyntaxError) return freshDefaultDocument();
       throw describeStoreError("Config-Datei konnte nicht gelesen werden", error);
     }
 
-    const parsed = configSchema.safeParse(raw);
-    if (!parsed.success) {
-      await preserveBrokenConfig();
-      return defaultConfig;
+    const normalizedRaw = dropUnknownPanes(raw);
+    const parsedDocument = profileDocumentSchema.safeParse(normalizedRaw);
+    if (parsedDocument.success) {
+      return normalizeDocument(parsedDocument.data);
     }
 
-    // Neue Panes fehlen in einer älteren config.json — ohne sie könnte man die Pane
-    // in den Einstellungen weder sehen noch schalten. Anhängen, nicht umsortieren:
-    // die Reihenfolge im Raster gibt ohnehin App.tsx vor.
-    for (const entry of defaultConfig.layout) {
-      if (!parsed.data.layout.some((layout) => layout.id === entry.id)) {
-        parsed.data.layout.push(entry);
-      }
+    const parsedLegacy = configSchema.safeParse(normalizedRaw);
+    if (parsedLegacy.success) {
+      const defaults = freshDefaultDocument();
+      return {
+        ...defaults,
+        profiles: [{
+          id: DEFAULT_PROFILE_ID,
+          name: "Standard",
+          config: addMissingPanes(parsedLegacy.data),
+        }],
+      };
     }
-    return parsed.data;
+
+    await preserveBrokenConfig();
+    return freshDefaultDocument();
   }
 
   // Alle Schreibvorgänge dieses Stores laufen durch dieselbe Promise-Queue. Das ist auch
@@ -167,13 +284,21 @@ export function createConfigStore(configPath: string): ConfigStore {
     }
   }
 
-  async function writeConfigUnlocked(cfg: Config): Promise<void> {
-    const serialized = JSON.stringify(cfg, null, 2);
-    if (Buffer.byteLength(serialized, "utf8") > MAX_CONFIG_BYTES) {
+  async function writeDocumentUnlocked(document: ProfileDocument): Promise<ProfileDocument> {
+    const parsed = profileDocumentSchema.safeParse(document);
+    if (!parsed.success) {
+      throw new ConfigStoreError("Config-Dokument ist ungültig");
+    }
+    const normalized = normalizeDocument(parsed.data);
+    const serializedDocument = JSON.stringify(normalized, null, 2);
+    // Die Größenprüfung muss vor jeder Backup-Rotation stattfinden: ein abgewiesener
+    // Schreibvorgang darf weder die aktive Datei noch ihre Sicherungen verändern.
+    if (Buffer.byteLength(serializedDocument, "utf8") > MAX_CONFIG_BYTES) {
       throw new ConfigTooLargeError();
     }
     await keepPreviousVersion();
-    await writeAtomic(configPath, serialized);
+    await writeAtomic(configPath, serializedDocument);
+    return normalized;
   }
 
   function nextRevision(previous: string): string {
@@ -183,32 +308,210 @@ export function createConfigStore(configPath: string): ConfigStore {
     return new Date(Math.max(now, minimum)).toISOString();
   }
 
-  async function readConfig(): Promise<Config> {
-    return readConfigUnlocked();
+  function profileIdIssues(value: unknown): ZodIssue[] | ProfileId {
+    const parsed = profileIdSchema.safeParse(value);
+    return parsed.success ? parsed.data : parsed.error.issues;
   }
 
-  async function writeConfig(cfg: Config): Promise<void> {
-    return serialized(() => writeConfigUnlocked(cfg));
+  function profileName(value: unknown, id: ProfileId): { name: string } | { issues: ZodIssue[] } {
+    const parsed = profileMetaSchema.safeParse({ id, name: value });
+    return parsed.success ? { name: parsed.data.name } : { issues: parsed.error.issues };
   }
 
-  async function updateConfig(ifMatch: string | undefined, candidate: unknown): Promise<ConfigUpdateResult> {
+  async function readCatalog(): Promise<ProfileCatalog> {
+    return catalogFromDocument(await readDocumentUnlocked());
+  }
+
+  async function readProfileConfig(profileId: ProfileId): Promise<ConfigReadResult> {
+    const document = await readDocumentUnlocked();
+    const profile = document.profiles.find((entry) => entry.id === profileId);
+    if (profile === undefined) return { kind: "not-found" };
+    return { kind: "ok", config: clone(profile.config) };
+  }
+
+  async function createProfile(ifMatch: string | undefined, name: unknown, sourceProfileId: unknown): Promise<CatalogMutationResult>;
+  async function createProfile(ifMatch: string | undefined, input: { name: unknown; sourceProfileId: unknown }): Promise<CatalogMutationResult>;
+  async function createProfile(...args: CreateProfileArgs): Promise<CatalogMutationResult> {
     return serialized(async () => {
-      const current = await readConfigUnlocked();
-      if (ifMatch !== current.updatedAt) {
-        return { kind: "conflict", current: current.updatedAt };
-      }
+    let ifMatch: string | undefined;
+    let name: unknown;
+    let sourceProfileId: unknown;
+    if (args.length === 2) {
+      ifMatch = args[0];
+      const input = args[1];
+      if (!isRecord(input)) return { kind: "invalid", issues: [customIssue("Ungültige Profildaten")] };
+      name = input.name;
+      sourceProfileId = input.sourceProfileId;
+    } else {
+      ifMatch = args[0];
+      name = args[1];
+      sourceProfileId = args[2];
+    }
 
-      const body = isRecord(candidate) ? candidate : {};
-      const parsed = configSchema.safeParse({ ...body, updatedAt: nextRevision(current.updatedAt) });
-      if (!parsed.success) {
-        return { kind: "invalid", issues: parsed.error.issues };
-      }
+    const document = await readDocumentUnlocked();
+    if (ifMatch !== document.profilesUpdatedAt) {
+      return { kind: "conflict", current: document.profilesUpdatedAt };
+    }
 
-      const config = parsed.data;
-      await writeConfigUnlocked(config);
-      return { kind: "ok", config };
+    const sourceId = profileIdIssues(sourceProfileId);
+    if (Array.isArray(sourceId)) return { kind: "invalid", issues: sourceId };
+    const source = document.profiles.find((entry) => entry.id === sourceId);
+    if (source === undefined) return { kind: "not-found" };
+
+    if (document.profiles.length >= MAX_PROFILES) {
+      return { kind: "invalid", issues: [customIssue("Es sind höchstens 16 Profile erlaubt", ["profiles"])] };
+    }
+
+    const generatedId = profileIdIssues(randomUUID());
+    if (Array.isArray(generatedId)) return { kind: "invalid", issues: generatedId };
+    const parsedName = profileName(name, generatedId);
+    if ("issues" in parsedName) return { kind: "invalid", issues: parsedName.issues };
+    const normalizedName = parsedName.name.toLocaleLowerCase("de-DE");
+    if (document.profiles.some((entry) => entry.name.toLocaleLowerCase("de-DE") === normalizedName)) {
+      return { kind: "invalid", issues: [customIssue("Profilname darf nur einmal vorkommen", ["name"])] };
+    }
+
+    const copiedConfig = clone(source.config);
+    copiedConfig.updatedAt = nextRevision(source.config.updatedAt);
+    const nextDocument = clone(document);
+    nextDocument.profiles.push({ id: generatedId, name: parsedName.name, config: copiedConfig });
+    nextDocument.profilesUpdatedAt = nextRevision(document.profilesUpdatedAt);
+    const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
+    if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
+    const persisted = await writeDocumentUnlocked(parsedDocument.data);
+    return { kind: "ok", catalog: catalogFromDocument(persisted), createdId: generatedId };
     });
   }
 
-  return { readConfig, writeConfig, updateConfig };
+  const renameProfile: RenameProfileFunction = async (profileId, ifMatch, input) => serialized(async () => {
+    const document = await readDocumentUnlocked();
+    if (ifMatch !== document.profilesUpdatedAt) {
+      return { kind: "conflict", current: document.profilesUpdatedAt };
+    }
+    const parsedId = profileIdIssues(profileId);
+    if (Array.isArray(parsedId)) return { kind: "invalid", issues: parsedId };
+    const profileIndex = document.profiles.findIndex((entry) => entry.id === parsedId);
+    if (profileIndex < 0) return { kind: "not-found" };
+    const name = isRecord(input) && "name" in input ? input.name : input;
+    const parsedName = profileName(name, parsedId);
+    if ("issues" in parsedName) return { kind: "invalid", issues: parsedName.issues };
+    const normalizedName = parsedName.name.toLocaleLowerCase("de-DE");
+    if (document.profiles.some((entry, index) => index !== profileIndex && entry.name.toLocaleLowerCase("de-DE") === normalizedName)) {
+      return { kind: "invalid", issues: [customIssue("Profilname darf nur einmal vorkommen", ["name"])] };
+    }
+
+    const nextDocument = clone(document);
+    const profile = nextDocument.profiles[profileIndex];
+    if (profile === undefined) return { kind: "not-found" };
+    profile.name = parsedName.name;
+    nextDocument.profilesUpdatedAt = nextRevision(document.profilesUpdatedAt);
+    const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
+    if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
+    const persisted = await writeDocumentUnlocked(parsedDocument.data);
+    return { kind: "ok", catalog: catalogFromDocument(persisted) };
+  });
+
+  async function deleteProfile(profileId: ProfileId, ifMatch: string | undefined): Promise<CatalogMutationResult> {
+    return serialized(async () => {
+      const document = await readDocumentUnlocked();
+      if (ifMatch !== document.profilesUpdatedAt) {
+        return { kind: "conflict", current: document.profilesUpdatedAt };
+      }
+      const parsedId = profileIdIssues(profileId);
+      if (Array.isArray(parsedId)) return { kind: "invalid", issues: parsedId };
+      const profileIndex = document.profiles.findIndex((entry) => entry.id === parsedId);
+      if (profileIndex < 0) return { kind: "not-found" };
+      if (document.profiles.length <= 1) return { kind: "last-profile" };
+
+      const nextDocument = clone(document);
+      nextDocument.profiles.splice(profileIndex, 1);
+      nextDocument.profilesUpdatedAt = nextRevision(document.profilesUpdatedAt);
+      const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
+      if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
+      const persisted = await writeDocumentUnlocked(parsedDocument.data);
+      return { kind: "ok", catalog: catalogFromDocument(persisted) };
+    });
+  }
+
+  async function updateConfig(profileId: ProfileId, ifMatch: string | undefined, candidate: unknown): Promise<ProfileConfigUpdateResult>;
+  async function updateConfig(ifMatch: string | undefined, candidate: unknown): Promise<ConfigUpdateResult>;
+  async function updateConfig(...args: UpdateConfigArgs): Promise<ProfileConfigUpdateResult> {
+    return serialized(async () => {
+    let profileId: ProfileId;
+    let ifMatch: string | undefined;
+    let candidate: unknown;
+    if (args.length === 3) {
+      profileId = args[0];
+      ifMatch = args[1];
+      candidate = args[2];
+    } else {
+      profileId = DEFAULT_PROFILE_ID;
+      ifMatch = args[0];
+      candidate = args[1];
+    }
+
+    const document = await readDocumentUnlocked();
+    const parsedId = profileIdIssues(profileId);
+    if (Array.isArray(parsedId)) return { kind: "not-found" };
+    const profileIndex = document.profiles.findIndex((entry) => entry.id === parsedId);
+    if (profileIndex < 0) return { kind: "not-found" };
+    const currentProfile = document.profiles[profileIndex];
+    if (currentProfile === undefined) return { kind: "not-found" };
+    if (ifMatch !== currentProfile.config.updatedAt) {
+      return { kind: "conflict", current: currentProfile.config.updatedAt };
+    }
+
+    const body = isRecord(candidate) ? dropUnknownPanesFromConfig(candidate) : {};
+    const parsed = configSchema.safeParse({
+      ...(isRecord(body) ? body : {}),
+      updatedAt: nextRevision(currentProfile.config.updatedAt),
+    });
+    if (!parsed.success) return { kind: "invalid", issues: parsed.error.issues };
+    const config = addMissingPanes(parsed.data);
+
+    const nextDocument = clone(document);
+    const profile = nextDocument.profiles[profileIndex];
+    if (profile === undefined) return { kind: "not-found" };
+    profile.config = config;
+    const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
+    if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
+    await writeDocumentUnlocked(parsedDocument.data);
+    return { kind: "ok", config: clone(config) };
+    });
+  }
+
+  async function readConfig(): Promise<Config> {
+    const result = await readProfileConfig(DEFAULT_PROFILE_ID);
+    return result.kind === "ok" ? result.config : clone(defaultConfig);
+  }
+
+  async function writeConfig(cfg: Config): Promise<void> {
+    return serialized(async () => {
+      const parsed = configSchema.safeParse(dropUnknownPanesFromConfig(cfg));
+      if (!parsed.success) {
+        throw new ConfigStoreError("Config ist ungültig");
+      }
+      const document = await readDocumentUnlocked();
+      const profileIndex = document.profiles.findIndex((entry) => entry.id === DEFAULT_PROFILE_ID);
+      if (profileIndex < 0) {
+        throw new ConfigStoreError("Standardprofil nicht gefunden");
+      }
+      const nextDocument = clone(document);
+      const profile = nextDocument.profiles[profileIndex];
+      if (profile === undefined) throw new ConfigStoreError("Standardprofil nicht gefunden");
+      profile.config = addMissingPanes(parsed.data);
+      await writeDocumentUnlocked(nextDocument);
+    });
+  }
+
+  return {
+    readConfig,
+    writeConfig,
+    readCatalog,
+    readProfileConfig,
+    createProfile,
+    renameProfile,
+    deleteProfile,
+    updateConfig,
+  };
 }
