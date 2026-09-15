@@ -13,6 +13,24 @@ function wrapper({ children }: { children: ReactNode }) {
 describe("useCachedQuery", () => {
   beforeEach(() => localStorage.clear());
 
+  it("sperrt den Fetcher bei deaktivierter Query und startet ihn nach Aktivierung", async () => {
+    const fetcher = vi.fn(async () => [{ title: "neu", date: new Date() }]);
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useCachedQuery<Item[]>("toggle", fetcher, 60_000, {
+        enabled,
+        decode: () => undefined,
+      }),
+      { initialProps: { enabled: false }, wrapper },
+    );
+
+    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    expect(fetcher).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("belebt Datumsfelder aus dem JSON-Cache wieder", async () => {
     localStorage.setItem(
       "dashboard:cache:test",

@@ -55,6 +55,27 @@ describe("useSaveConfig", () => {
     expect(invalidate).toHaveBeenCalledWith({ predicate: expect.any(Function) });
   });
 
+  it("überspringt bei deaktiviertem Monitoring nur die PVE-Invalidierung", async () => {
+    const client = new QueryClient();
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    for (const key of ["pve", "wx:test", "cal:test", "news:test"]) {
+      client.setQueryData([key], { cached: true });
+    }
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify(defaultConfig), { status: 200 })));
+    const { result } = renderHook(() => useSaveConfig(), { wrapper: testWrapper });
+
+    act(() => result.current.mutate(defaultConfig));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(client.getQueryState(["wx:test"])?.isInvalidated).toBe(true));
+
+    expect(client.getQueryState(["pve"])?.isInvalidated).not.toBe(true);
+    expect(client.getQueryState(["cal:test"])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(["news:test"])?.isInvalidated).toBe(true);
+  });
+
   it("lässt einen älteren Config-Poll einen erfolgreichen Save nicht zurückrollen", async () => {
     const client = new QueryClient();
     let resolveGet: (response: Response) => void = () => undefined;

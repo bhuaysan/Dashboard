@@ -2,10 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Config } from "../src/config/schema";
+import { defaultConfig } from "../src/config/defaults";
 import { createApp, inertProxyResponse, readJsonBody } from "./app.ts";
 import type { DashboardEnvironment } from "./env.ts";
+import { emptyHomelab } from "./pve.ts";
+import type { HomelabFetcher } from "./homelab-cache.ts";
 
 type AppFixture = {
   app: ReturnType<typeof createApp>;
@@ -13,7 +16,14 @@ type AppFixture = {
   tempDir: string;
 };
 
-async function createFixture(): Promise<AppFixture> {
+type FixtureOptions = {
+  config?: Config;
+  homelabFetcher?: HomelabFetcher;
+};
+
+const homelabFetcher = vi.fn<HomelabFetcher>(async () => emptyHomelab);
+
+async function createFixture(options: FixtureOptions = {}): Promise<AppFixture> {
   const tempDir = await mkdtemp(join(tmpdir(), "dashboard-api-"));
   const configPath = join(tempDir, "config.json");
   const staticPath = join(tempDir, "static");
@@ -21,6 +31,7 @@ async function createFixture(): Promise<AppFixture> {
   await mkdir(join(tempDir, "dist"));
   await writeFile(join(tempDir, "dist", "index.html"), '<html><body><div id="root">Dashboard</div></body></html>');
   await writeFile(join(staticPath, "arbeit.ics"), "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n");
+  if (options.config) await writeFile(configPath, JSON.stringify(options.config));
   const testEnv: DashboardEnvironment = {
     port: 7777,
     configPath,
@@ -28,12 +39,20 @@ async function createFixture(): Promise<AppFixture> {
     writeAllow: ["127.0.0.1"],
     writeHosts: ["start.home.arpa", "10.0.10.20", "localhost", "127.0.0.1"],
   };
-  return { app: createApp({ env: testEnv, distRoot: join(tempDir, "dist") }), configPath, tempDir };
+  return {
+    app: createApp({
+      env: testEnv,
+      distRoot: join(tempDir, "dist"),
+      homelabFetcher: options.homelabFetcher,
+    }),
+    configPath,
+    tempDir,
+  };
 }
 
-function itWithApp(name: string, test: (fixture: AppFixture) => Promise<void>): void {
+function itWithApp(name: string, test: (fixture: AppFixture) => Promise<void>, options?: FixtureOptions): void {
   it(name, async () => {
-    const fixture = await createFixture();
+    const fixture = await createFixture(options);
     try {
       await test(fixture);
     } finally {
@@ -247,6 +266,21 @@ describe("/api/config", () => {
       await rm(`${configPath}.bak`, { force: true, recursive: true });
       await rm(configPath, { force: true });
     }
+  });
+});
+
+describe("/api/homelab", () => {
+  itWithApp("weist deaktiviertes Monitoring ab, ohne den Fetcher aufzurufen", async ({ app }) => {
+    const response = await app.request("/api/homelab");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Homelab deaktiviert" });
+    expect(homelabFetcher).not.toHaveBeenCalled();
+  }, {
+    config: {
+      ...defaultConfig,
+      homelab: { ...defaultConfig.homelab, enabled: false },
+    },
+    homelabFetcher: homelabFetcher,
   });
 });
 

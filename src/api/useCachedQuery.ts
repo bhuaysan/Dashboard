@@ -13,6 +13,7 @@ type CacheEnvelope = {
 };
 
 type Options<T> = {
+  enabled?: boolean;
   refetchIntervalMs?: number;
   decode?: (data: unknown) => T | undefined;
 };
@@ -82,7 +83,7 @@ function readEnvelope(key: string): CacheEnvelope | undefined {
 }
 
 export function useCachedQuery<T>(key: string, fn: () => Promise<T>, ttlMs: number, options: Options<T> = {}) {
-  const { refetchIntervalMs, decode } = options;
+  const { enabled = true, refetchIntervalMs, decode } = options;
   return useQuery<T>({
     queryKey: [key],
     queryFn: async () => {
@@ -108,6 +109,7 @@ export function useCachedQuery<T>(key: string, fn: () => Promise<T>, ttlMs: numb
     initialDataUpdatedAt: () => {
       return readEnvelope(key)?.t;
     },
+    enabled,
     staleTime: ttlMs,
     refetchInterval: refetchIntervalMs ?? false,
     refetchIntervalInBackground: false,   // pausiert, solange der Tab nicht sichtbar ist

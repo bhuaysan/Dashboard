@@ -50,6 +50,27 @@ describe("SettingsPane", () => {
     expect(screen.getByRole("button", { name: 'Link „Datasphere" löschen' })).toBeTruthy();
   });
 
+  it("speichert den aktivierten Proxmox-Monitoring-Schalter ohne andere Homelab-Werte zu verändern", () => {
+    let sent: Config | undefined;
+    const save = fakeSave((config, opts) => {
+      sent = config;
+      opts?.onSuccess?.();
+    });
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Homelab" }));
+    const monitoring = screen.getByRole("checkbox", { name: "Proxmox-Monitoring aktiv" });
+    if (!(monitoring instanceof HTMLInputElement)) throw new Error("Monitoring-Schalter ist kein Eingabefeld");
+    expect(monitoring.checked).toBe(false);
+    fireEvent.click(monitoring);
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(save.mutate).toHaveBeenCalledOnce();
+    if (sent === undefined) throw new Error("Kein Config-Entwurf gespeichert");
+    expect(sent.homelab.enabled).toBe(true);
+    expect(sent.homelab.node).toBe(defaultConfig.homelab.node);
+    expect(sent.homelab.thresholds).toEqual(defaultConfig.homelab.thresholds);
+  });
+
   it("hält den Tastaturfokus im Einstellungsdialog", () => {
     render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
       save={saveSucceeds()} onSaved={() => undefined} />);

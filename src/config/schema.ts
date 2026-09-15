@@ -170,6 +170,7 @@ const baseConfigSchema = z.object({
   layout: layoutSchema,
   proxyAllowlist: z.array(hostname).max(128),
   homelab: z.object({
+    enabled: z.boolean().default(true),
     node: pveNodeName.default("pve"),
     uiUrl: httpBaseUrl.default("https://10.0.10.10:8006"),   // Ziel der Konsolen-Links
     expectRunning: z.array(z.number().int().positive().max(999999)).max(128).default([]),

@@ -91,6 +91,12 @@ LXC "dashboard" · 10.0.10.20:80 · ein einziger Node-Prozess (Hono)
   Dateien in /opt/dashboard: dist/  server/  config.json  .env  pve-ca.pem
 ```
 
+`homelab.enabled` steuert das Proxmox-Monitoring und den Zugriff auf `/api/homelab`.
+`layout.homelab.visible` steuert nur die HOMELAB-Pane; bei aktiviertem Monitoring läuft die
+Überwachung auch bei ausgeblendeter Pane weiter. Bei deaktiviertem Monitoring gibt es keine
+PVE-Requests und keine PVE-Status- oder Alarmanzeige. Fehlt `PVE_TOKEN_SECRET`, bleibt davon
+unabhängig `configured: false` („nicht konfiguriert“).
+
 Es gibt genau **einen** Serverprozess. Er liefert die App und alle Daten. Dadurch gibt es im ganzen
 Projekt kein CORS-Problem.
 
@@ -461,6 +467,7 @@ export const configSchema = z.object({
   })),
   proxyAllowlist: z.array(z.string()),         // Hostnamen, z.B. "api.open-meteo.com"
   homelab: z.object({
+    enabled: z.boolean().default(true),       // Monitoring und /api/homelab
     node: z.string().default("pve"),
     expectRunning: z.array(z.number().int()).default([]),   // VMIDs, die laufen sollen
     thresholds: z.object({
@@ -475,6 +482,12 @@ export const configSchema = z.object({
 
 export type Config = z.infer<typeof configSchema>;
 ```
+
+`homelab.enabled` steuert das Monitoring und `/api/homelab`; `layout.homelab.visible` steuert
+nur die Pane. Bei deaktiviertem Monitoring gibt es keine PVE-Requests, Status- oder
+Alarmanzeige. Fehlt `PVE_TOKEN_SECRET`, bleibt unabhängig davon `configured: false`
+(„nicht konfiguriert“). Die neue `defaultConfig` setzt `homelab.enabled` auf `false`; das
+Schema behandelt das fehlende Feld einer älteren Config als `true`.
 
 Beachte: **`expectRunning` ist eine Liste von VMIDs in der Config**, keine Abfrage des
 Proxmox-`onboot`-Flags. Das erspart einen zusätzlichen API-Aufruf pro Gast, und „soll laufen" ist
@@ -913,8 +926,8 @@ Zuerst per Hand in der Proxmox-Weboberfläche einrichten (`https://10.0.10.10:80
    `scp root@10.0.10.10:/etc/pve/pve-root-ca.pem ./pve-ca.pem`
 5. Das Token-Secret in die **bereits vorhandene** `.env` eintragen, Zeile `PVE_TOKEN_SECRET=`.
    `PVE_URL`, `PVE_TOKEN_ID` und `PVE_CA_PATH` stehen dort schon richtig. Keine neue Datei anlegen.
-   Ist die Zeile leer, überspringt der Server den Homelab-Teil kommentarlos — das ist ein gültiger
-   Zustand, kein Fehler.
+   Ist die Zeile leer, liefert der Server unabhängig von `homelab.enabled` den gültigen Zustand
+   `configured: false` („nicht konfiguriert“), keinen Fehler.
 
 `server/pve.ts` — *Vorlage für den TLS-Teil:*
 
@@ -1018,7 +1031,8 @@ type HomelabData = {
 
 Serverseitiger Cache 60 s, damit mehrere Geräte und Tabs nur einen Durchlauf auslösen. Der Browser
 ruft `/api/homelab` alle 60 s ab und **pausiert per `visibilitychange`**, solange der Tab nicht
-sichtbar ist.
+sichtbar ist. Ist `homelab.enabled` false, sperrt der Server die Route mit 404 und der Browser
+führt keinen PVE-Request aus.
 
 `Homelab.tsx`: Node-Zeile, Storage-Balken, Gästetabelle zweispaltig, darunter die Alarmzeilen. Ist
 `configured: false`, zeigt die Pane eine ruhige Zeile *„Homelab nicht konfiguriert"* statt eines

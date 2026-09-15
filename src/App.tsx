@@ -102,8 +102,9 @@ export default function App() {
     900_000,
     { decode: decodeNews, refetchIntervalMs: 900_000 },
   );
+  const homelabEnabled = config.homelab.enabled;
   const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, {
-    decode: decodeHomelab, refetchIntervalMs: 60_000,
+    decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: homelabEnabled,
   });
 
   // undefined bleibt undefined: „noch keine Termine" ist ein anderer Zustand als
@@ -139,14 +140,17 @@ export default function App() {
     () => Object.fromEntries(config.layout.map((l) => [l.id, l])),
     [config.layout],
   );
-  const paneVisible = (id: PaneId) => layoutById[id]?.visible ?? true;
+  const paneVisible = (id: PaneId) => id === "homelab"
+    ? homelabEnabled && (layoutById[id]?.visible ?? true)
+    : layoutById[id]?.visible ?? true;
   const paneSpan = (id: PaneId): 1 | 2 => {
     const layout = layoutById[id];
     return layout && "span" in layout ? layout.span : 1;
   };
   const visiblePanes = useMemo(
-    () => new Set(PANE_ORDER.map((p) => p.id).filter((id) => layoutById[id]?.visible ?? true)),
-    [layoutById],
+    () => new Set(PANE_ORDER.map((p) => p.id).filter((id) => id !== "homelab" || homelabEnabled)
+      .filter((id) => layoutById[id]?.visible ?? true)),
+    [layoutById, homelabEnabled],
   );
 
   const consoleUrl = useCallback(
@@ -280,15 +284,15 @@ export default function App() {
   const queryState = (q: { isError: boolean; isStale: boolean }, partial = false): SourceState =>
     q.isError ? "crit" : partial || q.isStale ? "warn" : "ok";
 
-  const labAlerts = labQuery.data?.alerts ?? [];
-  const labAlertLevel = labAlerts.some((a) => a.level === "crit") ? "crit" : "warn";
+  const labAlerts = homelabEnabled ? labQuery.data?.alerts ?? [] : [];
+  const labAlertLevel: "warn" | "crit" = labAlerts.some((a) => a.level === "crit") ? "crit" : "warn";
 
   // Der erste Fehler wird ausgeschrieben — ein roter Punkt allein sagt nicht, was fehlt.
   const failed = ([
     ["wx", wxQuery.error],
     ["news", newsQuery.error],
     ["cal", calQuery.error],
-    ["pve", labQuery.error],
+    ["pve", homelabEnabled ? labQuery.error : null],
     ["cfg", configQuery.error],
   ] as const).find(([, err]) => err !== null);
   const partialProblems = [
@@ -444,14 +448,14 @@ export default function App() {
               { label: "wx", state: queryState(wxQuery), updatedAt: wxQuery.dataUpdatedAt },
               { label: "news", state: queryState(newsQuery, (newsQuery.data?.failures.length ?? 0) > 0), updatedAt: newsQuery.dataUpdatedAt },
               { label: "cal", state: queryState(calQuery, (calQuery.data?.failures.length ?? 0) > 0), updatedAt: calQuery.dataUpdatedAt },
-              {
+              ...(homelabEnabled ? [{
                 label: "pve",
                 state: labQuery.data && !labQuery.data.configured ? "unconfigured" : queryState(labQuery),
                 updatedAt: labQuery.dataUpdatedAt,
                 ...(labAlerts.length > 0
                   ? { alerts: { count: labAlerts.length, level: labAlertLevel } }
                   : {}),
-              },
+              }] : []),
               { label: "cfg", state: queryState(configQuery), updatedAt: configQuery.dataUpdatedAt },
             ]}
             clock={timeFmt.format(now)}
@@ -465,7 +469,7 @@ export default function App() {
       <SettingsPane
         open={settingsOpen}
         config={config}
-        guests={labQuery.data?.guests ?? []}
+        guests={homelabEnabled ? labQuery.data?.guests ?? [] : []}
         onClose={() => setSettingsOpen(false)}
         save={saveConfig}
         onReload={async () => {

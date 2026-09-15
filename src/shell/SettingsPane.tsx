@@ -646,6 +646,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                   </span>
                 </div>
                 <p className="set-hint" style={{ marginTop: "1rem" }}>Breite in Spalten.</p>
+                <p className="set-hint">Sichtbarkeit blendet nur die Pane aus; bei aktivem Monitoring bleiben Status und Alarme erhalten.</p>
                 <div className="tbl tbl--panes">
                   <div className="tbl-head"><span>Pane</span><span>Sichtbar</span><span>Breite</span></div>
                   {draft.layout.map((l, i) => (
@@ -653,6 +654,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
                       <span>{l.id}</span>
                       <label className="check">
                           <input type="checkbox" aria-label={`${l.id.toUpperCase()} sichtbar`} checked={l.visible}
+                            disabled={l.id === "homelab" && !draft.homelab.enabled}
                             onChange={(e) => upd((d) => ({ ...d, layout: d.layout.map((x, j) => j === i ? { ...x, visible: e.target.checked } : x) }))} />
                           <span className="check-state">{l.visible ? "an" : "aus"}</span>
                       </label>
@@ -685,6 +687,13 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
 
             {sec === "lab" && (
               <section>
+                <div className="checks">
+                  <label className="check">
+                    <input type="checkbox" aria-label="Proxmox-Monitoring aktiv" checked={draft.homelab.enabled}
+                      onChange={(e) => upd((d) => ({ ...d, homelab: { ...d.homelab, enabled: e.target.checked } }))} />
+                    Proxmox-Monitoring aktiv <span className="check-state">{draft.homelab.enabled ? "an" : "aus"}</span>
+                  </label>
+                </div>
                 <div className="field">
                   <label htmlFor="s-node">Node-Name</label>
                   <input className="inp" id="s-node" style={{ maxWidth: "16ch" }} value={draft.homelab.node}

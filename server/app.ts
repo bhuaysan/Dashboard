@@ -184,6 +184,9 @@ export function createApp(options: AppOptions): Hono {
       }
       return c.json({ error: "Homelab nicht erreichbar" }, 502);
     }
+    if (!cfg.homelab.enabled) {
+      return c.json({ error: "Homelab deaktiviert" }, 404);
+    }
     try {
       return c.json(await homelabCache.get(cfg));
     } catch {
