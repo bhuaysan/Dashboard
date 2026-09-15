@@ -265,7 +265,28 @@ export function createConfigStore(configPath: string): ConfigStore {
     return result;
   }
 
-  async function keepPreviousVersion(): Promise<void> {
+  async function keepPreviousVersion(previousDocument: ProfileDocument): Promise<void> {
+    let currentExists = true;
+    try {
+      await stat(configPath);
+    } catch (error) {
+      if (isMissing(error)) {
+        currentExists = false;
+      } else {
+        throw describeStoreError("Config-Datei nicht lesbar", error);
+      }
+    }
+
+    let serializedPrevious: string | undefined;
+    if (currentExists) {
+      serializedPrevious = JSON.stringify(normalizeDocument(previousDocument), null, 2);
+      // Validate every serialized representation before moving any backup. This keeps a
+      // rejected write from changing the backup chain as well as the active file.
+      if (Buffer.byteLength(serializedPrevious, "utf8") > MAX_CONFIG_BYTES) {
+        throw new ConfigTooLargeError();
+      }
+    }
+
     for (let i = KEEP_BACKUPS - 1; i >= 1; i -= 1) {
       try {
         await rename(`${configPath}.${i}`, `${configPath}.${i + 1}`);
@@ -275,8 +296,9 @@ export function createConfigStore(configPath: string): ConfigStore {
         }
       }
     }
+    if (serializedPrevious === undefined) return;
     try {
-      await copyFile(configPath, `${configPath}.1`);
+      await writeFile(`${configPath}.1`, serializedPrevious, { mode: 0o600 });
     } catch (error) {
       if (!isMissing(error)) {
         throw describeStoreError("Sicherung nicht anlegbar", error);
@@ -284,7 +306,7 @@ export function createConfigStore(configPath: string): ConfigStore {
     }
   }
 
-  async function writeDocumentUnlocked(document: ProfileDocument): Promise<ProfileDocument> {
+  async function writeDocumentUnlocked(document: ProfileDocument, previousDocument: ProfileDocument): Promise<ProfileDocument> {
     const parsed = profileDocumentSchema.safeParse(document);
     if (!parsed.success) {
       throw new ConfigStoreError("Config-Dokument ist ungültig");
@@ -296,7 +318,7 @@ export function createConfigStore(configPath: string): ConfigStore {
     if (Buffer.byteLength(serializedDocument, "utf8") > MAX_CONFIG_BYTES) {
       throw new ConfigTooLargeError();
     }
-    await keepPreviousVersion();
+    await keepPreviousVersion(previousDocument);
     await writeAtomic(configPath, serializedDocument);
     return normalized;
   }
@@ -378,7 +400,7 @@ export function createConfigStore(configPath: string): ConfigStore {
     nextDocument.profilesUpdatedAt = nextRevision(document.profilesUpdatedAt);
     const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
     if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
-    const persisted = await writeDocumentUnlocked(parsedDocument.data);
+    const persisted = await writeDocumentUnlocked(parsedDocument.data, document);
     return { kind: "ok", catalog: catalogFromDocument(persisted), createdId: generatedId };
     });
   }
@@ -407,7 +429,7 @@ export function createConfigStore(configPath: string): ConfigStore {
     nextDocument.profilesUpdatedAt = nextRevision(document.profilesUpdatedAt);
     const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
     if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
-    const persisted = await writeDocumentUnlocked(parsedDocument.data);
+    const persisted = await writeDocumentUnlocked(parsedDocument.data, document);
     return { kind: "ok", catalog: catalogFromDocument(persisted) };
   });
 
@@ -428,7 +450,7 @@ export function createConfigStore(configPath: string): ConfigStore {
       nextDocument.profilesUpdatedAt = nextRevision(document.profilesUpdatedAt);
       const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
       if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
-      const persisted = await writeDocumentUnlocked(parsedDocument.data);
+      const persisted = await writeDocumentUnlocked(parsedDocument.data, document);
       return { kind: "ok", catalog: catalogFromDocument(persisted) };
     });
   }
@@ -475,7 +497,7 @@ export function createConfigStore(configPath: string): ConfigStore {
     profile.config = config;
     const parsedDocument = profileDocumentSchema.safeParse(nextDocument);
     if (!parsedDocument.success) return { kind: "invalid", issues: parsedDocument.error.issues };
-    await writeDocumentUnlocked(parsedDocument.data);
+    await writeDocumentUnlocked(parsedDocument.data, document);
     return { kind: "ok", config: clone(config) };
     });
   }
@@ -500,7 +522,7 @@ export function createConfigStore(configPath: string): ConfigStore {
       const profile = nextDocument.profiles[profileIndex];
       if (profile === undefined) throw new ConfigStoreError("Standardprofil nicht gefunden");
       profile.config = addMissingPanes(parsed.data);
-      await writeDocumentUnlocked(nextDocument);
+      await writeDocumentUnlocked(nextDocument, document);
     });
   }
 

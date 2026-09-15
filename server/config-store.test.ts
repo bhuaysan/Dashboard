@@ -217,6 +217,25 @@ describe("profile document migration", () => {
     }));
   });
 
+  itWithStore("legt bei der ersten Legacy-Mutation eine vollständige Version-2-Sicherung an", async ({ configPath, store }) => {
+    await writeFile(configPath, JSON.stringify({ ...defaultConfig, theme: "light" }));
+    const current = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    expect(current.kind).toBe("ok");
+    if (current.kind !== "ok") return;
+
+    const result = await store.updateConfig(DEFAULT_PROFILE_ID, current.config.updatedAt, {
+      ...current.config,
+      theme: "dark",
+    });
+    expect(result.kind).toBe("ok");
+
+    const backup = profileDocumentSchema.parse(JSON.parse(await readFile(`${configPath}.1`, "utf8")));
+    expect(backup.version).toBe(2);
+    expect(backup.profiles).toHaveLength(1);
+    expect(backup.profiles[0]?.id).toBe(DEFAULT_PROFILE_ID);
+    expect(backup.profiles[0]?.config.theme).toBe("light");
+  });
+
   itWithStore("normalisiert unbekannte und fehlende Panes in jedem Version-2-Profil", async ({ configPath, store }) => {
     const workId = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
     const firstLayout = defaultConfig.layout.filter((entry) => entry.id !== "news");
