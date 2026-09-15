@@ -213,3 +213,46 @@ export const configSchema = baseConfigSchema.superRefine((config, ctx) => {
 });
 
 export type Config = z.infer<typeof configSchema>;
+
+export const DEFAULT_PROFILE_ID = "default" as const;
+export const profileIdSchema = z.string().refine(
+  (value) => value === DEFAULT_PROFILE_ID || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value),
+  "Ungültige Profil-ID",
+);
+export type ProfileId = z.infer<typeof profileIdSchema>;
+
+export const profileMetaSchema = z.object({
+  id: profileIdSchema,
+  name: text(64),
+});
+export type ProfileMeta = z.infer<typeof profileMetaSchema>;
+
+export const profileDocumentSchema = z.object({
+  version: z.literal(2),
+  profilesUpdatedAt: isoDateTime,
+  profiles: z.array(profileMetaSchema.extend({ config: configSchema })).min(1).max(16),
+}).superRefine((document, ctx) => {
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  document.profiles.forEach((profile, index) => {
+    if (ids.has(profile.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profiles", index, "id"],
+        message: "Profil-ID darf nur einmal vorkommen",
+      });
+    }
+    ids.add(profile.id);
+
+    const normalizedName = profile.name.toLocaleLowerCase("de-DE");
+    if (names.has(normalizedName)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profiles", index, "name"],
+        message: "Profilname darf nur einmal vorkommen",
+      });
+    }
+    names.add(normalizedName);
+  });
+});
+export type ProfileDocument = z.infer<typeof profileDocumentSchema>;

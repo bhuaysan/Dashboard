@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { configSchema, isSafeLocalCalendarPath } from "./schema";
-import { defaultConfig } from "./defaults";
+import { configSchema, isSafeLocalCalendarPath, profileDocumentSchema } from "./schema";
+import { defaultConfig, defaultProfileDocument } from "./defaults";
 import { readLocalConfig } from "./local";
 import { importConfig, restoreConfig } from "./io";
 
@@ -130,6 +130,84 @@ describe("configSchema", () => {
       expect(parsed.success).toBe(false);
     },
   );
+});
+
+describe("profileDocumentSchema", () => {
+  const validDocument = {
+    version: 2,
+    profilesUpdatedAt: "2026-09-15T00:00:00.000Z",
+    profiles: [
+      { id: "default", name: "Standard", config: defaultConfig },
+      { id: "123e4567-e89b-42d3-a456-426614174000", name: "Arbeit", config: defaultConfig },
+    ],
+  };
+
+  it("akzeptiert mehrere gültige Profile", () => {
+    const document = profileDocumentSchema.parse(validDocument);
+    expect(document.profiles).toHaveLength(2);
+  });
+
+  it("weist ein Dokument ohne Profile ab", () => {
+    expect(profileDocumentSchema.safeParse({ ...validDocument, profiles: [] }).success).toBe(false);
+  });
+
+  it("weist mehr als 16 Profile ab", () => {
+    const profiles = Array.from({ length: 17 }, (_, index) => ({
+      id: `123e4567-e89b-42d3-a456-426614174${String(index).padStart(3, "0")}`,
+      name: `Profil ${index}`,
+      config: defaultConfig,
+    }));
+    expect(profileDocumentSchema.safeParse({ ...validDocument, profiles }).success).toBe(false);
+  });
+
+  it("weist doppelte Profil-IDs ab", () => {
+    const profiles = [
+      ...validDocument.profiles,
+      { id: "default", name: "Privat", config: defaultConfig },
+    ];
+    expect(profileDocumentSchema.safeParse({ ...validDocument, profiles }).success).toBe(false);
+  });
+
+  it("weist Profilnamen ab, die sich unabhängig von Groß-/Kleinschreibung wiederholen", () => {
+    const profiles = [
+      { id: "default", name: "Privat", config: defaultConfig },
+      { id: "123e4567-e89b-42d3-a456-426614174000", name: "privat", config: defaultConfig },
+    ];
+    expect(profileDocumentSchema.safeParse({ ...validDocument, profiles }).success).toBe(false);
+  });
+
+  it.each([
+    ["Steuerzeichen", "Pri\nvat"],
+    ["nur Leerzeichen", "   "],
+  ])("weist Profilnamen mit %s ab", (_reason, name) => {
+    const profiles = [{ id: "default", name, config: defaultConfig }];
+    expect(profileDocumentSchema.safeParse({ ...validDocument, profiles }).success).toBe(false);
+  });
+
+  it.each([
+    "DEFAULT",
+    "123e4567-e89b-42d3-a456-426614174000 ",
+    "123e4567-e89b-12d3-a456-426614174000",
+    "123e4567-e89b-42d3-7456-426614174000",
+    "123e4567-e89b-42d3-a456-42661417400Z",
+  ])("weist eine ungültige Profil-ID ab: %s", (id) => {
+    const profiles = [{ id, name: "Standard", config: defaultConfig }];
+    expect(profileDocumentSchema.safeParse({ ...validDocument, profiles }).success).toBe(false);
+  });
+
+  it("weist ein Dokument mit ungültiger enthaltenen Config ab", () => {
+    const { location: _omit, ...invalidConfig } = defaultConfig;
+    const profiles = [{ id: "default", name: "Standard", config: invalidConfig }];
+    expect(profileDocumentSchema.safeParse({ ...validDocument, profiles }).success).toBe(false);
+  });
+
+  it("exportiert das deterministische Standardprofil", () => {
+    expect(defaultProfileDocument).toEqual({
+      version: 2,
+      profilesUpdatedAt: "2026-08-05T00:00:00.000Z",
+      profiles: [{ id: "default", name: "Standard", config: defaultConfig }],
+    });
+  });
 });
 
 describe("isSafeLocalCalendarPath", () => {
