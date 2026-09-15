@@ -108,6 +108,8 @@ export default function App() {
   // catalog or the server catalog provides a validated first/selected ID.
   const profileId = resolvedProfileId ?? DEFAULT_PROFILE_ID;
   const profileReady = catalog !== undefined && resolvedProfileId !== undefined;
+  const selectedProfile = catalog?.profiles.find((profile) => profile.id === resolvedProfileId);
+  const activeProfileName = selectedProfile?.name ?? "Profil wird geladen";
   const configQuery = useConfig(profileId, { enabled: profileReady });
   const saveConfig = useSaveConfig(profileId);
   const config = configQuery.data;
@@ -115,6 +117,7 @@ export default function App() {
   const [seed, setSeed] = useState<string | null>(null);
   const [message, setMessage] = useState<Note | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<"profile" | undefined>(undefined);
   const previousCatalog = useRef<ProfileCatalog | undefined>(localCatalog);
   const modalOpen = settingsOpen || ui.showHelp;
   const now = useNow();
@@ -351,12 +354,46 @@ export default function App() {
   }
 
   function runCommand(cmd: string) {
-    switch (cmd) {
+    const normalized = cmd.trim();
+    if (normalized === "profile") {
+      setSettingsInitialSection("profile");
+      setSettingsOpen(true);
+      return;
+    }
+
+    const profileMatch = /^profile\s+(.+)$/.exec(normalized);
+    if (profileMatch !== null) {
+      const name = profileMatch[1]?.trim() ?? "";
+      if (!profileReady || catalog === undefined || resolvedProfileId === undefined || name === "") {
+        setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+        return;
+      }
+      const normalizedName = name.toLocaleLowerCase("de-DE");
+      const target = catalog.profiles.find((profile) =>
+        profile.name.toLocaleLowerCase("de-DE") === normalizedName,
+      );
+      if (target === undefined) {
+        setMessage({ text: `Profil „${name}" nicht gefunden.`, level: "error" });
+        return;
+      }
+      switchProfile(target.id);
+      return;
+    }
+
+    switch (normalized) {
       case "export":
-        exportConfig(config);
+        if (!profileReady || selectedProfile === undefined) {
+          setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+          break;
+        }
+        exportConfig(config, selectedProfile.name);
         setMessage({ text: "Konfiguration als Datei gesichert.", level: "info" });
         break;
       case "import":
+        if (!profileReady || selectedProfile === undefined) {
+          setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+          break;
+        }
         fileRef.current?.click();
         break;
       case "refresh":
@@ -368,6 +405,10 @@ export default function App() {
         window.location.reload();
         break;
       case "theme": {
+        if (!profileReady || selectedProfile === undefined) {
+          setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+          break;
+        }
         const effective = document.documentElement.dataset.theme ??
           (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
         updateConfig({ ...config, theme: effective === "dark" ? "light" : "dark" });
@@ -375,6 +416,7 @@ export default function App() {
         break;
       }
       case "settings":
+        setSettingsInitialSection(undefined);
         setSettingsOpen(true);
         break;
       default:
@@ -557,6 +599,7 @@ export default function App() {
 
           <StatusLine
             mode={ui.mode}
+            profileName={activeProfileName}
             panes={PANE_ORDER
               .map((p, i) => ({ id: p.id, n: i + 1, label: p.label, active: ui.pane === p.id }))
               .filter((p) => visiblePanes.has(p.id))
@@ -604,6 +647,7 @@ export default function App() {
         onCreateProfile={createProfile}
         onRenameProfile={renameProfile}
         onDeleteProfile={deleteProfile}
+        initialSection={settingsInitialSection}
         // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
         // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
         onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}

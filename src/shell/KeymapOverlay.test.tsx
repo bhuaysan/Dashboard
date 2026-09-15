@@ -14,4 +14,11 @@ describe("KeymapOverlay", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("dokumentiert beide Profil-Kommandos", () => {
+    render(<KeymapOverlay open onClose={() => undefined} />);
+    const dialog = screen.getByRole("dialog", { name: "Tastenbelegung" });
+    expect(dialog.textContent).toContain(":profile");
+    expect(dialog.textContent).toContain(":profile <name>");
+  });
 });

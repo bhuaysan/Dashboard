@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { configSchema, isSafeLocalCalendarPath, profileDocumentSchema } from "./schema";
 import { defaultConfig, defaultProfileDocument } from "./defaults";
 import { readLocalConfig } from "./local";
-import { importConfig, restoreConfig } from "./io";
+import { exportConfig, importConfig, restoreConfig } from "./io";
 
 function configFile(value: unknown): File {
   const source = JSON.stringify(value);
@@ -263,5 +263,32 @@ describe("importConfig", () => {
     const imported = { ...defaultConfig, proxyAllowlist: ["-api.open-meteo.com"] };
     const result = await importConfig(configFile(imported));
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("exportConfig", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["Arbeit Zuhause", "dashboard-arbeit-zuhause.json"],
+    ["Arbeit/Zuhause", "dashboard-arbeit-zuhause.json"],
+    ["Arbeit\nZuhause", "dashboard-arbeit-zuhause.json"],
+    ["/\\\u0000", "dashboard-profil.json"],
+  ])("bereinigt den Profilnamen %j zum Dateinamen %j", (profileName, expected) => {
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:test"),
+      revokeObjectURL: vi.fn(),
+    });
+    let download = "";
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      download = this.download;
+    });
+
+    exportConfig(defaultConfig, profileName);
+
+    expect(download).toBe(expected);
   });
 });

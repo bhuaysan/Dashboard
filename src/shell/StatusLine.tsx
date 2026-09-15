@@ -16,6 +16,7 @@ export type Note = { text: string; level: "info" | "error" };
 
 type Props = {
   mode: string;
+  profileName: string;
   panes: { n: number; label: string; active: boolean }[];
   sources: Source[];
   clock: string;
@@ -40,7 +41,15 @@ const STATE_MARK: Record<SourceState, string> = {
   unconfigured: "○",
 };
 
-export function StatusLine({ mode, panes, sources, clock, note, problem }: Props) {
+const PROFILE_VISIBLE_LENGTH = 18;
+
+function visibleProfileName(profileName: string): string {
+  const normalized = profileName.toLocaleLowerCase("de-DE");
+  if (normalized.length <= PROFILE_VISIBLE_LENGTH) return normalized;
+  return `${normalized.slice(0, PROFILE_VISIBLE_LENGTH - 1)}…`;
+}
+
+export function StatusLine({ mode, profileName, panes, sources, clock, note, problem }: Props) {
   const now = new Date();
   return (
     <footer className="statusline">
@@ -54,6 +63,9 @@ export function StatusLine({ mode, panes, sources, clock, note, problem }: Props
         ))}
       </span>
       <span className="sl-right">
+        <span className="sl-profile" aria-label={`Profil: ${profileName}`} title={profileName}>
+          <span className="sl-profile-visible" aria-hidden="true">profile:{visibleProfileName(profileName)}</span>
+        </span>
         {sources.map((s) => {
           const stamp = s.updatedAt ? new Date(s.updatedAt) : undefined;
           const spoken = stamp ? `, geladen ${spokenAge(stamp, now)}` : ", noch nicht geladen";

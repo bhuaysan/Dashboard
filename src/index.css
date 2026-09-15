@@ -405,6 +405,8 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .sl-panes b { color: var(--color-accent); font-weight: 400; }
 .sl-panes .is-active { color: var(--color-fg); }
 .sl-right { margin-left: auto; display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; }
+.sl-profile { display: inline-flex; min-width: 0; max-width: 24ch; color: var(--color-fg); }
+.sl-profile-visible { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sl-src { display: inline-flex; gap: .3rem; align-items: baseline; }
 /* Die drei Zeichen sind verschieden breit — feste Spalte, sonst wackeln die Kürzel. */
 .sl-mark { display: inline-block; width: 1ch; text-align: center; font-weight: 700; }

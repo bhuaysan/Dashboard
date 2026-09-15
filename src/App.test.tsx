@@ -95,6 +95,22 @@ function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResp
   return fetchMock;
 }
 
+function stubProfiledApi(catalog: ProfileCatalog, configs: Record<string, Config>) {
+  writeLocalCatalog(catalog);
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const parsed = new URL(String(input), "http://dashboard.test");
+    if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(catalog), { status: 200 });
+    if (parsed.pathname === "/api/config") {
+      const profileId = parsed.searchParams.get("profile") ?? "";
+      return new Response(JSON.stringify(configs[profileId] ?? defaultConfig), { status: 200 });
+    }
+    if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+    return new Response("", { status: 502 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 function chooseImportFile(file: File) {
   typeCommand(":import");
   const input = document.querySelector<HTMLInputElement>('input[type="file"]');
@@ -286,6 +302,91 @@ describe("App", () => {
     );
     typeCommand(":gibtsnicht");
     expect(screen.getByText("Unbekanntes Kommando: :gibtsnicht")).toBeTruthy();
+  });
+
+  it(":profile öffnet die Einstellungen direkt im Abschnitt PROFILE", async () => {
+    setInitialConfig(defaultConfig);
+    stubBaseApi(defaultConfig);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Datasphere")).toBeTruthy());
+    typeCommand(":profile");
+    expect(await screen.findByRole("tab", { name: "PROFILE", selected: true })).toBeTruthy();
+  });
+
+  it(":profile <name> wechselt exakt, ohne den Profilkatalog auf dem Server zu verändern", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    const privateConfig = profileConfig("light", "Privatort");
+    writeActiveProfileId(PRIVATE_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    const fetchMock = stubProfiledApi(TWO_PROFILE_CATALOG, {
+      [WORK_PROFILE_ID]: work,
+      [PRIVATE_PROFILE_ID]: privateConfig,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText(/Privatort/)).toBeTruthy());
+    typeCommand(":profile   arbeit  ");
+
+    await waitFor(() => expect(localStorage.getItem("dashboard:active-profile")).toBe(WORK_PROFILE_ID));
+    expect(await screen.findByText(/Arbeitsort/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method !== undefined)).toBe(false);
+  });
+
+  it.each(["Arb", "Unbekannt"])(":profile %s meldet einen deutschen Fehler und bleibt beim alten Profil", async (name) => {
+    const work = profileConfig("dark", "Arbeitsort");
+    const privateConfig = profileConfig("light", "Privatort");
+    writeActiveProfileId(PRIVATE_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    stubProfiledApi(TWO_PROFILE_CATALOG, {
+      [WORK_PROFILE_ID]: work,
+      [PRIVATE_PROFILE_ID]: privateConfig,
+    });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText(/Privatort/)).toBeTruthy());
+    typeCommand(`:profile ${name}`);
+    expect(screen.getByRole("alert").textContent).toContain(`Profil „${name}" nicht gefunden.`);
+    expect(localStorage.getItem("dashboard:active-profile")).toBe(PRIVATE_PROFILE_ID);
+  });
+
+  it("führt profilabhängige Kommandos vor Katalogauflösung nicht mit dem default-Platzhalter aus", async () => {
+    writeActiveProfileId(DEFAULT_PROFILE_ID);
+    let resolveProfiles: (value: Response) => void = () => undefined;
+    const profilesPending = new Promise<Response>((resolve) => { resolveProfiles = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return profilesPending;
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(defaultConfig), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/profiles")).toBe(true));
+    typeCommand(":profile Arbeit");
+    expect(screen.getByRole("alert").textContent).toContain("Profile werden noch geladen");
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config?profile=default")).toBe(false);
+    resolveProfiles(new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 }));
   });
 
   it("isoliert das Raster, solange das Settings-Dialog offen ist", () => {
