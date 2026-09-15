@@ -127,8 +127,8 @@ describe("/api/config", () => {
     const saved = (await res.json()) as Config;
     expect(saved.theme).toBe("light");
     expect(saved.updatedAt).not.toBe(before.updatedAt);
-    const onDisk = JSON.parse(await readFile(configPath, "utf8")) as Config;
-    expect(onDisk.theme).toBe("light");
+    const onDisk = JSON.parse(await readFile(configPath, "utf8")) as { profiles: Array<{ config: Config }> };
+    expect(onDisk.profiles[0]?.config.theme).toBe("light");
   });
 
   itWithApp("PUT mit altem If-Match liefert 409 und den aktuellen Stand", async ({ app }) => {
