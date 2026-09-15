@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { configSchema, type Config, type ProfileId } from "../config/schema";
 import { describeIssue, issueRootKey } from "../config/describeIssue";
 import { ConfigConflictError } from "../api/config";
+import {
+  ProfileConflictError,
+  type CatalogMutationData,
+  type CreateProfileInput,
+  type DeleteProfileInput,
+  type RenameProfileInput,
+} from "../api/profiles";
+import type { ProfileCatalog } from "../config/local";
 import { profileApiUrl } from "../api/profileUrl";
 
 type Guest = { vmid: number; name: string };
@@ -15,20 +23,38 @@ export type SaveConfig = {
   isPending: boolean;
 };
 
+export type ProfileMutationOptions = {
+  onSuccess?: (data: CatalogMutationData) => void;
+  onError?: (error: unknown) => void;
+};
+
+export type CreateProfile = (input: CreateProfileInput, options?: ProfileMutationOptions) => void;
+export type RenameProfile = (input: RenameProfileInput, options?: ProfileMutationOptions) => void;
+export type DeleteProfile = (input: DeleteProfileInput, options?: ProfileMutationOptions) => void;
+
 type Props = {
   open: boolean;
   config: Config;
   profileId: ProfileId;
+  profiles: ProfileCatalog | undefined;
+  activeProfileId: ProfileId | undefined;
   guests: Guest[];
   onClose: () => void;
   save: SaveConfig;
   onReload?: () => Promise<Config | undefined>;
+  onReloadProfiles?: () => Promise<ProfileCatalog | undefined>;
+  onSwitchProfile: (profileId: ProfileId) => void;
+  onCreateProfile: CreateProfile;
+  onRenameProfile: RenameProfile;
+  onDeleteProfile: DeleteProfile;
+  initialSection?: Sec;
   /** Ausschließlich die Erfolgsmeldung außerhalb des Dialogs — Schließen und Fehlerfall
       übernimmt der Dialog selbst, weil nur er weiß, ob der Entwurf erhalten bleiben muss. */
   onSaved: () => void;
 };
 
 const SECTIONS = [
+  ["profile", "PROFILE"],
   ["links", "Links"],
   ["feeds", "Feeds"],
   ["cal", "Kalender"],
@@ -131,25 +157,90 @@ function isVisibleFocusable(element: HTMLElement): boolean {
   return style.display !== "none" && style.visibility !== "hidden";
 }
 
-export function SettingsPane({ open, config, profileId, guests, onClose, save, onSaved, onReload }: Props) {
+function serializeConfig(config: Config): string {
+  const parsed = configSchema.safeParse(config);
+  const value: unknown = parsed.success ? parsed.data : config;
+  return JSON.stringify(value) ?? "";
+}
+
+function normalizedProfileName(name: string): string {
+  return name.trim().toLocaleLowerCase("de-DE");
+}
+
+function profileNameError(name: string, profiles: ProfileCatalog, excludedId?: ProfileId): string | undefined {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return "Profilname darf nicht leer sein.";
+  if (trimmed.length > 64) return "Profilname darf höchstens 64 Zeichen lang sein.";
+  if (profiles.profiles.some((profile) => profile.id !== excludedId && normalizedProfileName(profile.name) === normalizedProfileName(trimmed))) {
+    return "Profilname ist bereits vergeben.";
+  }
+  return undefined;
+}
+
+type DiscardAction =
+  | { kind: "switch"; profileId: ProfileId }
+  | { kind: "delete"; profileId: ProfileId };
+
+export function SettingsPane({
+  open,
+  config,
+  profileId,
+  profiles,
+  activeProfileId,
+  guests,
+  onClose,
+  save,
+  onSaved,
+  onReload,
+  onReloadProfiles,
+  onSwitchProfile,
+  onCreateProfile,
+  onRenameProfile,
+  onDeleteProfile,
+  initialSection,
+}: Props) {
   const [draft, setDraft] = useState<Config>(config);
-  const [sec, setSec] = useState<Sec>("links");
+  const [sec, setSec] = useState<Sec>(initialSection ?? "links");
   const [error, setError] = useState<string | undefined>(undefined);
   const [placeQuery, setPlaceQuery] = useState(config.location.label);
   const [searching, setSearching] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [reloading, setReloading] = useState(false);
+  const [catalogConflict, setCatalogConflict] = useState(false);
+  const [reloadingProfiles, setReloadingProfiles] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [renameNames, setRenameNames] = useState<Record<string, string>>({});
+  const [confirmDelProfile, setConfirmDelProfile] = useState<ProfileId | null>(null);
+  const [discardAction, setDiscardAction] = useState<DiscardAction | undefined>(undefined);
   // Index der Gruppe, deren ✕ schon einmal geklickt wurde. Nur eine gleichzeitig — ein
   // zweiter Klick woanders meint eine neue Absicht, keine Bestätigung der ersten.
   const [confirmDelGroup, setConfirmDelGroup] = useState<number | null>(null);
   // Bangs sind in der Config ein Objekt. Beim Umbenennen im Objekt frisst ein bereits
   // vergebener Schlüssel den anderen Eintrag stillschweigend auf — also wird hier eine
   // Liste bearbeitet und erst beim Speichern wieder zum Objekt gefaltet.
-  const [bangs, setBangs] = useState<BangRow[]>([]);
+  const [bangs, setBangs] = useState<BangRow[]>(() =>
+    Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })),
+  );
   const boxRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const wasOpen = useRef(false);
   const placeRequest = useRef(0);
+  const configSnapshot = useRef(serializeConfig(config));
+  const activeProfileSnapshot = useRef<ProfileId | undefined>(activeProfileId);
+
+  const selectedProfile = profiles?.profiles.find((profile) => profile.id === activeProfileId);
+  const profileReady = profiles !== undefined && activeProfileId !== undefined && selectedProfile !== undefined;
+  const draftForComparison: Config = {
+    ...draft,
+    search: {
+      ...draft.search,
+      bangs: Object.fromEntries(bangs.map((bang) => [bang.key.trim(), bang.tpl])),
+    },
+  };
+  const draftDirty = serializeConfig(draftForComparison) !== configSnapshot.current;
+  const draftDirtyRef = useRef(draftDirty);
+  draftDirtyRef.current = draftDirty;
 
   // Nur beim Öffnen selbst aus config neu befüllen — config pollt alle 15 s vom Server
   // nach, und ein Effekt auf [open, config] würde bei jeder echten Änderung während
@@ -157,14 +248,40 @@ export function SettingsPane({ open, config, profileId, guests, onClose, save, o
   useEffect(() => {
     if (open && !wasOpen.current) {
       setDraft(config);
+      configSnapshot.current = serializeConfig(config);
+      activeProfileSnapshot.current = activeProfileId;
       setPlaceQuery(config.location.label);
       setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
+      setSec(initialSection ?? "links");
+      setCreateName("");
+      setRenameNames(Object.fromEntries((profiles?.profiles ?? []).map((profile) => [profile.id, profile.name])));
       setError(undefined);
       setConfirmDelGroup(null);
+      setConfirmDelProfile(null);
+      setDiscardAction(undefined);
       setConflict(false);
+      setCatalogConflict(false);
     }
     wasOpen.current = open;
-  }, [open, config]);
+  }, [open, config, initialSection, profiles, activeProfileId]);
+
+  // Ein bestätigter Profilwechsel lässt das Overlay offen. Sobald die neue lokale
+  // Config als Prop ankommt, wird deshalb ein neuer Entwurfssnapshot begonnen —
+  // spätere Polls desselben Profils dürfen eine laufende Bearbeitung weiterhin nicht
+  // überschreiben.
+  useEffect(() => {
+    if (!open || !profileReady || activeProfileSnapshot.current === activeProfileId) return;
+    activeProfileSnapshot.current = activeProfileId;
+    setDraft(config);
+    configSnapshot.current = serializeConfig(config);
+    setPlaceQuery(config.location.label);
+    setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
+    setConfirmDelGroup(null);
+    setConfirmDelProfile(null);
+    setDiscardAction(undefined);
+    setError(undefined);
+    setConflict(false);
+  }, [activeProfileId, config, open, profileReady]);
 
   // Fokus in den Dialog und beim Schließen zurück auf die Stelle, von der er kam.
   useEffect(() => {
@@ -232,6 +349,132 @@ export function SettingsPane({ open, config, profileId, guests, onClose, save, o
     } finally {
       if (request === placeRequest.current) setSearching(false);
     }
+  }
+
+  function handleProfileError(err: unknown) {
+    setProfileBusy(false);
+    if (err instanceof ProfileConflictError) {
+      setCatalogConflict(true);
+      setError("Ein anderes Gerät hat den Profilkatalog geändert. Bitte Serverstand neu laden.");
+    } else {
+      setError("Profiländerung fehlgeschlagen.");
+    }
+  }
+
+  function handleSwitchProfile(nextProfileId: ProfileId) {
+    if (!profileReady || catalogConflict || nextProfileId === activeProfileId) return;
+    if (draftDirty) {
+      setDiscardAction({ kind: "switch", profileId: nextProfileId });
+      return;
+    }
+    onSwitchProfile(nextProfileId);
+  }
+
+  function submitCreateProfile() {
+    if (!profileReady || profiles === undefined || activeProfileId === undefined || catalogConflict) return;
+    const name = createName.trim();
+    const nameError = profileNameError(name, profiles);
+    if (nameError !== undefined) {
+      setError(nameError);
+      return;
+    }
+    setError(undefined);
+    setProfileBusy(true);
+    onCreateProfile(
+      { name, sourceProfileId: activeProfileId, profilesUpdatedAt: profiles.profilesUpdatedAt },
+      {
+        onSuccess: (data) => {
+          setProfileBusy(false);
+          const createdId = data.createdId;
+          if (createdId === undefined) {
+            setError("Profil konnte nicht angelegt werden.");
+            return;
+          }
+          setCreateName("");
+          if (draftDirtyRef.current) {
+            setDiscardAction({ kind: "switch", profileId: createdId });
+          } else {
+            onSwitchProfile(createdId);
+          }
+        },
+        onError: handleProfileError,
+      },
+    );
+  }
+
+  function submitRenameProfile(profileIdToRename: ProfileId) {
+    if (!profileReady || profiles === undefined || catalogConflict) return;
+    const current = profiles.profiles.find((profile) => profile.id === profileIdToRename);
+    if (current === undefined) return;
+    const name = (renameNames[profileIdToRename] ?? current.name).trim();
+    const nameError = profileNameError(name, profiles, profileIdToRename);
+    if (nameError !== undefined) {
+      setError(nameError);
+      return;
+    }
+    setError(undefined);
+    setProfileBusy(true);
+    onRenameProfile(
+      { profileId: profileIdToRename, name, profilesUpdatedAt: profiles.profilesUpdatedAt },
+      {
+        onSuccess: (data) => {
+          setProfileBusy(false);
+          const renamed = data.catalog.profiles.find((profile) => profile.id === profileIdToRename);
+          if (renamed !== undefined) {
+            setRenameNames((names) => ({ ...names, [profileIdToRename]: renamed.name }));
+          } else {
+            setRenameNames((names) => ({ ...names, [profileIdToRename]: name }));
+          }
+        },
+        onError: handleProfileError,
+      },
+    );
+  }
+
+  function performDeleteProfile(profileIdToDelete: ProfileId) {
+    if (!profileReady || profiles === undefined || catalogConflict || profiles.profiles.length <= 1) return;
+    setError(undefined);
+    setProfileBusy(true);
+    onDeleteProfile(
+      { profileId: profileIdToDelete, profilesUpdatedAt: profiles.profilesUpdatedAt },
+      {
+        onSuccess: (data) => {
+          setProfileBusy(false);
+          setConfirmDelProfile(null);
+          if (profileIdToDelete === activeProfileId) {
+            const firstRemaining = data.catalog.profiles[0];
+            if (firstRemaining !== undefined) onSwitchProfile(firstRemaining.id);
+          }
+        },
+        onError: handleProfileError,
+      },
+    );
+  }
+
+  function requestDeleteProfile(profileIdToDelete: ProfileId) {
+    if (profileIdToDelete === activeProfileId && draftDirty) {
+      setDiscardAction({ kind: "delete", profileId: profileIdToDelete });
+      return;
+    }
+    performDeleteProfile(profileIdToDelete);
+  }
+
+  function confirmDiscard() {
+    const action = discardAction;
+    setDiscardAction(undefined);
+    if (action === undefined) return;
+    if (action.kind === "switch") {
+      onSwitchProfile(action.profileId);
+    } else {
+      setConfirmDelProfile(null);
+      performDeleteProfile(action.profileId);
+    }
+  }
+
+  function cancelDiscard() {
+    const action = discardAction;
+    setDiscardAction(undefined);
+    if (action?.kind === "delete") setConfirmDelProfile(null);
   }
 
   const guestChoices = [...guests];
@@ -341,6 +584,7 @@ export function SettingsPane({ open, config, profileId, guests, onClose, save, o
         return;
       }
       setDraft(current);
+      configSnapshot.current = serializeConfig(current);
       setPlaceQuery(current.location.label);
       setBangs(Object.entries(current.search.bangs).map(([key, tpl]) => ({ key, tpl })));
       setConflict(false);
@@ -352,7 +596,44 @@ export function SettingsPane({ open, config, profileId, guests, onClose, save, o
     }
   }
 
+  async function reloadProfileCatalog() {
+    if (!onReloadProfiles) {
+      setError("Profilkatalog kann hier nicht neu geladen werden.");
+      return;
+    }
+    setReloadingProfiles(true);
+    try {
+      const current = await onReloadProfiles();
+      if (current === undefined) {
+        setError("Profilkatalog konnte nicht geladen werden.");
+        return;
+      }
+      setCatalogConflict(false);
+      setError(undefined);
+    } catch {
+      setError("Profilkatalog konnte nicht geladen werden.");
+    } finally {
+      setReloadingProfiles(false);
+    }
+  }
+
   if (!open) return null;
+
+  if (!profileReady) {
+    return (
+      <div className="overlay">
+        <div className="overlay-box set-box" role="dialog" aria-modal="true" aria-labelledby="set-title">
+          <div className="set-head">
+            <h2 id="set-title">Einstellungen</h2>
+          </div>
+          <p className="set-hint">Profile werden geladen — Einstellungen sind gleich verfügbar.</p>
+          <div className="set-foot">
+            <button type="button" className="btn" onClick={onClose}>Abbrechen</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overlay">
@@ -401,6 +682,107 @@ export function SettingsPane({ open, config, profileId, guests, onClose, save, o
           </div>
 
           <div className="set-body" id="set-panel" role="tabpanel" aria-labelledby={`set-tab-${sec}`}>
+            {sec === "profile" && (
+              <section aria-labelledby="profile-section-title">
+                <h3 id="profile-section-title" className="sr-only">Profile</h3>
+                <p className="set-hint">Das aktive Profil gilt nur auf diesem Gerät. Ein neues Profil ist eine Kopie des aktuell aktiven Profils.</p>
+                <div className="profile-list" role="table" aria-label="Profile">
+                  <div className="tbl-head profile-row" role="row">
+                    <span role="columnheader">Profil</span>
+                    <span role="columnheader">Aktionen</span>
+                  </div>
+                  {profiles.profiles.map((profile) => {
+                    const active = profile.id === activeProfileId;
+                    const displayName = renameNames[profile.id] ?? profile.name;
+                    const armed = confirmDelProfile === profile.id;
+                    const canDelete = profiles.profiles.length > 1;
+                    return (
+                      <div
+                        className={`profile-row${active ? " is-active" : ""}`}
+                        key={profile.id}
+                        role="row"
+                        aria-current={active ? "true" : undefined}
+                        aria-label={`${displayName}${active ? ", aktiv" : ""}`}
+                      >
+                        <div className="profile-name" role="cell">
+                          <input
+                            className="inp"
+                            value={displayName}
+                            aria-label={`Profilname „${profile.name}"`}
+                            maxLength={64}
+                            onChange={(e) => setRenameNames((names) => ({ ...names, [profile.id]: e.target.value }))}
+                          />
+                          {active && <span className="profile-active">aktiv</span>}
+                        </div>
+                        <span className="rowacts" role="cell">
+                          <button
+                            type="button"
+                            className="rowact"
+                            disabled={active || profileBusy || catalogConflict}
+                            onClick={() => handleSwitchProfile(profile.id)}
+                            aria-label={active ? `Profil „${profile.name}" aktiv` : `Profil „${profile.name}" wechseln`}
+                          >
+                            {active ? "aktiv" : "wechseln"}
+                          </button>
+                          <button
+                            type="button"
+                            className="rowact"
+                            disabled={profileBusy || catalogConflict}
+                            onClick={() => submitRenameProfile(profile.id)}
+                            aria-label={`Profil „${profile.name}" umbenennen`}
+                          >
+                            umbenennen
+                          </button>
+                          <button
+                            type="button"
+                            className={`rowact rowact--del${armed ? " is-confirm" : ""}`}
+                            disabled={!canDelete || profileBusy || catalogConflict}
+                            onClick={armed ? () => requestDeleteProfile(profile.id) : () => setConfirmDelProfile(profile.id)}
+                            onBlur={() => setConfirmDelProfile((current) => current === profile.id ? null : current)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape" && armed) {
+                                setConfirmDelProfile(null);
+                                e.stopPropagation();
+                              }
+                            }}
+                            aria-label={
+                              armed
+                                ? `Profil „${profile.name}" endgültig löschen — noch einmal klicken zum Bestätigen`
+                                : `Profil „${profile.name}" löschen`
+                            }
+                          >
+                            {armed ? "löschen?" : "löschen"}
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="profile-create">
+                  <label htmlFor="s-profile-name">Neuer Profilname</label>
+                  <span className="profile-create-controls">
+                    <input
+                      className="inp"
+                      id="s-profile-name"
+                      value={createName}
+                      maxLength={64}
+                      onChange={(e) => setCreateName(e.target.value)}
+                    />
+                    <button type="button" className="btn" disabled={profileBusy || catalogConflict} onClick={submitCreateProfile}>
+                      Profil duplizieren
+                    </button>
+                  </span>
+                </div>
+
+                {catalogConflict && (
+                  <button type="button" className="btn" onClick={() => void reloadProfileCatalog()} disabled={reloadingProfiles}>
+                    {reloadingProfiles ? "lädt…" : "Profilkatalog neu laden"}
+                  </button>
+                )}
+              </section>
+            )}
+
             {sec === "links" && (
               <section>
                 <p className="set-hint">Kürzel beginnen mit <b>g</b> und sind genau zwei Zeichen lang — <b>gd</b> heißt: erst g, dann d. Doppelte Kürzel werden beim Speichern abgelehnt.</p>
@@ -834,6 +1216,20 @@ export function SettingsPane({ open, config, profileId, guests, onClose, save, o
           {error && <span className="set-error" role="alert">{error}</span>}
           <span className="spacer note">:export sichert als Datei · :import liest sie zurück</span>
         </div>
+
+        {discardAction && (
+          <div className="profile-discard" aria-live="assertive">
+            <p role="alert">
+              Ungespeicherter Entwurf würde beim {discardAction.kind === "switch" ? "Profilwechsel" : "Löschen des Profils"} verworfen.
+            </p>
+            <div className="profile-discard-actions">
+              <button type="button" className="btn btn--primary" onClick={confirmDiscard}>
+                Entwurf verwerfen und Profil {discardAction.kind === "switch" ? "wechseln" : "löschen"}
+              </button>
+              <button type="button" className="btn" onClick={cancelDiscard}>Entwurf behalten</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

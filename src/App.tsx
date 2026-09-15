@@ -23,7 +23,15 @@ import {
   type ProfileCatalog,
 } from "./config/local";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
-import { useProfiles } from "./api/profiles";
+import {
+  useCreateProfile,
+  useDeleteProfile,
+  useProfiles,
+  useRenameProfile,
+  type CreateProfileInput,
+  type DeleteProfileInput,
+  type RenameProfileInput,
+} from "./api/profiles";
 import { useCachedQuery } from "./api/useCachedQuery";
 import { decodeWeather, fetchWeather, Weather } from "./widgets/Weather";
 import { decodeEvents, fetchEvents, filterAgendaEvents, Agenda } from "./widgets/Agenda";
@@ -34,7 +42,10 @@ import { eventFetchRange } from "./lib/date";
 import { linkHost } from "./lib/host";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { decodeHomelab, fetchHomelab, Homelab } from "./widgets/Homelab";
-import { SettingsPane } from "./shell/SettingsPane";
+import {
+  SettingsPane,
+  type ProfileMutationOptions,
+} from "./shell/SettingsPane";
 
 type RowInfo = { url?: string };
 
@@ -82,6 +93,9 @@ function useNow(): Date {
 export default function App() {
   const queryClient = useQueryClient();
   const profilesQuery = useProfiles();
+  const createProfileMutation = useCreateProfile();
+  const renameProfileMutation = useRenameProfile();
+  const deleteProfileMutation = useDeleteProfile();
   const [localCatalog] = useState<ProfileCatalog | undefined>(() => readLocalCatalog());
   const [storedProfileId] = useState<ProfileId | undefined>(() => readActiveProfileId());
   const [activeProfileId, setActiveProfileId] = useState<ProfileId | undefined>(() =>
@@ -109,7 +123,9 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const switchProfile = useCallback((nextProfileId: ProfileId): void => {
-    if (catalog !== undefined && !profileInCatalog(catalog, nextProfileId)) return;
+    const cachedCatalog = queryClient.getQueryData<ProfileCatalog>(["profiles"]);
+    const knownCatalog = cachedCatalog ?? catalog;
+    if (knownCatalog !== undefined && !profileInCatalog(knownCatalog, nextProfileId)) return;
     if (nextProfileId === activeProfileId) {
       writeActiveProfileId(nextProfileId);
       return;
@@ -124,6 +140,36 @@ export default function App() {
     dispatch({ type: "resetSelection" });
     setActiveProfileId(nextProfileId);
   }, [activeProfileId, catalog, queryClient]);
+
+  const createProfile = useCallback((
+    input: CreateProfileInput,
+    options?: ProfileMutationOptions,
+  ): void => {
+    createProfileMutation.mutate(input, {
+      onSuccess: (data) => options?.onSuccess?.(data),
+      onError: (error) => options?.onError?.(error),
+    });
+  }, [createProfileMutation]);
+
+  const renameProfile = useCallback((
+    input: RenameProfileInput,
+    options?: ProfileMutationOptions,
+  ): void => {
+    renameProfileMutation.mutate(input, {
+      onSuccess: (data) => options?.onSuccess?.(data),
+      onError: (error) => options?.onError?.(error),
+    });
+  }, [renameProfileMutation]);
+
+  const deleteProfile = useCallback((
+    input: DeleteProfileInput,
+    options?: ProfileMutationOptions,
+  ): void => {
+    deleteProfileMutation.mutate(input, {
+      onSuccess: (data) => options?.onSuccess?.(data),
+      onError: (error) => options?.onError?.(error),
+    });
+  }, [deleteProfileMutation]);
 
   useEffect(() => {
     if (catalog === undefined) return;
@@ -541,6 +587,8 @@ export default function App() {
         open={settingsOpen}
         config={config}
         profileId={profileId}
+        profiles={catalog}
+        activeProfileId={resolvedProfileId}
         guests={homelabEnabled ? labQuery.data?.guests ?? [] : []}
         onClose={() => setSettingsOpen(false)}
         save={saveConfig}
@@ -548,6 +596,14 @@ export default function App() {
           const result = await configQuery.refetch();
           return result.isSuccess ? result.data : undefined;
         }}
+        onReloadProfiles={async () => {
+          const result = await profilesQuery.refetch();
+          return result.isSuccess ? result.data : undefined;
+        }}
+        onSwitchProfile={switchProfile}
+        onCreateProfile={createProfile}
+        onRenameProfile={renameProfile}
+        onDeleteProfile={deleteProfile}
         // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
         // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
         onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}

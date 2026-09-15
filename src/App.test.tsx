@@ -38,6 +38,7 @@ const PROFILE_CATALOG = {
 
 const WORK_PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
 const PRIVATE_PROFILE_ID = "223e4567-e89b-42d3-a456-426614174000" as ProfileId;
+const CREATED_PROFILE_ID = "323e4567-e89b-42d3-a456-426614174000" as ProfileId;
 const TWO_PROFILE_CATALOG: ProfileCatalog = {
   profilesUpdatedAt: "2026-09-15T00:00:00.000Z",
   profiles: [
@@ -342,6 +343,40 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByRole("alert").textContent)
       .toContain("Server nicht erreichbar"));
+  });
+
+  it("verdrahtet Profilduplikate mit der Katalogmutation und schaltet erst nach Bestätigung", async () => {
+    writeLocalCatalog(PROFILE_CATALOG);
+    let resolveCreate: (response: Response) => void = () => undefined;
+    const createPending = new Promise<Response>((resolve) => { resolveCreate = resolve; });
+    const createdCatalog: ProfileCatalog = {
+      ...PROFILE_CATALOG,
+      profilesUpdatedAt: "2026-09-16T00:00:00.000Z",
+      profiles: [...PROFILE_CATALOG.profiles, { id: CREATED_PROFILE_ID, name: "Zuhause" }],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles" && init?.method === "POST") return createPending;
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(defaultConfig), { status: 200 });
+      if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    typeCommand(":settings");
+    fireEvent.click(await screen.findByRole("tab", { name: "PROFILE" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Neuer Profilname" }), { target: { value: "  Zuhause  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Profil duplizieren" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input, init]) => {
+      return String(input) === "/api/profiles" && init?.method === "POST";
+    })).toBe(true));
+    expect(localStorage.getItem("dashboard:active-profile")).toBe(DEFAULT_PROFILE_ID);
+
+    resolveCreate(new Response(JSON.stringify({ catalog: createdCatalog, createdId: CREATED_PROFILE_ID }), { status: 200 }));
+    await waitFor(() => expect(localStorage.getItem("dashboard:active-profile")).toBe(CREATED_PROFILE_ID));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/config?profile=${CREATED_PROFILE_ID}`)).toBe(true);
   });
 
   it("zeigt partielle Kalender- und Feed-Ausfälle in Pane und Statusline", async () => {
