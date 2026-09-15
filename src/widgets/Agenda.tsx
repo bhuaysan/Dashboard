@@ -29,7 +29,8 @@ type CalendarSourceResult = { items: CalEvent[]; failure?: string };
 
 // `from` und `to` kommen von außen, weil zwei Panes dieselben Termine brauchen: die
 // Agenda die nächsten Tage, das Monatsraster den ganzen sichtbaren Monat. Der optionale
-// Rückwärts-kompatible Aufruf mit nur `to` bleibt für direkte Verbraucher erhalten.
+// zweite Datumswert grenzt den abgefragten Bereich ein; fehlt er, wird `fromOrTo` als Ende
+// eines eintägigen Bereichs verwendet.
 export async function fetchEvents(
   profileId: ProfileId,
   cals: Config["calendars"],

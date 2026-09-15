@@ -60,6 +60,7 @@ function monitoringConfig(enabled: boolean, homelabVisible = true): Config {
 
 function setInitialConfig(config: Config): void {
   localStorage.setItem("dashboard:config:default", JSON.stringify(config));
+  writeLocalCatalog(PROFILE_CATALOG);
 }
 
 afterEach(() => {
@@ -77,6 +78,7 @@ function typeCommand(cmd: string) {
 }
 
 function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResponse: HomelabData = EMPTY_HOMELAB) {
+  writeLocalCatalog(PROFILE_CATALOG);
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/profiles") return new Response(JSON.stringify(PROFILE_CATALOG), { status: 200 });
@@ -244,6 +246,7 @@ describe("App", () => {
   });
 
   it(":refresh holt die Quellen tatsächlich erneut ab", async () => {
+    writeLocalCatalog(PROFILE_CATALOG);
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     try {
@@ -369,6 +372,7 @@ describe("App", () => {
       if (target.includes("calendar-ok")) return new Response(ics, { status: 200 });
       return new Response("kaputt", { status: 502 });
     });
+    writeLocalCatalog(PROFILE_CATALOG);
     vi.stubGlobal("fetch", fetchMock);
 
     render(
@@ -422,6 +426,33 @@ describe("App", () => {
     expect(await screen.findByText(/Arbeitsort/)).toBeTruthy();
   });
 
+  it("wartet ohne lokalen Katalog vor Config- und Quellen-Requests auf den Serverkatalog", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    writeActiveProfileId(DEFAULT_PROFILE_ID);
+    let resolveProfiles: (value: Response) => void = () => undefined;
+    const profilesPending = new Promise<Response>((resolve) => { resolveProfiles = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return profilesPending;
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(work), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/profiles")).toBe(true));
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config?profile=default")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const path = new URL(String(input), "http://dashboard.test").pathname;
+      return path === "/api/proxy" || path === "/api/homelab";
+    })).toBe(false);
+
+    resolveProfiles(new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 }));
+    await waitFor(() => expect(localStorage.getItem("dashboard:active-profile")).toBe(WORK_PROFILE_ID));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/config?profile=${WORK_PROFILE_ID}`)).toBe(true));
+    expect(await screen.findByText(/Arbeitsort/)).toBeTruthy();
+  });
+
   it("isoliert zwei simulierte Geräte durch die lokale aktive ID", async () => {
     const work = profileConfig("dark", "Arbeitsort");
     const privateConfig = profileConfig("light", "Privatort");
@@ -472,6 +503,9 @@ describe("App", () => {
     render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
     await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
 
+    fireEvent.keyDown(window, { key: "5" });
+    expect(document.querySelector(".sl-panes .is-active")?.textContent).toContain("news");
+
     client.setQueryData(["profiles"], {
       ...TWO_PROFILE_CATALOG,
       profiles: [TWO_PROFILE_CATALOG.profiles[1]],
@@ -479,6 +513,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("Profil wurde entfernt — Standardprofil aktiv.")).toBeTruthy());
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(screen.queryByRole("heading", { name: "Weather" })).toBeNull();
+    expect(document.querySelector(".sl-panes .is-active")).toBeNull();
     expect(localStorage.getItem("dashboard:active-profile")).toBe(PRIVATE_PROFILE_ID);
   });
 

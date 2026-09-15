@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { configSchema, type Config } from "../config/schema";
+import { configSchema, type Config, type ProfileId } from "../config/schema";
 import { describeIssue, issueRootKey } from "../config/describeIssue";
 import { ConfigConflictError } from "../api/config";
+import { profileApiUrl } from "../api/profileUrl";
 
 type Guest = { vmid: number; name: string };
 type SaveOptions = {
@@ -17,6 +18,7 @@ export type SaveConfig = {
 type Props = {
   open: boolean;
   config: Config;
+  profileId: ProfileId;
   guests: Guest[];
   onClose: () => void;
   save: SaveConfig;
@@ -129,7 +131,7 @@ function isVisibleFocusable(element: HTMLElement): boolean {
   return style.display !== "none" && style.visibility !== "hidden";
 }
 
-export function SettingsPane({ open, config, guests, onClose, save, onSaved, onReload }: Props) {
+export function SettingsPane({ open, config, profileId, guests, onClose, save, onSaved, onReload }: Props) {
   const [draft, setDraft] = useState<Config>(config);
   const [sec, setSec] = useState<Sec>("links");
   const [error, setError] = useState<string | undefined>(undefined);
@@ -202,7 +204,7 @@ export function SettingsPane({ open, config, guests, onClose, save, onSaved, onR
     setError(undefined);
     try {
       const target = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(placeQuery)}&count=1&language=de`;
-      const res = await fetch(`/api/proxy?url=${encodeURIComponent(target)}`);
+      const res = await fetch(profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: target })));
       if (request !== placeRequest.current) {
         try { await res.body?.cancel(); } catch { /* veraltete Antwort wird verworfen */ }
         return;

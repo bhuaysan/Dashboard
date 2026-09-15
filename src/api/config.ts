@@ -39,7 +39,7 @@ async function conflictRevision(res: Response): Promise<string | undefined> {
   }
 }
 
-export function useConfig(profileId: ProfileId): DefinedUseQueryResult<Config> {
+export function useConfig(profileId: ProfileId, options: { enabled?: boolean } = {}): DefinedUseQueryResult<Config> {
   const queryKey = ["config", profileId];
   const url = profileApiUrl("/api/config", profileId);
   const initialConfig = readLocalConfig(profileId) ?? defaultConfig;
@@ -62,6 +62,7 @@ export function useConfig(profileId: ProfileId): DefinedUseQueryResult<Config> {
     // server Config must be requested immediately instead of waiting 30 seconds.
     initialDataUpdatedAt: 0,
     staleTime: 30_000,
+    enabled: options.enabled ?? true,
     // Local Storage liefert sofort ein sichtbares Bild, ist aber keine Aussage
     // darüber, ob der Serverstand noch aktuell ist.
     refetchOnMount: "always",

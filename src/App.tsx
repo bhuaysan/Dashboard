@@ -42,14 +42,15 @@ type RowInfo = { url?: string };
 // mehr. Beide Panes teilen sich eine Abfrage, deshalb wird hier zugeschnitten.
 const AGENDA_DAYS = 4;
 
-function profileInCatalog(catalog: ProfileCatalog | undefined, profileId: ProfileId): boolean {
-  return catalog?.profiles.some((profile) => profile.id === profileId) ?? false;
+function profileInCatalog(catalog: ProfileCatalog | undefined, profileId: ProfileId | undefined): boolean {
+  return profileId !== undefined && (catalog?.profiles.some((profile) => profile.id === profileId) ?? false);
 }
 
-function resolveProfileId(catalog: ProfileCatalog | undefined, stored: ProfileId | undefined): ProfileId {
-  if (catalog !== undefined && stored !== undefined && profileInCatalog(catalog, stored)) return stored;
-  const first = catalog?.profiles[0];
-  return first?.id ?? stored ?? DEFAULT_PROFILE_ID;
+function resolveProfileId(catalog: ProfileCatalog | undefined, stored: ProfileId | undefined): ProfileId | undefined {
+  if (catalog === undefined) return undefined;
+  if (stored !== undefined && profileInCatalog(catalog, stored)) return stored;
+  const first = catalog.profiles[0];
+  return first?.id;
 }
 
 function isProfileQuery(queryKey: readonly unknown[], profileId: ProfileId): boolean {
@@ -81,12 +82,17 @@ export default function App() {
   const profilesQuery = useProfiles();
   const [localCatalog] = useState<ProfileCatalog | undefined>(() => readLocalCatalog());
   const [storedProfileId] = useState<ProfileId | undefined>(() => readActiveProfileId());
-  const [activeProfileId, setActiveProfileId] = useState<ProfileId>(() =>
+  const [activeProfileId, setActiveProfileId] = useState<ProfileId | undefined>(() =>
     resolveProfileId(localCatalog, storedProfileId),
   );
   const catalog = profilesQuery.data;
-  const profileId = resolveProfileId(catalog, activeProfileId);
-  const configQuery = useConfig(profileId);
+  const resolvedProfileId = resolveProfileId(catalog, activeProfileId);
+  // Before a first catalog arrives there is no selected profile. The default ID below is
+  // only a hook key placeholder; all profile-dependent queries stay disabled until a local
+  // catalog or the server catalog provides a validated first/selected ID.
+  const profileId = resolvedProfileId ?? DEFAULT_PROFILE_ID;
+  const profileReady = resolvedProfileId !== undefined;
+  const configQuery = useConfig(profileId, { enabled: profileReady });
   const saveConfig = useSaveConfig(profileId);
   const config = configQuery.data;
   const [ui, dispatch] = useReducer(uiReducer, initialUiState);
@@ -108,10 +114,12 @@ export default function App() {
     }
     const previousProfileId = activeProfileId;
     writeActiveProfileId(nextProfileId);
-    void queryClient.cancelQueries({
-      predicate: (query) => isProfileQuery(query.queryKey, previousProfileId),
-    });
-    dispatch({ type: "reset" });
+    if (previousProfileId !== undefined) {
+      void queryClient.cancelQueries({
+        predicate: (query) => isProfileQuery(query.queryKey, previousProfileId),
+      });
+    }
+    dispatch({ type: "resetSelection" });
     setActiveProfileId(nextProfileId);
   }, [activeProfileId, catalog, queryClient]);
 
@@ -124,7 +132,7 @@ export default function App() {
       switchProfile(first.id);
       if (wasKnown) setMessage({ text: "Profil wurde entfernt — Standardprofil aktiv.", level: "info" });
     } else {
-      writeActiveProfileId(activeProfileId);
+      if (activeProfileId !== undefined) writeActiveProfileId(activeProfileId);
     }
     previousCatalog.current = catalog;
   }, [activeProfileId, catalog, switchProfile]);
@@ -149,23 +157,23 @@ export default function App() {
     `profile:${profileId}:wx:${config.location.lat},${config.location.lon}`,
     () => fetchWeather(profileId, config.location),
     600_000,
-    { decode: decodeWeather, refetchIntervalMs: 600_000 },
+    { decode: decodeWeather, refetchIntervalMs: 600_000, enabled: profileReady },
   );
   const calQuery = useCachedQuery(
     `profile:${profileId}:cal:${JSON.stringify(config.calendars)}:${calRange.from.getTime()}:${calRange.to.getTime()}`,
     () => fetchEvents(profileId, config.calendars, calRange.from, calRange.to),
     900_000,
-    { decode: decodeEvents, refetchIntervalMs: 900_000 },
+    { decode: decodeEvents, refetchIntervalMs: 900_000, enabled: profileReady },
   );
   const newsQuery = useCachedQuery(
     `profile:${profileId}:news:${JSON.stringify(config.feeds)}`,
     () => fetchNews(profileId, config.feeds),
     900_000,
-    { decode: decodeNews, refetchIntervalMs: 900_000 },
+    { decode: decodeNews, refetchIntervalMs: 900_000, enabled: profileReady },
   );
   const homelabEnabled = config.homelab.enabled;
   const labQuery = useCachedQuery(`profile:${profileId}:pve`, () => fetchHomelab(profileId), 60_000, {
-    decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: homelabEnabled,
+    decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: profileReady && homelabEnabled,
   });
 
   // undefined bleibt undefined: „noch keine Termine" ist ein anderer Zustand als
@@ -530,6 +538,7 @@ export default function App() {
       <SettingsPane
         open={settingsOpen}
         config={config}
+        profileId={profileId}
         guests={homelabEnabled ? labQuery.data?.guests ?? [] : []}
         onClose={() => setSettingsOpen(false)}
         save={saveConfig}

@@ -1,11 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { SettingsPane, type SaveConfig } from "./SettingsPane";
+import { SettingsPane as SettingsPaneComponent, type SaveConfig } from "./SettingsPane";
 import { ConfigConflictError } from "../api/config";
 import { defaultConfig } from "../config/defaults";
-import type { Config } from "../config/schema";
+import type { Config, ProfileId } from "../config/schema";
+import type { ComponentProps } from "react";
 
 const guests = [{ vmid: 100, name: "caddy" }, { vmid: 110, name: "minecraft.local" }];
+const PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
+
+type TestSettingsProps = Omit<ComponentProps<typeof SettingsPaneComponent>, "profileId"> & { profileId?: ProfileId };
+
+function SettingsPane(props: TestSettingsProps) {
+  const { profileId = PROFILE_ID, ...rest } = props;
+  return <SettingsPaneComponent {...rest} profileId={profileId} />;
+}
 
 // Nur mutate und isPending werden von SettingsPane tatsächlich gelesen — der Rest der
 // echten UseMutationResult-Form ist für diesen Test nicht das Verhalten, das geprüft wird.
@@ -298,6 +307,22 @@ describe("SettingsPane", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("sendet die aktive Profil-ID bei der Ortssuche an den Proxy", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      results: [{ name: "Heilbronn", latitude: 49, longitude: 9 }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SettingsPane open config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      onClose={() => undefined} save={saveSucceeds()} onSaved={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    const target = "https://geocoding-api.open-meteo.com/v1/search?name=Heilbronn&count=1&language=de";
+    expect(fetchMock).toHaveBeenCalledWith(`/api/proxy?profile=${PROFILE_ID}&url=${encodeURIComponent(target)}`);
   });
 
   it("lässt eine ältere Ortssuche kein neueres Ergebnis überschreiben", async () => {
