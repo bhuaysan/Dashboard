@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { buildConsoleUrl } from "./lib/url";
@@ -128,6 +128,12 @@ function jsonFile(value: unknown): File {
   // jsdoms File-Stub hat in dieser Vitest-Version kein implementiertes Blob.text().
   Object.defineProperty(file, "text", { value: async () => JSON.stringify(value) });
   return file;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
 }
 
 function profileConfig(theme: Config["theme"], location: string, hideWeather = false): Config {
@@ -431,6 +437,94 @@ describe("App", () => {
     resolveConfig(new Response(JSON.stringify(defaultConfig), { status: 200 }));
   });
 
+  it("zeigt bei fehlender Config einen deutschen Fehler, Retry und bekannte Profile", async () => {
+    const privateConfig = profileConfig("light", "Privatort");
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    let workConfigRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") {
+        if (parsed.searchParams.get("profile") === WORK_PROFILE_ID) {
+          workConfigRequests += 1;
+          return new Response("nicht erreichbar", { status: 503 });
+        }
+        return new Response(JSON.stringify(privateConfig), { status: 200 });
+      }
+      if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Profil-Konfiguration"), { timeout: 4000 });
+    expect(screen.getByRole("button", { name: "Erneut versuchen" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Privat/ })).toBeTruthy();
+
+    const requestsBeforeRetry = workConfigRequests;
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+    await waitFor(() => expect(workConfigRequests).toBeGreaterThan(requestsBeforeRetry));
+    fireEvent.click(screen.getByRole("button", { name: /Privat/ }));
+    await waitFor(() => expect(screen.getByText(/Privatort/)).toBeTruthy());
+    expect(screen.queryByText(/Profil-Konfiguration konnte nicht geladen werden/)).toBeNull();
+  });
+
+  it("zeigt einen Katalogfehler mit Retry und lädt danach das erste Profil", async () => {
+    localStorage.removeItem("dashboard:profiles");
+    writeActiveProfileId(DEFAULT_PROFILE_ID);
+    let profileRequests = 0;
+    const work = profileConfig("dark", "Arbeitsort");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") {
+        profileRequests += 1;
+        return profileRequests <= 2
+          ? new Response("nicht erreichbar", { status: 503 })
+          : new Response(JSON.stringify({ ...TWO_PROFILE_CATALOG, profiles: [{ id: WORK_PROFILE_ID, name: "Arbeit" }] }), { status: 200 });
+      }
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(work), { status: 200 });
+      if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Profilkatalog"), { timeout: 4000 });
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+    await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
+    expect(profileRequests).toBeGreaterThan(2);
+  });
+
+  it("zeigt einen Katalogfehler auch mit lokalem Stand und kann ihn erneut laden", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    const privateConfig = profileConfig("light", "Privatort");
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    let profileRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") {
+        profileRequests += 1;
+        return profileRequests <= 2
+          ? new Response("nicht erreichbar", { status: 503 })
+          : new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      }
+      if (parsed.pathname === "/api/config") return new Response(JSON.stringify(work), { status: 200 });
+      if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Profilkatalog"), { timeout: 4000 });
+    fireEvent.click(screen.getByRole("button", { name: "Erneut versuchen" }));
+    await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
+    expect(profileRequests).toBeGreaterThan(2);
+  });
+
   it("isoliert das Raster, solange das Settings-Dialog offen ist", () => {
     setInitialConfig(defaultConfig);
     render(
@@ -459,6 +553,48 @@ describe("App", () => {
     expect(fetchMock.mock.calls.some(([input, init]) =>
       String(input) === "/api/config?profile=default" && init?.method === "PUT",
     )).toBe(true);
+  });
+
+  it("verwirft einen verzögerten Import nach jedem Profilwechsel", async () => {
+    const work = profileConfig("dark", "Arbeitsort");
+    const privateConfig = profileConfig("light", "Privatort");
+    const importText = deferred<string>();
+    writeActiveProfileId(WORK_PROFILE_ID);
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config" && init?.method === "PUT") {
+        return new Response(JSON.stringify(work), { status: 200 });
+      }
+      if (parsed.pathname === "/api/config") {
+        return new Response(JSON.stringify(parsed.searchParams.get("profile") === WORK_PROFILE_ID ? work : privateConfig), { status: 200 });
+      }
+      if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(EMPTY_HOMELAB), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File([""], "config.json", { type: "application/json" });
+    Object.defineProperty(file, "text", { value: () => importText.promise });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
+    chooseImportFile(file);
+    typeCommand(":profile privat");
+    await waitFor(() => expect(screen.getByText(/Privatort/)).toBeTruthy());
+    typeCommand(":profile arbeit");
+    await waitFor(() => expect(screen.getByText(/Arbeitsort/)).toBeTruthy());
+
+    await act(async () => {
+      importText.resolve(JSON.stringify({ ...work, location: { ...work.location, label: "Importierter Ort" } }));
+      await importText.promise;
+    });
+
+    await waitFor(() => expect(screen.getByText("Import verworfen — Profil wurde gewechselt.")).toBeTruthy());
+    expect(fetchMock.mock.calls.some(([input, mutation]) => String(input).includes("/api/config") && mutation?.method === "PUT")).toBe(false);
+    expect(screen.queryByText("Konfiguration importiert.")).toBeNull();
   });
 
   it("zeigt einen Importkonflikt sichtbar an und übernimmt ihn nicht still", async () => {

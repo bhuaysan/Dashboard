@@ -100,6 +100,10 @@ export function useSaveConfig(profileId: ProfileId): UseMutationResult<Config, E
   const url = profileApiUrl("/api/config", profileId);
 
   return useMutation<Config, Error, Config>({
+    // Ein Profilwechsel darf einen laufenden Save nicht auf den neuen Observer
+    // umhängen. Der Schlüssel trennt die Mutation-Instanzen, sodass ihre
+    // Abschluss-Callbacks beim ursprünglichen Profil bleiben.
+    mutationKey: ["saveConfig", profileId],
     mutationFn: async (next: Config): Promise<Config> => {
       const res = await fetch(url, {
         method: "PUT",

@@ -94,6 +94,43 @@ describe("useConfig", () => {
 });
 
 describe("useSaveConfig", () => {
+  it("schreibt eine verspätete PUT-Antwort in das ursprüngliche Profil", async () => {
+    const saved = {
+      ...defaultConfig,
+      theme: "dark" as const,
+      updatedAt: "2026-08-25T12:00:00.000Z",
+    };
+    const workConfig = { ...defaultConfig, theme: "light" as const };
+    const put = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") return put.promise;
+      return Promise.resolve(new Response("", { status: 502 }));
+    }));
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    client.setQueryData(["config", DEFAULT_PROFILE_ID], defaultConfig);
+    client.setQueryData(["config", WORK_PROFILE_ID], workConfig);
+    localStorage.setItem("dashboard:config:default", JSON.stringify(defaultConfig));
+    localStorage.setItem(`dashboard:config:${WORK_PROFILE_ID}`, JSON.stringify(workConfig));
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const initialProps: { profileId: ProfileId } = { profileId: DEFAULT_PROFILE_ID };
+    const { result, rerender } = renderHook(
+      ({ profileId }: { profileId: ProfileId }) => useSaveConfig(profileId),
+      { initialProps, wrapper: testWrapper },
+    );
+
+    act(() => result.current.mutate(defaultConfig));
+    rerender({ profileId: WORK_PROFILE_ID });
+    put.resolve(new Response(JSON.stringify(saved), { status: 200 }));
+
+    await waitFor(() => expect(client.getQueryData(["config", DEFAULT_PROFILE_ID])).toEqual(saved));
+    expect(client.getQueryData(["config", DEFAULT_PROFILE_ID])).toEqual(saved);
+    expect(client.getQueryData(["config", WORK_PROFILE_ID])).toEqual(workConfig);
+    expect(JSON.parse(localStorage.getItem("dashboard:config:default") ?? "null")).toEqual(saved);
+    expect(JSON.parse(localStorage.getItem(`dashboard:config:${WORK_PROFILE_ID}`) ?? "null")).toEqual(workConfig);
+  });
+
   it("speichert die Zielprofil-Config mit URL-Parameter und If-Match", async () => {
     const saved = { ...defaultConfig, theme: "dark" as const };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>

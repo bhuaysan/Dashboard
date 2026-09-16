@@ -279,11 +279,15 @@ export function createConfigStore(configPath: string): ConfigStore {
 
     let serializedPrevious: string | undefined;
     if (currentExists) {
-      serializedPrevious = JSON.stringify(normalizeDocument(previousDocument), null, 2);
+      const normalizedPrevious = normalizeDocument(previousDocument);
+      serializedPrevious = JSON.stringify(normalizedPrevious, null, 2);
       // Validate every serialized representation before moving any backup. This keeps a
       // rejected write from changing the backup chain as well as the active file.
       if (Buffer.byteLength(serializedPrevious, "utf8") > MAX_CONFIG_BYTES) {
-        throw new ConfigTooLargeError();
+        serializedPrevious = JSON.stringify(normalizedPrevious);
+        if (Buffer.byteLength(serializedPrevious, "utf8") > MAX_CONFIG_BYTES) {
+          throw new ConfigTooLargeError();
+        }
       }
     }
 

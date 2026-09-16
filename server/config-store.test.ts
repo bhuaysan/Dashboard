@@ -22,6 +22,17 @@ function nearLimitConfig(): Config {
   };
 }
 
+function largeLegacyConfig(): Config {
+  const linkGroups = Array.from({ length: 27 }, (_, groupIndex) => ({
+    title: `gruppe-${groupIndex}`,
+    links: Array.from({ length: 100 }, (_, linkIndex) => ({
+      label: `link-${groupIndex}-${linkIndex}-${"l".repeat(47)}`,
+      url: `https://example.com/${"x".repeat(33)}-${groupIndex}-${linkIndex}`,
+    })),
+  }));
+  return { ...defaultConfig, linkGroups };
+}
+
 type StoreFixture = {
   dir: string;
   configPath: string;
@@ -234,6 +245,40 @@ describe("profile document migration", () => {
     expect(backup.profiles).toHaveLength(1);
     expect(backup.profiles[0]?.id).toBe(DEFAULT_PROFILE_ID);
     expect(backup.profiles[0]?.config.theme).toBe("light");
+  });
+
+  itWithStore("erlaubt eine Mutation einer gültigen Legacy-Config nahe dem Größenlimit", async ({ configPath, store }) => {
+    const legacy = largeLegacyConfig();
+    const legacyText = JSON.stringify(legacy, null, 2);
+    const migrated = {
+      version: 2 as const,
+      profilesUpdatedAt: defaultConfig.updatedAt,
+      profiles: [{ id: DEFAULT_PROFILE_ID, name: "Standard", config: legacy }],
+    };
+    const prettyMigration = JSON.stringify(migrated, null, 2);
+    expect(Buffer.byteLength(legacyText, "utf8")).toBeLessThanOrEqual(MAX_CONFIG_BYTES);
+    expect(Buffer.byteLength(prettyMigration, "utf8")).toBeGreaterThan(MAX_CONFIG_BYTES);
+    await writeFile(configPath, legacyText);
+
+    const current = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    expect(current.kind).toBe("ok");
+    if (current.kind !== "ok") return;
+
+    const result = await store.updateConfig(DEFAULT_PROFILE_ID, current.config.updatedAt, {
+      ...defaultConfig,
+      theme: "dark",
+    });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    const backupText = await readFile(`${configPath}.1`, "utf8");
+    expect(Buffer.byteLength(backupText, "utf8")).toBeLessThanOrEqual(MAX_CONFIG_BYTES);
+    const backup = profileDocumentSchema.parse(JSON.parse(backupText));
+    expect(backup.version).toBe(2);
+    expect(backup.profiles[0]?.config).toEqual(legacy);
+
+    const active = profileDocumentSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
+    expect(active.profiles[0]?.config).toEqual(result.config);
   });
 
   itWithStore("normalisiert unbekannte und fehlende Panes in jedem Version-2-Profil", async ({ configPath, store }) => {

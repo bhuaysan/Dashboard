@@ -126,6 +126,7 @@ export default function App() {
   const calRange = useMemo(() => eventFetchRange(now, AGENDA_DAYS), [now]);
   const paneRefs = useRef<Partial<Record<PaneId, HTMLElement | null>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+  const profileContextEpoch = useRef(0);
 
   const switchProfile = useCallback((nextProfileId: ProfileId): void => {
     const cachedCatalog = queryClient.getQueryData<ProfileCatalog>(["profiles"]);
@@ -136,6 +137,7 @@ export default function App() {
       return;
     }
     const previousProfileId = activeProfileId;
+    profileContextEpoch.current += 1;
     writeActiveProfileId(nextProfileId);
     if (previousProfileId !== undefined) {
       void queryClient.cancelQueries({
@@ -442,7 +444,12 @@ export default function App() {
 
   async function onImportFile(file: File | undefined) {
     if (!file || !profileDataReady) return;
+    const originEpoch = profileContextEpoch.current;
     const result = await importConfig(file);
+    if (originEpoch !== profileContextEpoch.current) {
+      setMessage({ text: "Import verworfen — Profil wurde gewechselt.", level: "info" });
+      return;
+    }
     if (result.ok) {
       updateConfig(restoreConfig(result.config, config), () => {
         setMessage({ text: "Konfiguration importiert.", level: "info" });
@@ -461,6 +468,22 @@ export default function App() {
 
   const labAlerts = homelabEnabled ? labQuery.data?.alerts ?? [] : [];
   const labAlertLevel: "warn" | "crit" = labAlerts.some((a) => a.level === "crit") ? "crit" : "warn";
+
+  const catalogProblem = profilesQuery.error !== null
+    ? "Profilkatalog konnte nicht geladen werden."
+    : undefined;
+  const configProblem = configQuery.error !== null
+    ? "Profil-Konfiguration konnte nicht geladen werden."
+    : undefined;
+  const readinessProblem = catalogProblem ?? (!configReady ? configProblem : undefined);
+  const retryReadiness = () => {
+    if (catalog === undefined || profilesQuery.error !== null) {
+      void profilesQuery.refetch();
+      return;
+    }
+    void configQuery.refetch();
+  };
+  const alternateProfiles = catalog?.profiles.filter((profile) => profile.id !== resolvedProfileId) ?? [];
 
   // Der erste Fehler wird ausgeschrieben — ein roter Punkt allein sagt nicht, was fehlt.
   const failed = ([
@@ -527,7 +550,24 @@ export default function App() {
       <>
         <div className="app">
           <h1 className="sr-only">Dashboard</h1>
-          <div className="dim" role="status">Profil-Konfiguration wird geladen …</div>
+          <div className="dim" role={readinessProblem ? "alert" : "status"}>
+            <div>{readinessProblem ?? (catalog === undefined ? "Profilkatalog wird geladen …" : "Profil-Konfiguration wird geladen …")}</div>
+            {readinessProblem && (
+              <>
+                <button type="button" className="btn" onClick={retryReadiness}>Erneut versuchen</button>
+                {alternateProfiles.length > 0 && (
+                  <div role="group" aria-label="Bekannte Profile">
+                    <span>Anderes Profil laden:</span>
+                    {alternateProfiles.map((profile) => (
+                      <button type="button" className="btn" key={profile.id} onClick={() => switchProfile(profile.id)}>
+                        {profile.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
         {settingsPane}
         {fileInput}
@@ -537,9 +577,25 @@ export default function App() {
 
   return (
     <>
-      <div className="app" aria-hidden={modalOpen ? "true" : undefined} inert={modalOpen}>
-        <h1 className="sr-only">Dashboard</h1>
-        <PaneGrid>
+        <div className="app" aria-hidden={modalOpen ? "true" : undefined} inert={modalOpen}>
+          <h1 className="sr-only">Dashboard</h1>
+          {catalogProblem && (
+            <div className="dim" role="alert">
+              <div>{catalogProblem}</div>
+              <button type="button" className="btn" onClick={retryReadiness}>Erneut versuchen</button>
+              {alternateProfiles.length > 0 && (
+                <div role="group" aria-label="Bekannte Profile">
+                  <span>Anderes Profil laden:</span>
+                  {alternateProfiles.map((profile) => (
+                    <button type="button" className="btn" key={profile.id} onClick={() => switchProfile(profile.id)}>
+                      {profile.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <PaneGrid>
           {paneVisible("clock") && (
           <Pane
             title="Clock"
