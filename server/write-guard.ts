@@ -103,7 +103,7 @@ export function originAllowed(
 
 export function createWriteGuard(runtimeEnv: Pick<DashboardEnvironment, "port" | "writeAllow" | "writeHosts">): MiddlewareHandler {
   return async (c, next) => {
-    if (c.req.method !== "PUT" && c.req.method !== "DELETE") return next();
+    if (c.req.method !== "POST" && c.req.method !== "PUT" && c.req.method !== "PATCH" && c.req.method !== "DELETE") return next();
     const requestHost = c.req.header("host");
     if (requestHost === undefined || !hostAllowed(requestHost, runtimeEnv.writeHosts)) {
       return c.json({ error: "Host für Schreibzugriff nicht erlaubt" }, 403);

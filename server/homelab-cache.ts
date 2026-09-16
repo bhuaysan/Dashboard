@@ -1,21 +1,21 @@
-import type { Config } from "../src/config/schema.ts";
+import type { Config, ProfileId } from "../src/config/schema.ts";
 import type { HomelabData } from "../src/lib/homelab.ts";
 
 export type HomelabFetcher = (config: Config) => Promise<HomelabData>;
 
 type CacheEntry = {
-  revision: string;
+  key: string;
   fetchedAt: number;
   data: HomelabData;
 };
 
 type FailureEntry = {
-  revision: string;
+  key: string;
   retryAt: number;
 };
 
 type Flight = {
-  revision: string;
+  key: string;
   promise: Promise<HomelabData>;
 };
 
@@ -26,8 +26,8 @@ export type HomelabCacheOptions = {
 };
 
 /**
- * Teilt Homelab-Abfragen pro Config-Revision und verhindert nach einem Fehler einen
- * kurzen Request-Sturm. Die Revision gehört zur Config und nicht zur Uhrzeit allein:
+ * Teilt Homelab-Abfragen pro Profil und Config-Revision und verhindert nach einem Fehler
+ * einen kurzen Request-Sturm. Die Revision gehört zur Config und nicht zur Uhrzeit allein:
  * neue Schwellwerte müssen sofort eine neue Auswertung auslösen.
  */
 export function createHomelabCache(
@@ -37,21 +37,24 @@ export function createHomelabCache(
   const ttlMs = options.ttlMs ?? 60_000;
   const errorBackoffMs = options.errorBackoffMs ?? 5_000;
   const now = options.now ?? Date.now;
-  let cache: CacheEntry | undefined;
-  let failure: FailureEntry | undefined;
-  let flight: Flight | undefined;
+  const cache = new Map<string, CacheEntry>();
+  const failures = new Map<string, FailureEntry>();
+  const flights = new Map<string, Flight>();
 
-  async function get(config: Config): Promise<HomelabData> {
-    const revision = config.updatedAt;
+  async function get(profileId: ProfileId, config: Config): Promise<HomelabData> {
+    const key = `${profileId}:${config.updatedAt}`;
     const timestamp = now();
 
-    if (cache?.revision === revision && timestamp - cache.fetchedAt < ttlMs) {
-      return cache.data;
+    const cached = cache.get(key);
+    if (cached !== undefined && timestamp - cached.fetchedAt < ttlMs) {
+      return cached.data;
     }
-    if (failure?.revision === revision && timestamp < failure.retryAt) {
+    const failure = failures.get(key);
+    if (failure !== undefined && timestamp < failure.retryAt) {
       throw new Error("Homelab nicht erreichbar");
     }
-    if (flight?.revision === revision) {
+    const flight = flights.get(key);
+    if (flight !== undefined) {
       return flight.promise;
     }
 
@@ -60,31 +63,31 @@ export function createHomelabCache(
     const request = Promise.resolve().then(() => fetcher(config));
     const promise = request.then(
       (data) => {
-        // Wenn inzwischen eine neuere Revision angefragt wurde, darf ein später
+        // Wenn inzwischen ein anderer Profilstand angefragt wurde, darf ein später
         // eintreffender alter Stand den neueren Cache nicht überschreiben.
-        if (flight?.promise === promise) {
-          cache = { revision, fetchedAt: now(), data };
-          failure = undefined;
+        if (flights.get(key)?.promise === promise) {
+          cache.set(key, { key, fetchedAt: now(), data });
+          failures.delete(key);
         }
         return data;
       },
       (error: unknown) => {
-        if (flight?.promise === promise) {
-          failure = { revision, retryAt: now() + errorBackoffMs };
+        if (flights.get(key)?.promise === promise) {
+          failures.set(key, { key, retryAt: now() + errorBackoffMs });
         }
         throw error;
       },
     );
-    flight = { revision, promise };
+    flights.set(key, { key, promise });
 
     // Die abgeleitete Promise behandelt die Ablehnung ausdrücklich, damit der
     // Aufräumpfad selbst kein unhandled-rejection erzeugt.
     void promise.then(
       () => {
-        if (flight?.promise === promise) flight = undefined;
+        if (flights.get(key)?.promise === promise) flights.delete(key);
       },
       () => {
-        if (flight?.promise === promise) flight = undefined;
+        if (flights.get(key)?.promise === promise) flights.delete(key);
       },
     );
     return promise;

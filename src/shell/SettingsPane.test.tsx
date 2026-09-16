@@ -1,11 +1,78 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { SettingsPane, type SaveConfig } from "./SettingsPane";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  SettingsPane as SettingsPaneComponent,
+  type ProfileMutationOptions,
+  type SaveConfig,
+} from "./SettingsPane";
 import { ConfigConflictError } from "../api/config";
 import { defaultConfig } from "../config/defaults";
-import type { Config } from "../config/schema";
+import type { Config, ProfileId } from "../config/schema";
+import type { ComponentProps } from "react";
+import type { ProfileCatalog } from "../config/local";
+import { ProfileConflictError, type CreateProfileInput, type DeleteProfileInput, type RenameProfileInput } from "../api/profiles";
 
 const guests = [{ vmid: 100, name: "caddy" }, { vmid: 110, name: "minecraft.local" }];
+const PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
+const SECOND_PROFILE_ID = "223e4567-e89b-42d3-a456-426614174000" as ProfileId;
+const THIRD_PROFILE_ID = "323e4567-e89b-42d3-a456-426614174000" as ProfileId;
+const PROFILE_CATALOG: ProfileCatalog = {
+  profilesUpdatedAt: "2026-09-15T00:00:00.000Z",
+  profiles: [
+    { id: PROFILE_ID, name: "Arbeit" },
+    { id: SECOND_PROFILE_ID, name: "Privat" },
+  ],
+};
+const SINGLE_PROFILE_CATALOG: ProfileCatalog = {
+  profilesUpdatedAt: PROFILE_CATALOG.profilesUpdatedAt,
+  profiles: [PROFILE_CATALOG.profiles[0]!],
+};
+
+type TestSettingsProps = Omit<ComponentProps<typeof SettingsPaneComponent>,
+  "profileId" | "profiles" | "activeProfileId" | "onSwitchProfile" | "onCreateProfile" | "onRenameProfile" | "onDeleteProfile"
+> & {
+  profileId?: ProfileId;
+  profiles?: ProfileCatalog;
+  activeProfileId?: ProfileId;
+  onSwitchProfile?: (profileId: ProfileId) => void;
+  onCreateProfile?: (input: CreateProfileInput, options?: ProfileMutationOptions) => void;
+  onRenameProfile?: (input: RenameProfileInput, options?: ProfileMutationOptions) => void;
+  onDeleteProfile?: (input: DeleteProfileInput, options?: ProfileMutationOptions) => void;
+};
+
+function SettingsPane(props: TestSettingsProps) {
+  const {
+    profileId = PROFILE_ID,
+    profiles = PROFILE_CATALOG,
+    activeProfileId = PROFILE_ID,
+    onSwitchProfile = () => undefined,
+    onCreateProfile = () => undefined,
+    onRenameProfile = () => undefined,
+    onDeleteProfile = () => undefined,
+    ...rest
+  } = props;
+  return <SettingsPaneComponent {...rest} profileId={profileId} profiles={profiles} activeProfileId={activeProfileId}
+    onSwitchProfile={onSwitchProfile} onCreateProfile={onCreateProfile} onRenameProfile={onRenameProfile} onDeleteProfile={onDeleteProfile} />;
+}
+
+function renderProfiles(overrides: Partial<TestSettingsProps> = {}) {
+  const props: TestSettingsProps = {
+    open: true,
+    config: defaultConfig,
+    guests,
+    onClose: () => undefined,
+    save: saveSucceeds(),
+    onSaved: () => undefined,
+    profiles: PROFILE_CATALOG,
+    activeProfileId: PROFILE_ID,
+    onSwitchProfile: () => undefined,
+    onCreateProfile: () => undefined,
+    onRenameProfile: () => undefined,
+    onDeleteProfile: () => undefined,
+    ...overrides,
+  };
+  return render(<SettingsPane {...props} />);
+}
 
 // Nur mutate und isPending werden von SettingsPane tatsächlich gelesen — der Rest der
 // echten UseMutationResult-Form ist für diesen Test nicht das Verhalten, das geprüft wird.
@@ -300,6 +367,22 @@ describe("SettingsPane", () => {
     }
   });
 
+  it("sendet die aktive Profil-ID bei der Ortssuche an den Proxy", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      results: [{ name: "Heilbronn", latitude: 49, longitude: 9 }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SettingsPane open config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      onClose={() => undefined} save={saveSucceeds()} onSaved={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    const target = "https://geocoding-api.open-meteo.com/v1/search?name=Heilbronn&count=1&language=de";
+    expect(fetchMock).toHaveBeenCalledWith(`/api/proxy?profile=${PROFILE_ID}&url=${encodeURIComponent(target)}`);
+  });
+
   it("lässt eine ältere Ortssuche kein neueres Ergebnis überschreiben", async () => {
     const pending: ((response: Response) => void)[] = [];
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve))));
@@ -323,6 +406,251 @@ describe("SettingsPane", () => {
     await Promise.resolve();
     expect(screen.queryByText(/Alter Ort/)).toBeNull();
     expect(screen.getByText(/Neuer Ort/)).toBeTruthy();
+  });
+
+  it("verwirft ein Ortssuchergebnis des vorherigen Profils", async () => {
+    const pending: ((response: Response) => void)[] = [];
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve))));
+    const { rerender } = renderProfiles({ profileId: PROFILE_ID, activeProfileId: PROFILE_ID, initialSection: "place" });
+    const city = document.getElementById("s-city") as HTMLInputElement;
+    fireEvent.change(city, { target: { value: "Ort A" } });
+    fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+    expect(pending).toHaveLength(1);
+
+    const profileBConfig: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Ort B" },
+    };
+    rerender(<SettingsPane open config={profileBConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} initialSection="place" />);
+    await waitFor(() => expect(screen.getByText(/Ort B ·/)).toBeTruthy());
+
+    const cancel = vi.fn(async () => undefined);
+    const response = new Response(JSON.stringify({
+      results: [{ name: "Ort A", latitude: 48, longitude: 8 }],
+    }), { status: 200 });
+    Object.defineProperty(response, "body", {
+      configurable: true,
+      value: { cancel },
+    });
+    await act(async () => {
+      pending[0]?.(response);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(screen.getByText(/Ort B ·/)).toBeTruthy();
+    expect(screen.queryByText(/Ort A ·/)).toBeNull();
+  });
+
+  it("verwirft eine Antwort nach Schließen und erneutem Öffnen desselben Dialogs", async () => {
+    let resolveSearch: (response: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => { resolveSearch = resolve; });
+    vi.stubGlobal("fetch", vi.fn(() => pending));
+    const rendered = renderProfiles({ initialSection: "place" });
+    fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+
+    rendered.rerender(<SettingsPane open={false} config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} initialSection="place" />);
+    rendered.rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} initialSection="place" />);
+    resolveSearch(new Response(JSON.stringify({ results: [{ name: "Alter Ort", latitude: 48, longitude: 8 }] }), { status: 200 }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(screen.queryByText(/Alter Ort/)).toBeNull();
+  });
+
+  it("hält Profilaktionen während eines ausstehenden Config-Speicherns gesperrt", () => {
+    const onSwitchProfile = vi.fn();
+    const onRenameProfile = vi.fn();
+    const onDeleteProfile = vi.fn();
+    const save: SaveConfig = { mutate: vi.fn(), isPending: true };
+    renderProfiles({ save, onSwitchProfile, onRenameProfile, onDeleteProfile, initialSection: "profile" });
+
+    expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: 'Profil „Arbeit" umbenennen' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: 'Profil „Privat" löschen' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Profil duplizieren" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+    expect(onSwitchProfile).not.toHaveBeenCalled();
+  });
+
+  it("ignoriert einen verspäteten Save-Erfolg nach einem Profilwechsel", () => {
+    let finishSave: { onSuccess?: () => void; onError?: (error: unknown) => void } | undefined;
+    const save = fakeSave((_config, options) => { finishSave = options; });
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    const onSwitchProfile = vi.fn();
+    const { rerender } = renderProfiles({ save, onClose, onSaved, onSwitchProfile, initialSection: "profile" });
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Entwurf A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    expect(finishSave).toBeDefined();
+
+    const profileBConfig: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Ort B" },
+    };
+    rerender(<SettingsPane open config={profileBConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={onClose}
+      save={{ ...save, isPending: true }} onSaved={onSaved} />);
+    finishSave?.onSuccess?.();
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    expect(screen.getByText(/Ort B ·/)).toBeTruthy();
+  });
+
+  it("ignoriert einen verspäteten Save-Erfolg nach Schließen und erneutem Öffnen", () => {
+    let finishSave: { onSuccess?: () => void; onError?: (error: unknown) => void } | undefined;
+    const save = fakeSave((_config, options) => { finishSave = options; });
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    const rendered = renderProfiles({ save, onClose, onSaved });
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Entwurf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    rendered.rerender(<SettingsPane open={false} config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={onClose} save={save} onSaved={onSaved} />);
+    rendered.rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={onClose} save={save} onSaved={onSaved} />);
+    finishSave?.onSuccess?.();
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("sperrt Profilwechsel beim Config-Reload und verwirft keine alte Antwort im neuen Profil", async () => {
+    let resolveReload: (config: Config) => void = () => undefined;
+    const reloadPending = new Promise<Config>((resolve) => { resolveReload = resolve; });
+    const onReload = vi.fn(() => reloadPending);
+    const onSwitchProfile = vi.fn();
+    const { rerender } = renderProfiles({
+      save: saveConflicts("other-revision"),
+      onReload,
+      onSwitchProfile,
+      initialSection: "profile",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand neu laden" }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+    expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+
+    const profileBConfig: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Ort B" },
+    };
+    rerender(<SettingsPane open config={profileBConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onReload={onReload} onSwitchProfile={onSwitchProfile}
+      onSaved={() => undefined} initialSection="profile" />);
+    expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(false);
+
+    resolveReload({ ...defaultConfig, location: { ...defaultConfig.location, label: "Alter Serverstand" } });
+    await Promise.resolve();
+    expect(screen.getByRole("tab", { name: "PROFILE", selected: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    await waitFor(() => expect(screen.getByText(/Ort B ·/)).toBeTruthy());
+    expect(screen.queryByDisplayValue("Alter Serverstand")).toBeNull();
+  });
+
+  it("setzt eine laufende Config-Reload-Sperre beim Profilkontextwechsel zurück", async () => {
+    let resolveReload: (config: Config) => void = () => undefined;
+    const reloadPending = new Promise<Config>((resolve) => { resolveReload = resolve; });
+    const onReload = vi.fn(() => reloadPending);
+    const { rerender } = renderProfiles({
+      save: saveConflicts("other-revision"),
+      onReload,
+      initialSection: "profile",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand neu laden" }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+
+    rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onReload={onReload} onSaved={() => undefined} initialSection="profile" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(false));
+    resolveReload(defaultConfig);
+  });
+
+  it("setzt eine laufende Sperre beim Schließen und erneuten Öffnen zurück", async () => {
+    let resolveReload: (config: Config) => void = () => undefined;
+    const reloadPending = new Promise<Config>((resolve) => { resolveReload = resolve; });
+    const onReload = vi.fn(() => reloadPending);
+    const rendered = renderProfiles({
+      save: saveConflicts("other-revision"),
+      onReload,
+      initialSection: "profile",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand neu laden" }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+
+    rendered.rerender(<SettingsPane open={false} config={defaultConfig} guests={guests}
+      onClose={() => undefined} save={saveSucceeds()} onReload={onReload} onSaved={() => undefined} initialSection="profile" />);
+    rendered.rerender(<SettingsPane open config={defaultConfig} guests={guests}
+      onClose={() => undefined} save={saveSucceeds()} onReload={onReload} onSaved={() => undefined} initialSection="profile" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(false));
+    resolveReload(defaultConfig);
+  });
+
+  it("setzt eine laufende Profilmutations-Sperre beim Profilkontextwechsel zurück", async () => {
+    let finishRename: ProfileMutationOptions | undefined;
+    const onRenameProfile = vi.fn((_input: RenameProfileInput, options?: ProfileMutationOptions) => { finishRename = options; });
+    const { rerender } = renderProfiles({ onRenameProfile, initialSection: "profile" });
+    fireEvent.change(screen.getByRole("textbox", { name: 'Profilname „Arbeit"' }), { target: { value: "Büro" } });
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Arbeit" umbenennen' }));
+    expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+
+    rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onRenameProfile={onRenameProfile} initialSection="profile" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(false));
+    finishRename?.onSuccess?.({ catalog: PROFILE_CATALOG });
+  });
+
+  it("fokussiert und begrenzt auch den Readiness-Dialog vor dem Katalog", async () => {
+    const { rerender } = render(<SettingsPaneComponent open config={defaultConfig} profileId={PROFILE_ID}
+      profiles={undefined} activeProfileId={undefined} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    const loadingDialog = screen.getByRole("dialog");
+    await waitFor(() => expect(document.activeElement).toBe(loadingDialog));
+    fireEvent.keyDown(loadingDialog, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Abbrechen" }));
+
+    rerender(<SettingsPaneComponent open config={defaultConfig} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("dialog")));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("übernimmt eine später geladene echte Config im sauberen Dialog-Entwurf", async () => {
+    const loaded: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Später geladen" },
+    };
+    const { rerender } = render(<SettingsPane open config={defaultConfig} configReady={false} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    expect(screen.getByText(/Profile werden geladen/)).toBeTruthy();
+
+    rerender(<SettingsPane open config={loaded} configReady profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Später geladen")).toBeTruthy());
   });
 
   it("übersetzt einen strukturellen Konfigurationsfehler und springt zum richtigen Abschnitt", () => {
@@ -386,5 +714,169 @@ describe("SettingsPane", () => {
     expect(screen.getAllByLabelText(/^Gruppenname von/).map((field) => (field as HTMLInputElement).value))
       .toEqual(["Intern", "SAP", "Homelab", "Dev"]);
     expect((screen.getByRole("button", { name: 'Gruppe „Intern" nach oben' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("zeigt PROFILE zuerst und markiert das aktive Profil", () => {
+    renderProfiles({ initialSection: "profile" });
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs[0]?.textContent).toBe("PROFILE");
+    expect(screen.getByRole("row", { name: /Arbeit.*aktiv/ })).toBeTruthy();
+    expect(screen.getByRole("row", { name: /Privat/ })).toBeTruthy();
+  });
+
+  it("wechselt ein Profil ohne ungespeicherten Entwurf sofort", () => {
+    const onSwitchProfile = vi.fn();
+    renderProfiles({ onSwitchProfile, initialSection: "profile" });
+
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+
+    expect(onSwitchProfile).toHaveBeenCalledOnce();
+    expect(onSwitchProfile).toHaveBeenCalledWith(SECOND_PROFILE_ID);
+  });
+
+  it("beginnt nach einem bestätigten Profilwechsel einen neuen Config-Entwurf", () => {
+    const onSwitchProfile = vi.fn();
+    const { rerender } = renderProfiles({ onSwitchProfile, initialSection: "profile" });
+
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+    const privateConfig: Config = { ...defaultConfig, location: { ...defaultConfig.location, label: "Privatort" } };
+    rerender(<SettingsPane open config={privateConfig} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} profiles={PROFILE_CATALOG}
+      activeProfileId={SECOND_PROFILE_ID} onSwitchProfile={onSwitchProfile} initialSection="links" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    expect(screen.getByDisplayValue("Privatort")).toBeTruthy();
+  });
+
+  it("dupliziert mit getrimmtem Namen und wechselt erst nach Serverbestätigung", () => {
+    const onSwitchProfile = vi.fn();
+    const onCreateProfile = vi.fn((_input: CreateProfileInput, _options?: ProfileMutationOptions) => undefined);
+    renderProfiles({ onSwitchProfile, onCreateProfile, initialSection: "profile" });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Neuer Profilname" }), { target: { value: "  Zuhause  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Profil duplizieren" }));
+
+    expect(onCreateProfile).toHaveBeenCalledOnce();
+    expect(onCreateProfile).toHaveBeenCalledWith(
+      { name: "Zuhause", sourceProfileId: PROFILE_ID, profilesUpdatedAt: PROFILE_CATALOG.profilesUpdatedAt },
+      expect.anything(),
+    );
+    expect(onSwitchProfile).not.toHaveBeenCalled();
+
+    const options = onCreateProfile.mock.calls[0]?.[1];
+    options?.onSuccess?.({
+      catalog: {
+        ...PROFILE_CATALOG,
+        profiles: [...PROFILE_CATALOG.profiles, { id: THIRD_PROFILE_ID, name: "Zuhause" }],
+      },
+      createdId: THIRD_PROFILE_ID,
+    });
+    expect(onSwitchProfile).toHaveBeenCalledWith(THIRD_PROFILE_ID);
+  });
+
+  it("benennt ein Profil um und behält seine stabile ID", () => {
+    const onRenameProfile = vi.fn((_input: RenameProfileInput, _options?: ProfileMutationOptions) => undefined);
+    renderProfiles({ onRenameProfile, initialSection: "profile" });
+
+    fireEvent.change(screen.getByRole("textbox", { name: 'Profilname „Arbeit"' }), { target: { value: "  Büro  " } });
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Arbeit" umbenennen' }));
+
+    expect(onRenameProfile).toHaveBeenCalledWith(
+      { profileId: PROFILE_ID, name: "Büro", profilesUpdatedAt: PROFILE_CATALOG.profilesUpdatedAt },
+      expect.anything(),
+    );
+  });
+
+  it("löscht ein Profil erst beim zweiten Klick und sperrt das letzte Profil", () => {
+    const onDeleteProfile = vi.fn((_input: DeleteProfileInput, _options?: ProfileMutationOptions) => undefined);
+    const { rerender } = renderProfiles({ onDeleteProfile, initialSection: "profile" });
+
+    const del = screen.getByRole("button", { name: 'Profil „Privat" löschen' });
+    fireEvent.click(del);
+    expect(onDeleteProfile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Profil „Privat" endgültig löschen/ }));
+    expect(onDeleteProfile).toHaveBeenCalledOnce();
+
+    rerender(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} profiles={SINGLE_PROFILE_CATALOG}
+      activeProfileId={PROFILE_ID} onDeleteProfile={onDeleteProfile} initialSection="profile" />);
+    expect((screen.getByRole("button", { name: 'Profil „Arbeit" löschen' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("zeigt Profilfehler auf Deutsch und bietet Katalog-Neuladen an", () => {
+    const onReloadProfiles = vi.fn(async () => PROFILE_CATALOG);
+    const onRenameProfile = vi.fn((_input: RenameProfileInput, options?: ProfileMutationOptions) => {
+      options?.onError?.(new ProfileConflictError("2026-09-16T00:00:00.000Z"));
+    });
+    renderProfiles({ onRenameProfile, onReloadProfiles, initialSection: "profile" });
+
+    fireEvent.change(screen.getByRole("textbox", { name: 'Profilname „Arbeit"' }), { target: { value: "Büro" } });
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Arbeit" umbenennen' }));
+
+    expect(screen.getByRole("alert").textContent).toContain("Profilkatalog");
+    fireEvent.click(screen.getByRole("button", { name: "Profilkatalog neu laden" }));
+    return waitFor(() => expect(onReloadProfiles).toHaveBeenCalledOnce());
+  });
+
+  it("schützt Profilwechsel vor dem Verwerfen eines Config-Entwurfs", () => {
+    const onSwitchProfile = vi.fn();
+    renderProfiles({ onSwitchProfile, initialSection: "profile" });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Geänderte Seite" } });
+    fireEvent.click(screen.getByRole("tab", { name: "PROFILE" }));
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+    expect(onSwitchProfile).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Entwurf");
+    fireEvent.click(screen.getByRole("button", { name: "Entwurf verwerfen und Profil wechseln" }));
+    expect(onSwitchProfile).toHaveBeenCalledWith(SECOND_PROFILE_ID);
+  });
+
+  it("bricht die Verwerfensbestätigung ab und behält den Entwurf", () => {
+    const onSwitchProfile = vi.fn();
+    renderProfiles({ onSwitchProfile, initialSection: "profile" });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Geänderte Seite" } });
+    fireEvent.click(screen.getByRole("tab", { name: "PROFILE" }));
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Privat" wechseln' }));
+    fireEvent.click(screen.getByRole("button", { name: "Entwurf behalten" }));
+
+    expect(onSwitchProfile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    expect(screen.getByDisplayValue("Geänderte Seite")).toBeTruthy();
+  });
+
+  it("verlangt beim Löschen des aktiven Profils ebenfalls die Entwurfsbestätigung", () => {
+    const onDeleteProfile = vi.fn((_input: DeleteProfileInput, _options?: ProfileMutationOptions) => undefined);
+    renderProfiles({ onDeleteProfile, initialSection: "profile" });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Geänderte Seite" } });
+    fireEvent.click(screen.getByRole("tab", { name: "PROFILE" }));
+    const del = screen.getByRole("button", { name: 'Profil „Arbeit" löschen' });
+    fireEvent.click(del);
+    fireEvent.click(screen.getByRole("button", { name: /Profil „Arbeit" endgültig löschen/ }));
+    expect(onDeleteProfile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Entwurf verwerfen und Profil löschen" }));
+    expect(onDeleteProfile).toHaveBeenCalledOnce();
+  });
+
+  it("löscht inaktive Profile ohne den Config-Entwurf zu verwerfen", () => {
+    const onDeleteProfile = vi.fn((_input: DeleteProfileInput, _options?: ProfileMutationOptions) => undefined);
+    renderProfiles({ onDeleteProfile, initialSection: "profile" });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Geänderte Seite" } });
+    fireEvent.click(screen.getByRole("tab", { name: "PROFILE" }));
+    const del = screen.getByRole("button", { name: 'Profil „Privat" löschen' });
+    fireEvent.click(del);
+    fireEvent.click(screen.getByRole("button", { name: /Profil „Privat" endgültig löschen/ }));
+
+    expect(onDeleteProfile).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Entwurf verwerfen und Profil löschen" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Links" }));
+    expect(screen.getByDisplayValue("Geänderte Seite")).toBeTruthy();
   });
 });

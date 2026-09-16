@@ -4,7 +4,7 @@ import { join } from "node:path";
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../src/config/defaults";
-import { configSchema, type Config } from "../src/config/schema";
+import { DEFAULT_PROFILE_ID, PANE_IDS, profileDocumentSchema, type Config, type ProfileId } from "../src/config/schema";
 import { ConfigStoreError, createConfigStore, MAX_CONFIG_BYTES, writeAtomic } from "./config-store.ts";
 
 function nearLimitConfig(): Config {
@@ -99,17 +99,17 @@ describe("writeConfig", () => {
   itWithStore("hebt die vorherigen Stände als config.json.1 bis .7 auf", async ({ configPath, dir, store }) => {
     // zehn Speichervorgänge mit unterscheidbarem Inhalt
     for (let i = 1; i <= 10; i++) {
-      await store.writeConfig({ ...defaultConfig, updatedAt: `stand-${i}` });
+      await store.writeConfig({ ...defaultConfig, updatedAt: `2026-08-08T12:00:00.${String(i).padStart(3, "0")}Z` });
     }
-    const aktuell = JSON.parse(await readFile(configPath, "utf8")) as { updatedAt: string };
-    expect(aktuell.updatedAt).toBe("stand-10");
+    const aktuell = profileDocumentSchema.parse(JSON.parse(await readFile(configPath, "utf8")));
+    expect(aktuell.profiles[0]?.config.updatedAt).toBe("2026-08-08T12:00:00.010Z");
 
     // .1 ist der jüngste vorherige Stand, .7 der älteste
     const backups = await Promise.all(
-      [1, 7].map(async (n) => JSON.parse(await readFile(`${configPath}.${n}`, "utf8")) as { updatedAt: string }),
+      [1, 7].map(async (n) => profileDocumentSchema.parse(JSON.parse(await readFile(`${configPath}.${n}`, "utf8")))),
     );
-    expect(backups[0]?.updatedAt).toBe("stand-9");
-    expect(backups[1]?.updatedAt).toBe("stand-3");
+    expect(backups[0]?.profiles[0]?.config.updatedAt).toBe("2026-08-08T12:00:00.009Z");
+    expect(backups[1]?.profiles[0]?.config.updatedAt).toBe("2026-08-08T12:00:00.003Z");
 
     // und es bleiben genau sieben übrig
     const files = await readdir(dir);
@@ -118,7 +118,7 @@ describe("writeConfig", () => {
 
   itWithStore("weist eine zu große endgültige Darstellung vor der Backup-Rotation ab", async ({ configPath, store }) => {
     const candidate = nearLimitConfig();
-    await store.writeConfig({ ...defaultConfig, updatedAt: "vorher" });
+    await store.writeConfig({ ...defaultConfig, updatedAt: "2026-08-08T12:00:00.001Z" });
     const before = await readFile(configPath, "utf8");
     await writeFile(`${configPath}.1`, "unverändert");
 
@@ -162,8 +162,10 @@ describe("updateConfig", () => {
     const result = await store.updateConfig(current.updatedAt, candidate);
     expect(result.kind).toBe("ok");
     const persisted: unknown = JSON.parse(await readFile(configPath, "utf8"));
-    expect(configSchema.safeParse(persisted).success).toBe(true);
-    expect((persisted as Config).proxyAllowlist).toHaveLength(128);
+    const parsed = profileDocumentSchema.safeParse(persisted);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.profiles[0]?.config.proxyAllowlist).toHaveLength(128);
   });
 });
 
@@ -180,5 +182,218 @@ describe("writeAtomic", () => {
     await expect(writeAtomic(dir, "inhalt")).rejects.toBeInstanceOf(ConfigStoreError);
     const files = await readdir(join(dir, ".."));
     expect(files.some((file) => file.startsWith(`${dir.split("/").at(-1) ?? ""}.tmp-`))).toBe(false);
+  });
+});
+
+describe("profile document migration", () => {
+  itWithStore("liest eine Legacy-Config als deterministisches Standardprofil ohne zu schreiben", async ({ configPath, store }) => {
+    const legacy = JSON.stringify({ ...defaultConfig, theme: "light" });
+    await writeFile(configPath, legacy);
+
+    const before = await readFile(configPath, "utf8");
+    const first = await store.readCatalog();
+    const second = await store.readCatalog();
+
+    expect(first.profiles).toEqual([{ id: DEFAULT_PROFILE_ID, name: "Standard" }]);
+    expect(second).toEqual(first);
+    expect(await readFile(configPath, "utf8")).toBe(before);
+  });
+
+  itWithStore("persistiert beim ersten erfolgreichen Update ein Version-2-Dokument", async ({ configPath, store }) => {
+    await writeFile(configPath, JSON.stringify(defaultConfig));
+    const current = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    expect(current.kind).toBe("ok");
+    if (current.kind !== "ok") return;
+
+    const result = await store.updateConfig(DEFAULT_PROFILE_ID, current.config.updatedAt, {
+      ...current.config,
+      theme: "dark",
+    });
+    expect(result.kind).toBe("ok");
+    const persisted: unknown = JSON.parse(await readFile(configPath, "utf8"));
+    expect(persisted).toEqual(expect.objectContaining({ version: 2 }));
+    expect(persisted).toEqual(expect.objectContaining({
+      profiles: [expect.objectContaining({ id: DEFAULT_PROFILE_ID, name: "Standard" })],
+    }));
+  });
+
+  itWithStore("legt bei der ersten Legacy-Mutation eine vollständige Version-2-Sicherung an", async ({ configPath, store }) => {
+    await writeFile(configPath, JSON.stringify({ ...defaultConfig, theme: "light" }));
+    const current = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    expect(current.kind).toBe("ok");
+    if (current.kind !== "ok") return;
+
+    const result = await store.updateConfig(DEFAULT_PROFILE_ID, current.config.updatedAt, {
+      ...current.config,
+      theme: "dark",
+    });
+    expect(result.kind).toBe("ok");
+
+    const backup = profileDocumentSchema.parse(JSON.parse(await readFile(`${configPath}.1`, "utf8")));
+    expect(backup.version).toBe(2);
+    expect(backup.profiles).toHaveLength(1);
+    expect(backup.profiles[0]?.id).toBe(DEFAULT_PROFILE_ID);
+    expect(backup.profiles[0]?.config.theme).toBe("light");
+  });
+
+  itWithStore("normalisiert unbekannte und fehlende Panes in jedem Version-2-Profil", async ({ configPath, store }) => {
+    const workId = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
+    const firstLayout = defaultConfig.layout.filter((entry) => entry.id !== "news");
+    await writeFile(configPath, JSON.stringify({
+      version: 2,
+      profilesUpdatedAt: defaultConfig.updatedAt,
+      profiles: [
+        {
+          id: DEFAULT_PROFILE_ID,
+          name: "Standard",
+          config: { ...defaultConfig, layout: [...firstLayout, { id: "music", visible: true, span: 1 }] },
+        },
+        {
+          id: workId,
+          name: "Arbeit",
+          config: { ...defaultConfig, layout: [{ id: "clock", visible: true, span: 1 }] },
+        },
+      ],
+    }));
+
+    const standard = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    const work = await store.readProfileConfig(workId);
+    expect(standard.kind).toBe("ok");
+    expect(work.kind).toBe("ok");
+    if (standard.kind !== "ok" || work.kind !== "ok") return;
+    expect(standard.config.layout.map((entry) => entry.id)).toEqual(expect.arrayContaining(Array.from(PANE_IDS)));
+    expect(work.config.layout.map((entry) => entry.id)).toEqual(expect.arrayContaining(Array.from(PANE_IDS)));
+  });
+
+  itWithStore("rotiert bei Mutationen vollständige Version-2-Dokumente", async ({ configPath, store }) => {
+    const catalog = await store.readCatalog();
+    const created = await store.createProfile(catalog.profilesUpdatedAt, "Arbeit", DEFAULT_PROFILE_ID);
+    expect(created.kind).toBe("ok");
+    if (created.kind !== "ok" || created.createdId === undefined) return;
+
+    const renamed = await store.renameProfile(created.createdId, created.catalog.profilesUpdatedAt, "Office");
+    expect(renamed.kind).toBe("ok");
+    const backup: unknown = JSON.parse(await readFile(`${configPath}.1`, "utf8"));
+    expect(backup).toEqual(expect.objectContaining({ version: 2 }));
+    expect(backup).toEqual(expect.objectContaining({ profiles: expect.any(Array) }));
+    expect((backup as { profiles: unknown[] }).profiles).toHaveLength(2);
+  });
+});
+
+describe("profile catalog mutations", () => {
+  itWithStore("dupliziert ein Profil vollständig mit neuer UUID und unabhängiger Config-Revision", async ({ store }) => {
+    const catalog = await store.readCatalog();
+    const source = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    expect(source.kind).toBe("ok");
+    if (source.kind !== "ok") return;
+
+    const result = await store.createProfile(catalog.profilesUpdatedAt, "Arbeit", DEFAULT_PROFILE_ID);
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok" || result.createdId === undefined) return;
+    expect(result.createdId).not.toBe(DEFAULT_PROFILE_ID);
+    expect(result.createdId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const copied = await store.readProfileConfig(result.createdId);
+    expect(copied.kind).toBe("ok");
+    if (copied.kind !== "ok") return;
+    expect(copied.config).toEqual(expect.objectContaining({ ...source.config, updatedAt: expect.any(String) }));
+    expect(copied.config.updatedAt).not.toBe(source.config.updatedAt);
+  });
+
+  itWithStore("weist doppelte Profilnamen ohne Beachtung der Großschreibung zurück", async ({ store }) => {
+    const catalog = await store.readCatalog();
+    const result = await store.createProfile(catalog.profilesUpdatedAt, " standard ", DEFAULT_PROFILE_ID);
+    expect(result.kind).toBe("invalid");
+  });
+
+  itWithStore("benennt ein Profil um und behält seine ID", async ({ store }) => {
+    const catalog = await store.readCatalog();
+    const created = await store.createProfile(catalog.profilesUpdatedAt, "Arbeit", DEFAULT_PROFILE_ID);
+    expect(created.kind).toBe("ok");
+    if (created.kind !== "ok" || created.createdId === undefined) return;
+    const renamed = await store.renameProfile(created.createdId, created.catalog.profilesUpdatedAt, "Privat");
+    expect(renamed.kind).toBe("ok");
+    if (renamed.kind !== "ok") return;
+    expect(renamed.catalog.profiles).toContainEqual({ id: created.createdId, name: "Privat" });
+  });
+
+  itWithStore("löscht ein Profil, aber verweigert das letzte verbleibende Profil", async ({ store }) => {
+    const catalog = await store.readCatalog();
+    const created = await store.createProfile(catalog.profilesUpdatedAt, "Arbeit", DEFAULT_PROFILE_ID);
+    expect(created.kind).toBe("ok");
+    if (created.kind !== "ok" || created.createdId === undefined) return;
+    const deleted = await store.deleteProfile(created.createdId, created.catalog.profilesUpdatedAt);
+    expect(deleted.kind).toBe("ok");
+    if (deleted.kind !== "ok") return;
+    const last = await store.deleteProfile(DEFAULT_PROFILE_ID, deleted.catalog.profilesUpdatedAt);
+    expect(last.kind).toBe("last-profile");
+  });
+
+  itWithStore("weist unbekannte Quellen und Ziele sowie einen veralteten Katalog zurück", async ({ store }) => {
+    const catalog = await store.readCatalog();
+    const unknownSource = await store.createProfile(catalog.profilesUpdatedAt, "Arbeit", "123e4567-e89b-42d3-a456-426614174000");
+    expect(unknownSource.kind).toBe("not-found");
+    const unknownTarget = await store.renameProfile("123e4567-e89b-42d3-a456-426614174000", catalog.profilesUpdatedAt, "Arbeit");
+    expect(unknownTarget.kind).toBe("not-found");
+    const stale = await store.createProfile("1999-01-01T00:00:00.000Z", "Arbeit", DEFAULT_PROFILE_ID);
+    expect(stale.kind).toBe("conflict");
+  });
+
+  itWithStore("begrenzt den Katalog auf 16 Profile", async ({ store }) => {
+    let catalog = await store.readCatalog();
+    for (let index = 1; index < 16; index += 1) {
+      const result = await store.createProfile(catalog.profilesUpdatedAt, `Profil ${index}`, DEFAULT_PROFILE_ID);
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
+      catalog = result.catalog;
+    }
+    const tooMany = await store.createProfile(catalog.profilesUpdatedAt, "Zu viel", DEFAULT_PROFILE_ID);
+    expect(tooMany.kind).toBe("invalid");
+  });
+
+  itWithStore("isoliert Config-CAS-Revisionen zwischen Profilen", async ({ store }) => {
+    const catalog = await store.readCatalog();
+    const created = await store.createProfile(catalog.profilesUpdatedAt, "Arbeit", DEFAULT_PROFILE_ID);
+    expect(created.kind).toBe("ok");
+    if (created.kind !== "ok" || created.createdId === undefined) return;
+    const privateConfig = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    const workConfig = await store.readProfileConfig(created.createdId);
+    expect(privateConfig.kind).toBe("ok");
+    expect(workConfig.kind).toBe("ok");
+    if (privateConfig.kind !== "ok" || workConfig.kind !== "ok") return;
+
+    const privateWrite = await store.updateConfig(DEFAULT_PROFILE_ID, privateConfig.config.updatedAt, {
+      ...privateConfig.config,
+      theme: "dark",
+    });
+    const workWrite = await store.updateConfig(created.createdId, workConfig.config.updatedAt, {
+      ...workConfig.config,
+      theme: "light",
+    });
+    expect(privateWrite.kind).toBe("ok");
+    expect(workWrite.kind).toBe("ok");
+  });
+
+  itWithStore("weist eine zu große Duplikation vor der Backup-Rotation ab", async ({ configPath, store }) => {
+    const links = Array.from({ length: 100 }, (_, index) => ({
+      label: `link-${index}`,
+      url: `https://example.com/${"x".repeat(1300)}`,
+    }));
+    const candidate: Config = {
+      ...defaultConfig,
+      linkGroups: [
+        { title: "groß", links },
+        { title: "groß2", links },
+        { title: "groß3", links },
+      ],
+    };
+    const current = await store.readProfileConfig(DEFAULT_PROFILE_ID);
+    expect(current.kind).toBe("ok");
+    if (current.kind !== "ok") return;
+    const changed = await store.updateConfig(DEFAULT_PROFILE_ID, current.config.updatedAt, candidate);
+    expect(changed.kind).toBe("ok");
+    await writeFile(`${configPath}.1`, "unverändert");
+    const catalog = await store.readCatalog();
+    await expect(store.createProfile(catalog.profilesUpdatedAt, "Arbeit", DEFAULT_PROFILE_ID)).rejects.toThrow("Config-Datei ist zu groß");
+    expect(await readFile(`${configPath}.1`, "utf8")).toBe("unverändert");
   });
 });

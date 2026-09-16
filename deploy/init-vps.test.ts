@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { configSchema } from "../src/config/schema";
+import { profileDocumentSchema } from "../src/config/schema";
 import { seedVpsConfig } from "./init-vps";
 
 const directories: string[] = [];
@@ -17,10 +17,17 @@ afterEach(async () => {
 });
 
 describe("VPS-Erstinitialisierung", () => {
-  it("erstellt eine gültige Config ohne Monitoring und ohne HOMELAB-Pane", async () => {
+  it("erstellt ein gültiges Profildokument ohne Monitoring und ohne HOMELAB-Pane", async () => {
     const { directory, path } = await temporaryConfig();
     expect(await seedVpsConfig(path)).toBe("created");
-    const config = configSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    const document = profileDocumentSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    expect(document.version).toBe(2);
+    expect(document.profiles).toHaveLength(1);
+    expect(document.profiles[0]?.id).toBe("default");
+    expect(document.profiles[0]?.name).toBe("Standard");
+    const profile = document.profiles[0];
+    if (!profile) throw new Error("Standardprofil fehlt");
+    const config = profile.config;
     expect(config.homelab.enabled).toBe(false);
     expect(config.layout.find((pane) => pane.id === "homelab")?.visible).toBe(false);
     expect(await readdir(directory)).toEqual(["config.json"]);
@@ -39,7 +46,7 @@ describe("VPS-Erstinitialisierung", () => {
     const results = await Promise.all(Array.from({ length: 12 }, () => seedVpsConfig(path)));
     expect(results.filter((result) => result === "created")).toHaveLength(1);
     expect(results.filter((result) => result === "existing")).toHaveLength(11);
-    expect(configSchema.safeParse(JSON.parse(await readFile(path, "utf8"))).success).toBe(true);
+    expect(profileDocumentSchema.safeParse(JSON.parse(await readFile(path, "utf8"))).success).toBe(true);
     expect(await readdir(directory)).toEqual(["config.json"]);
   });
 

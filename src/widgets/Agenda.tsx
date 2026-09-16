@@ -1,6 +1,8 @@
 import { isSafeLocalCalendarPath, type Config } from "../config/schema";
 import { overlapsRange, parseIcs, type CalEvent } from "../lib/ics";
 import { z } from "zod";
+import type { ProfileId } from "../config/schema";
+import { profileApiUrl } from "../api/profileUrl";
 
 export type { CalEvent };
 export type EventFetchResult = { items: CalEvent[]; failures: string[] };
@@ -27,11 +29,14 @@ type CalendarSourceResult = { items: CalEvent[]; failure?: string };
 
 // `from` und `to` kommen von außen, weil zwei Panes dieselben Termine brauchen: die
 // Agenda die nächsten Tage, das Monatsraster den ganzen sichtbaren Monat. Der optionale
-// Rückwärts-kompatible Aufruf mit nur `to` bleibt für direkte Verbraucher erhalten.
+// zweite Datumswert grenzt den abgefragten Bereich ein; fehlt er, wird `fromOrTo` als Ende
+// eines eintägigen Bereichs verwendet.
 export async function fetchEvents(
+  profileId: ProfileId,
   cals: Config["calendars"],
   fromOrTo: Date,
   maybeTo?: Date,
+  signal?: AbortSignal,
 ): Promise<EventFetchResult> {
   const from = maybeTo === undefined ? (() => {
     const start = new Date();
@@ -44,11 +49,12 @@ export async function fetchEvents(
     try {
       const url = isSafeLocalCalendarPath(cal.url)
         ? cal.url
-        : `/api/proxy?url=${encodeURIComponent(cal.url)}`;
-      const res = await fetch(url);
+        : profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: cal.url }));
+      const res = signal === undefined ? await fetch(url) : await fetch(url, { signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return { items: parseIcs(await res.text(), from, to) };
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return { items: [], failure: cal.label };   // ein kaputter Kalender blockiert die anderen nicht
     }
   }));

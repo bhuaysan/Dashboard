@@ -3,18 +3,25 @@ import { link, open, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultConfig } from "../src/config/defaults.ts";
+import { DEFAULT_PROFILE_ID, type ProfileDocument } from "../src/config/schema.ts";
 
 export async function seedVpsConfig(configPath: string): Promise<"created" | "existing"> {
+  const updatedAt = new Date().toISOString();
   const config = {
     ...defaultConfig,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
     homelab: { ...defaultConfig.homelab, enabled: false },
     layout: defaultConfig.layout.map((pane) => pane.id === "homelab" ? { ...pane, visible: false } : pane),
+  };
+  const document: ProfileDocument = {
+    version: 2,
+    profilesUpdatedAt: updatedAt,
+    profiles: [{ id: DEFAULT_PROFILE_ID, name: "Standard", config }],
   };
   const temporaryPath = `${configPath}.${randomUUID()}.tmp`;
   const file = await open(temporaryPath, "wx", 0o600);
   try {
-    await file.writeFile(`${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await file.writeFile(`${JSON.stringify(document, null, 2)}\n`, "utf8");
     await file.sync();
     // A hard link publishes the complete file atomically, without replacing an existing path.
     try {

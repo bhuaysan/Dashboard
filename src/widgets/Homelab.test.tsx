@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeHomelab, reviveHomelab } from "./Homelab";
 import type { HomelabData } from "./Homelab";
+import { fetchHomelab } from "./Homelab";
+import type { ProfileId } from "../config/schema";
+
+const PROFILE_ID = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("reviveHomelab", () => {
   it("ergänzt die Pegel, die im Cache von vor dem Deploy noch fehlen", () => {
@@ -36,6 +42,19 @@ describe("reviveHomelab", () => {
 });
 
 describe("decodeHomelab", () => {
+  it("sendet die aktive Profil-ID an den Homelab-Endpunkt", async () => {
+    const response: HomelabData = {
+      configured: false,
+      node: { cpu: 0, mem: 0, root: 0, uptimeDays: 0, cpuSpark: [], memSpark: [], cpuLevel: "ok", memLevel: "ok", rootLevel: "ok" },
+      guests: [], storage: [], alerts: [],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    await expect(fetchHomelab(PROFILE_ID, controller.signal)).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/homelab?profile=${PROFILE_ID}`, { signal: controller.signal });
+  });
+
   it("verwirft eine formal gültige, aber strukturell leere Antwort", () => {
     expect(decodeHomelab({ configured: true, node: {}, guests: [], storage: [], alerts: [] })).toBeUndefined();
   });

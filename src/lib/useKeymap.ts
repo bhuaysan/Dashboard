@@ -20,6 +20,7 @@ export type UiAction =
   | { type: "hint"; buffer: string }
   | { type: "help"; show: boolean }
   | { type: "sync"; rowCounts: Readonly<Record<PaneId, number>>; visiblePanes: ReadonlySet<PaneId> }
+  | { type: "resetSelection" }
   | { type: "reset" };
 
 // Reihenfolge und Kürzel der Statusline. Die Ziffern 1–7 folgen dieser Liste, sie muss
@@ -61,6 +62,8 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
     }
     case "reset":
       return { ...state, mode: "NORMAL", hintBuffer: "", showHelp: false };
+    case "resetSelection":
+      return { ...state, mode: "NORMAL", pane: null, row: 0, hintBuffer: "", showHelp: false };
   }
 }
 

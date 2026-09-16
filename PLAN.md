@@ -1266,6 +1266,11 @@ Proxmox bleibt vorerst deaktiviert. Der folgende alte Docker-Entwurf ist histori
 Aktuell wird das ganze Datenverzeichnis statt einer einzelnen Config-Datei eingebunden
 (atomisches rename), Healthcheck über `/api/health`, Node 24 als Runtime.
 
+> **Historischer Hinweis:** Der ursprüngliche Ausschluss von Multi-Profilen in diesem abgeschlossenen Plan wurde
+> durch die spätere ausdrückliche Produktentscheidung für gerätebezogene Dashboard-Profile aufgehoben. Maßgeblich
+> ist die [Spezifikation für Geräteprofile](docs/superpowers/specs/2026-09-15-device-local-profiles-design.md);
+> die zehn Schritte dieses Plans bleiben als historische Umsetzungsanleitung unverändert.
+
 ### Für später vorgemerkt (historischer Stand)
 
 - **Pi-hole-Widget** — Queries, Blockrate, 24-Stunden-Verlauf über die v6-API

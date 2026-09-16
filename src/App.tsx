@@ -15,8 +15,23 @@ import {
 } from "./lib/useKeymap";
 import { buildConsoleUrl, safeHref } from "./lib/url";
 import { exportConfig, importConfig, restoreConfig } from "./config/io";
-import type { Config } from "./config/schema";
+import { DEFAULT_PROFILE_ID, type Config, type ProfileId } from "./config/schema";
+import {
+  readActiveProfileId,
+  readLocalCatalog,
+  writeActiveProfileId,
+  type ProfileCatalog,
+} from "./config/local";
 import { ConfigConflictError, useConfig, useSaveConfig } from "./api/config";
+import {
+  useCreateProfile,
+  useDeleteProfile,
+  useProfiles,
+  useRenameProfile,
+  type CreateProfileInput,
+  type DeleteProfileInput,
+  type RenameProfileInput,
+} from "./api/profiles";
 import { useCachedQuery } from "./api/useCachedQuery";
 import { decodeWeather, fetchWeather, Weather } from "./widgets/Weather";
 import { decodeEvents, fetchEvents, filterAgendaEvents, Agenda } from "./widgets/Agenda";
@@ -27,13 +42,35 @@ import { eventFetchRange } from "./lib/date";
 import { linkHost } from "./lib/host";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { decodeHomelab, fetchHomelab, Homelab } from "./widgets/Homelab";
-import { SettingsPane } from "./shell/SettingsPane";
+import {
+  SettingsPane,
+  type ProfileMutationOptions,
+} from "./shell/SettingsPane";
 
 type RowInfo = { url?: string };
 
 // Die Agenda zeigt heute und die drei folgenden Tage; geholt wird für das Monatsraster
 // mehr. Beide Panes teilen sich eine Abfrage, deshalb wird hier zugeschnitten.
 const AGENDA_DAYS = 4;
+
+function profileInCatalog(catalog: ProfileCatalog | undefined, profileId: ProfileId | undefined): boolean {
+  return profileId !== undefined && (catalog?.profiles.some((profile) => profile.id === profileId) ?? false);
+}
+
+function resolveProfileId(catalog: ProfileCatalog | undefined, stored: ProfileId | undefined): ProfileId | undefined {
+  // Keep a syntactically valid local selection pending while the first catalog is fetched;
+  // the caller still gates all profile-dependent requests until the catalog validates it.
+  if (catalog === undefined) return stored;
+  if (stored !== undefined && profileInCatalog(catalog, stored)) return stored;
+  const first = catalog.profiles[0];
+  return first?.id;
+}
+
+function isProfileQuery(queryKey: readonly unknown[], profileId: ProfileId): boolean {
+  const first = queryKey[0];
+  if (first === "config") return queryKey[1] === profileId;
+  return typeof first === "string" && first.startsWith(`profile:${profileId}:`);
+}
 
 function useNow(): Date {
   const [now, setNow] = useState(() => new Date());
@@ -55,24 +92,110 @@ function useNow(): Date {
 
 export default function App() {
   const queryClient = useQueryClient();
-  const configQuery = useConfig();
-  const saveConfig = useSaveConfig();
+  const profilesQuery = useProfiles();
+  const createProfileMutation = useCreateProfile();
+  const renameProfileMutation = useRenameProfile();
+  const deleteProfileMutation = useDeleteProfile();
+  const [localCatalog] = useState<ProfileCatalog | undefined>(() => readLocalCatalog());
+  const [storedProfileId] = useState<ProfileId | undefined>(() => readActiveProfileId());
+  const [activeProfileId, setActiveProfileId] = useState<ProfileId | undefined>(() =>
+    resolveProfileId(localCatalog, storedProfileId),
+  );
+  const catalog = profilesQuery.data;
+  const resolvedProfileId = resolveProfileId(catalog, activeProfileId);
+  // Before a first catalog arrives there is no selected profile. The default ID below is
+  // only a hook key placeholder; all profile-dependent queries stay disabled until a local
+  // catalog or the server catalog provides a validated first/selected ID.
+  const profileId = resolvedProfileId ?? DEFAULT_PROFILE_ID;
+  const profileReady = catalog !== undefined && resolvedProfileId !== undefined;
+  const selectedProfile = catalog?.profiles.find((profile) => profile.id === resolvedProfileId);
+  const activeProfileName = selectedProfile?.name ?? "Profil wird geladen";
+  const configQuery = useConfig(profileId, { enabled: profileReady });
+  const saveConfig = useSaveConfig(profileId);
   const config = configQuery.data;
+  const configReady = configQuery.configReady;
+  const profileDataReady = profileReady && configReady;
   const [ui, dispatch] = useReducer(uiReducer, initialUiState);
   const [seed, setSeed] = useState<string | null>(null);
   const [message, setMessage] = useState<Note | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<"profile" | undefined>(undefined);
+  const previousCatalog = useRef<ProfileCatalog | undefined>(localCatalog);
   const modalOpen = settingsOpen || ui.showHelp;
   const now = useNow();
   const calRange = useMemo(() => eventFetchRange(now, AGENDA_DAYS), [now]);
   const paneRefs = useRef<Partial<Record<PaneId, HTMLElement | null>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const switchProfile = useCallback((nextProfileId: ProfileId): void => {
+    const cachedCatalog = queryClient.getQueryData<ProfileCatalog>(["profiles"]);
+    const knownCatalog = cachedCatalog ?? catalog;
+    if (knownCatalog !== undefined && !profileInCatalog(knownCatalog, nextProfileId)) return;
+    if (nextProfileId === activeProfileId) {
+      writeActiveProfileId(nextProfileId);
+      return;
+    }
+    const previousProfileId = activeProfileId;
+    writeActiveProfileId(nextProfileId);
+    if (previousProfileId !== undefined) {
+      void queryClient.cancelQueries({
+        predicate: (query) => isProfileQuery(query.queryKey, previousProfileId),
+      });
+    }
+    dispatch({ type: "resetSelection" });
+    setActiveProfileId(nextProfileId);
+  }, [activeProfileId, catalog, queryClient]);
+
+  const createProfile = useCallback((
+    input: CreateProfileInput,
+    options?: ProfileMutationOptions,
+  ): void => {
+    createProfileMutation.mutate(input, {
+      onSuccess: (data) => options?.onSuccess?.(data),
+      onError: (error) => options?.onError?.(error),
+    });
+  }, [createProfileMutation]);
+
+  const renameProfile = useCallback((
+    input: RenameProfileInput,
+    options?: ProfileMutationOptions,
+  ): void => {
+    renameProfileMutation.mutate(input, {
+      onSuccess: (data) => options?.onSuccess?.(data),
+      onError: (error) => options?.onError?.(error),
+    });
+  }, [renameProfileMutation]);
+
+  const deleteProfile = useCallback((
+    input: DeleteProfileInput,
+    options?: ProfileMutationOptions,
+  ): void => {
+    deleteProfileMutation.mutate(input, {
+      onSuccess: (data) => options?.onSuccess?.(data),
+      onError: (error) => options?.onError?.(error),
+    });
+  }, [deleteProfileMutation]);
+
   useEffect(() => {
+    if (catalog === undefined) return;
+    const first = catalog.profiles[0];
+    if (first === undefined) return;
+    if (!profileInCatalog(catalog, activeProfileId)) {
+      const wasKnown = previousCatalog.current?.profiles.some((profile) => profile.id === activeProfileId) ?? false;
+      switchProfile(first.id);
+      if (wasKnown) setMessage({ text: "Profil wurde entfernt — Standardprofil aktiv.", level: "info" });
+    } else {
+      if (activeProfileId !== undefined) writeActiveProfileId(activeProfileId);
+    }
+    previousCatalog.current = catalog;
+  }, [activeProfileId, catalog, switchProfile]);
+
+  useEffect(() => {
+    if (!configReady) return;
     const root = document.documentElement;
     if (config.theme === "system") delete root.dataset.theme;
     else root.dataset.theme = config.theme;
-  }, [config.theme]);
+  }, [config.theme, configReady]);
 
   useEffect(() => {
     // Eine Fehlermeldung bleibt stehen, bis eine neue Meldung sie ablöst — wer eine
@@ -85,26 +208,26 @@ export default function App() {
   // Die Intervalle halten einen dauerhaft offenen Tab aktuell; ohne sie wird erst beim
   // nächsten Fokus nachgeladen, und eine Anzeige, die niemand fokussiert, friert ein.
   const wxQuery = useCachedQuery(
-    `wx:${config.location.lat},${config.location.lon}`,
-    () => fetchWeather(config.location),
+    `profile:${profileId}:wx:${config.location.lat},${config.location.lon}`,
+    (signal) => fetchWeather(profileId, config.location, signal),
     600_000,
-    { decode: decodeWeather, refetchIntervalMs: 600_000 },
+    { decode: decodeWeather, refetchIntervalMs: 600_000, enabled: profileDataReady },
   );
   const calQuery = useCachedQuery(
-    `cal:${JSON.stringify(config.calendars)}:${calRange.from.getTime()}:${calRange.to.getTime()}`,
-    () => fetchEvents(config.calendars, calRange.from, calRange.to),
+    `profile:${profileId}:cal:${JSON.stringify(config.calendars)}:${calRange.from.getTime()}:${calRange.to.getTime()}`,
+    (signal) => fetchEvents(profileId, config.calendars, calRange.from, calRange.to, signal),
     900_000,
-    { decode: decodeEvents, refetchIntervalMs: 900_000 },
+    { decode: decodeEvents, refetchIntervalMs: 900_000, enabled: profileDataReady },
   );
   const newsQuery = useCachedQuery(
-    `news:${JSON.stringify(config.feeds)}`,
-    () => fetchNews(config.feeds),
+    `profile:${profileId}:news:${JSON.stringify(config.feeds)}`,
+    (signal) => fetchNews(profileId, config.feeds, signal),
     900_000,
-    { decode: decodeNews, refetchIntervalMs: 900_000 },
+    { decode: decodeNews, refetchIntervalMs: 900_000, enabled: profileDataReady },
   );
-  const homelabEnabled = config.homelab.enabled;
-  const labQuery = useCachedQuery("pve", fetchHomelab, 60_000, {
-    decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: homelabEnabled,
+  const homelabEnabled = profileDataReady && config.homelab.enabled;
+  const labQuery = useCachedQuery(`profile:${profileId}:pve`, (signal) => fetchHomelab(profileId, signal), 60_000, {
+    decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: profileDataReady && homelabEnabled,
   });
 
   // undefined bleibt undefined: „noch keine Termine" ist ein anderer Zustand als
@@ -123,11 +246,12 @@ export default function App() {
   );
 
   const flatLinks = useMemo<FlatLink[]>(
-    () =>
-      config.linkGroups.flatMap((g) =>
+    () => profileDataReady
+      ? config.linkGroups.flatMap((g) =>
         g.links.map((l) => ({ label: l.label, url: l.url, hint: l.hint, group: g.title })),
-      ),
-    [config.linkGroups],
+      )
+      : [],
+    [config.linkGroups, profileDataReady],
   );
 
   const hints = useMemo<Record<string, string>>(() => {
@@ -137,10 +261,10 @@ export default function App() {
   }, [flatLinks]);
 
   const layoutById = useMemo(
-    () => Object.fromEntries(config.layout.map((l) => [l.id, l])),
-    [config.layout],
+    () => profileDataReady ? Object.fromEntries(config.layout.map((l) => [l.id, l])) : {},
+    [config.layout, profileDataReady],
   );
-  const paneVisible = (id: PaneId) => id === "homelab"
+  const paneVisible = (id: PaneId) => !profileDataReady ? false : id === "homelab"
     ? homelabEnabled && (layoutById[id]?.visible ?? true)
     : layoutById[id]?.visible ?? true;
   const paneSpan = (id: PaneId): 1 | 2 => {
@@ -148,9 +272,9 @@ export default function App() {
     return layout && "span" in layout ? layout.span : 1;
   };
   const visiblePanes = useMemo(
-    () => new Set(PANE_ORDER.map((p) => p.id).filter((id) => id !== "homelab" || homelabEnabled)
+    () => !profileDataReady ? new Set<PaneId>() : new Set(PANE_ORDER.map((p) => p.id).filter((id) => id !== "homelab" || homelabEnabled)
       .filter((id) => layoutById[id]?.visible ?? true)),
-    [layoutById, homelabEnabled],
+    [layoutById, homelabEnabled, profileDataReady],
   );
 
   const consoleUrl = useCallback(
@@ -205,13 +329,21 @@ export default function App() {
 
   useKeymap({
     state: ui, dispatch, hints, rowCount, selectedUrl, onSeed,
-    overlayOpen: modalOpen,
+    overlayOpen: modalOpen || !profileDataReady,
     onOverlayEscape: () => {
+      if (!profileDataReady) return;
       if (settingsOpen) setSettingsOpen(false);
       else dispatch({ type: "help", show: false });
     },
     visiblePanes,
   });
+
+  useEffect(() => {
+    if (!profileDataReady) {
+      setSeed(null);
+      dispatch({ type: "resetSelection" });
+    }
+  }, [profileDataReady]);
 
   useEffect(() => {
     if (ui.mode !== "NORMAL" || !ui.pane) return;
@@ -221,6 +353,10 @@ export default function App() {
   }, [ui.mode, ui.pane, ui.row]);
 
   function updateConfig(next: Config, onSuccess?: () => void) {
+    if (!profileDataReady) {
+      setMessage({ text: "Profil wird noch geladen — bitte gleich erneut versuchen.", level: "error" });
+      return;
+    }
     saveConfig.mutate(next, {
       onSuccess,
       onError: (err) => {
@@ -234,12 +370,46 @@ export default function App() {
   }
 
   function runCommand(cmd: string) {
-    switch (cmd) {
+    const normalized = cmd.trim();
+    if (normalized === "profile") {
+      setSettingsInitialSection("profile");
+      setSettingsOpen(true);
+      return;
+    }
+
+    const profileMatch = /^profile\s+(.+)$/.exec(normalized);
+    if (profileMatch !== null) {
+      const name = profileMatch[1]?.trim() ?? "";
+      if (!profileReady || catalog === undefined || resolvedProfileId === undefined || name === "") {
+        setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+        return;
+      }
+      const normalizedName = name.toLocaleLowerCase("de-DE");
+      const target = catalog.profiles.find((profile) =>
+        profile.name.toLocaleLowerCase("de-DE") === normalizedName,
+      );
+      if (target === undefined) {
+        setMessage({ text: `Profil „${name}" nicht gefunden.`, level: "error" });
+        return;
+      }
+      switchProfile(target.id);
+      return;
+    }
+
+    switch (normalized) {
       case "export":
-        exportConfig(config);
+        if (!profileDataReady || selectedProfile === undefined) {
+          setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+          break;
+        }
+        exportConfig(config, selectedProfile.name);
         setMessage({ text: "Konfiguration als Datei gesichert.", level: "info" });
         break;
       case "import":
+        if (!profileDataReady || selectedProfile === undefined) {
+          setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+          break;
+        }
         fileRef.current?.click();
         break;
       case "refresh":
@@ -251,6 +421,10 @@ export default function App() {
         window.location.reload();
         break;
       case "theme": {
+        if (!profileDataReady || selectedProfile === undefined) {
+          setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
+          break;
+        }
         const effective = document.documentElement.dataset.theme ??
           (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
         updateConfig({ ...config, theme: effective === "dark" ? "light" : "dark" });
@@ -258,6 +432,7 @@ export default function App() {
         break;
       }
       case "settings":
+        setSettingsInitialSection(undefined);
         setSettingsOpen(true);
         break;
       default:
@@ -266,7 +441,7 @@ export default function App() {
   }
 
   async function onImportFile(file: File | undefined) {
-    if (!file) return;
+    if (!file || !profileDataReady) return;
     const result = await importConfig(file);
     if (result.ok) {
       updateConfig(restoreConfig(result.config, config), () => {
@@ -304,6 +479,61 @@ export default function App() {
     : partialProblems.join(" · ") || undefined;
 
   let linkRow = -1;
+
+  const settingsPane = (
+    <SettingsPane
+      open={settingsOpen}
+      config={config}
+      configReady={configReady}
+      profileId={profileId}
+      profiles={catalog}
+      activeProfileId={resolvedProfileId}
+      guests={homelabEnabled ? labQuery.data?.guests ?? [] : []}
+      onClose={() => setSettingsOpen(false)}
+      save={saveConfig}
+      onReload={async () => {
+        const result = await configQuery.refetch();
+        return result.isSuccess ? result.data : undefined;
+      }}
+      onReloadProfiles={async () => {
+        const result = await profilesQuery.refetch();
+        return result.isSuccess ? result.data : undefined;
+      }}
+      onSwitchProfile={switchProfile}
+      onCreateProfile={createProfile}
+      onRenameProfile={renameProfile}
+      onDeleteProfile={deleteProfile}
+      initialSection={settingsInitialSection}
+      // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
+      // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
+      onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}
+    />
+  );
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept="application/json"
+      hidden
+      onChange={(e) => {
+        void onImportFile(e.target.files?.[0]);
+        e.target.value = "";
+      }}
+    />
+  );
+
+  if (!profileDataReady) {
+    return (
+      <>
+        <div className="app">
+          <h1 className="sr-only">Dashboard</h1>
+          <div className="dim" role="status">Profil-Konfiguration wird geladen …</div>
+        </div>
+        {settingsPane}
+        {fileInput}
+      </>
+    );
+  }
 
   return (
     <>
@@ -440,6 +670,7 @@ export default function App() {
 
           <StatusLine
             mode={ui.mode}
+            profileName={activeProfileName}
             panes={PANE_ORDER
               .map((p, i) => ({ id: p.id, n: i + 1, label: p.label, active: ui.pane === p.id }))
               .filter((p) => visiblePanes.has(p.id))
@@ -466,30 +697,8 @@ export default function App() {
       </div>
 
       <KeymapOverlay open={ui.showHelp} onClose={() => dispatch({ type: "help", show: false })} />
-      <SettingsPane
-        open={settingsOpen}
-        config={config}
-        guests={homelabEnabled ? labQuery.data?.guests ?? [] : []}
-        onClose={() => setSettingsOpen(false)}
-        save={saveConfig}
-        onReload={async () => {
-          const result = await configQuery.refetch();
-          return result.isSuccess ? result.data : undefined;
-        }}
-        // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
-        // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
-        onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}
-      />
-      <input
-        ref={fileRef}
-        type="file"
-        accept="application/json"
-        hidden
-        onChange={(e) => {
-          void onImportFile(e.target.files?.[0]);
-          e.target.value = "";
-        }}
-      />
+      {settingsPane}
+      {fileInput}
     </>
   );
 }

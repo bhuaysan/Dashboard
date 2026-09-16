@@ -1,4 +1,5 @@
-import type { Config } from "./schema";
+import { DEFAULT_PROFILE_ID } from "./schema";
+import type { Config, ProfileDocument } from "./schema";
 
 export const defaultConfig: Config = {
   version: 1,
@@ -91,4 +92,10 @@ export const defaultConfig: Config = {
     thresholds: { cpu: 90, mem: 85, storage: 80, backupAgeHours: 36 },
     reachability: [],
   },
+};
+
+export const defaultProfileDocument: ProfileDocument = {
+  version: 2,
+  profilesUpdatedAt: defaultConfig.updatedAt,
+  profiles: [{ id: DEFAULT_PROFILE_ID, name: "Standard", config: defaultConfig }],
 };

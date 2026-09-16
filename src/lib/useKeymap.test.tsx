@@ -83,6 +83,32 @@ describe("Auswahl-Synchronisierung", () => {
     expect(next.pane).toBe("clock");
     expect(next.row).toBe(0);
   });
+
+  it("setzt die Auswahl für einen Profilwechsel vollständig zurück", () => {
+    const state: UiState = {
+      ...initialUiState,
+      mode: "INSERT",
+      pane: "news",
+      row: 1,
+      hintBuffer: "g",
+      showHelp: true,
+    };
+    const next = uiReducer(state, { type: "resetSelection" });
+    expect(next).toEqual({
+      ...state,
+      mode: "NORMAL",
+      pane: null,
+      row: 0,
+      hintBuffer: "",
+      showHelp: false,
+    });
+  });
+
+  it("behält beim bestehenden Reset die Auswahl für Escape bei", () => {
+    const state: UiState = { ...initialUiState, mode: "COMMAND", pane: "news", row: 1, showHelp: true };
+    const next = uiReducer(state, { type: "reset" });
+    expect(next).toEqual({ ...state, mode: "NORMAL", hintBuffer: "", showHelp: false });
+  });
 });
 
 describe("Schnelles Tippen", () => {
