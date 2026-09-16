@@ -5,6 +5,39 @@ host=ben@5.252.224.168
 release_id="$(date -u +%Y%m%d%H%M%S)-$$"
 image="dashboard-vps:$release_id"
 release="/opt/dashboard/releases/$release_id"
+build_inputs=(
+  .dockerignore
+  Dockerfile.vps
+  compose.vps.yaml
+  index.html
+  package.json
+  pnpm-lock.yaml
+  pnpm-workspace.yaml
+  postcss.config.js
+  public
+  server
+  src
+  tailwind.config.js
+  tsconfig.app.json
+  tsconfig.json
+  tsconfig.node.json
+  vite.config.ts
+  deploy/deploy-vps.sh
+  deploy/init-vps.ts
+  deploy/package-vps.sh
+  deploy/remote-vps-deploy.sh
+)
+if ! git diff --quiet HEAD -- "${build_inputs[@]}"; then
+  echo 'Build-Eingaben sind nicht auf HEAD committed; Deployment abgebrochen.' >&2
+  git diff --name-only HEAD -- "${build_inputs[@]}" >&2
+  exit 1
+fi
+untracked_inputs="$(git status --porcelain=v1 --untracked-files=all --ignored -- "${build_inputs[@]}")"
+if [[ -n "$untracked_inputs" ]]; then
+  echo 'Build-Eingaben enthalten untracked oder ignorierte Dateien; Deployment abgebrochen.' >&2
+  printf '%s\n' "$untracked_inputs" >&2
+  exit 1
+fi
 pnpm test
 pnpm build
 git diff --check

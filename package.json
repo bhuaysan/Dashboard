@@ -13,7 +13,7 @@
     "build": "tsc -b && vite build",
     "test": "pnpm run test:unit && pnpm run test:deploy",
     "test:unit": "vitest run",
-    "test:deploy": "bash -n deploy/*.sh && bash deploy/remote-deploy.test.sh && bash deploy/remote-vps-deploy.test.sh",
+    "test:deploy": "bash -n deploy/*.sh && bash deploy/package-vps.test.sh && bash deploy/remote-deploy.test.sh && bash deploy/remote-vps-deploy.test.sh",
     "serve": "tsx server/index.ts",
     "deploy": "./deploy/deploy.sh",
     "deploy:vps": "./deploy/deploy-vps.sh"

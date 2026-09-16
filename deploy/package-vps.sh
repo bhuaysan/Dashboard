@@ -12,8 +12,12 @@ cp Dockerfile.vps "$bundle/Dockerfile"
 cp compose.vps.yaml "$bundle/"
 mkdir -p "$bundle/deploy"
 cp deploy/init-vps.ts deploy/remote-vps-deploy.sh "$bundle/deploy/"
-# Explizite Liste statt Repository-Upload. .env, Config und Zertifikate bleiben lokal.
-tar --exclude='*.test.ts' --exclude='*.test.tsx' -cf - dist src server | tar -xf - -C "$bundle"
+# dist kommt aus dem gerade abgeschlossenen Build; der Runtime-Quellcode kommt ausschließlich
+# aus HEAD, damit untracked oder ignorierte Dateien aus src/server nicht ins Image gelangen.
+tar -cf - dist | tar -xf - -C "$bundle"
+git archive --format=tar HEAD -- src server | tar -xf - -C "$bundle"
+find "$bundle/src" "$bundle/server" -type f \( -name '*.test.*' -o -path '*/test/*' \) -delete
+find "$bundle/src" "$bundle/server" -depth -type d -empty -delete
 cat > "$bundle/.dockerignore" <<'IGNORE'
 **/.env
 **/.env.*
