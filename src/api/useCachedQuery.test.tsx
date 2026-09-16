@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { CACHE_MAX_AGE_MS, CACHE_MAX_ENTRIES, cleanupCache, useCachedQuery } from "./useCachedQuery";
@@ -29,6 +29,32 @@ describe("useCachedQuery", () => {
     rerender({ enabled: true });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("reicht das AbortSignal weiter und schreibt nach Abbruch keinen späten Snapshot", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let signal: AbortSignal | undefined;
+    let resolveData: (value: Item[]) => void = () => undefined;
+    const data = new Promise<Item[]>((resolve) => { resolveData = resolve; });
+    const fetcher = vi.fn((receivedSignal: AbortSignal) => {
+      signal = receivedSignal;
+      return data;
+    });
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    renderHook(() => useCachedQuery<Item[]>("abort", fetcher, 60_000), { wrapper: testWrapper });
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    const cancellation = client.cancelQueries({ queryKey: ["abort"] });
+    await act(async () => {
+      resolveData([{ title: "zu spät", date: new Date() }]);
+      await cancellation;
+      await Promise.resolve();
+    });
+
+    expect(signal?.aborted).toBe(true);
+    expect(localStorage.getItem("dashboard:cache:abort")).toBeNull();
   });
 
   it("belebt Datumsfelder aus dem JSON-Cache wieder", async () => {

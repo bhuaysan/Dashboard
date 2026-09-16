@@ -24,6 +24,23 @@ afterEach(() => {
 });
 
 describe("useConfig", () => {
+  it("markiert den Default-Platzhalter ohne lokalen Snapshot erst nach echter Config als bereit", async () => {
+    const response = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn(async () => response.promise));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useConfig(WORK_PROFILE_ID), { wrapper: testWrapper });
+
+    expect(result.current.data).toEqual(defaultConfig);
+    expect(result.current.configReady).toBe(false);
+
+    response.resolve(new Response(JSON.stringify({ ...defaultConfig, theme: "dark" }), { status: 200 }));
+    await waitFor(() => expect(result.current.configReady).toBe(true));
+    expect(result.current.data?.theme).toBe("dark");
+  });
+
   it("revalidiert eine lokale Config sofort beim Mount", async () => {
     localStorage.setItem("dashboard:config:default", JSON.stringify(defaultConfig));
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...defaultConfig, theme: "dark" }), { status: 200 }));
@@ -43,6 +60,7 @@ describe("useConfig", () => {
     const { result } = renderHook(() => useConfig(DEFAULT_PROFILE_ID), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 3000 });
     expect(result.current.data).toEqual(defaultConfig);
+    expect(result.current.configReady).toBe(true);
   });
 
   it("schreibt keine Config, deren JSON erst nach dem Abbruch fertig wird", async () => {
@@ -174,6 +192,30 @@ describe("useSaveConfig", () => {
     await Promise.resolve();
     expect(client.getQueryData(["config", DEFAULT_PROFILE_ID])).toEqual(saved);
     expect(JSON.parse(localStorage.getItem("dashboard:config:default") ?? "null")).toEqual(saved);
+  });
+
+  it("überschreibt einen bereits neueren Config-Snapshot nicht mit älterer PUT-Antwort", async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const put = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") return put.promise;
+      return Promise.resolve(new Response("", { status: 502 }));
+    }));
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useSaveConfig(DEFAULT_PROFILE_ID), { wrapper: testWrapper });
+    const saved = { ...defaultConfig, theme: "dark" as const, updatedAt: "2026-08-25T12:00:00.000Z" };
+    const newer = { ...defaultConfig, theme: "light" as const, updatedAt: "2026-08-25T12:00:01.000Z" };
+
+    act(() => result.current.mutate(defaultConfig));
+    client.setQueryData(["config", DEFAULT_PROFILE_ID], newer);
+    localStorage.setItem("dashboard:config:default", JSON.stringify(newer));
+    put.resolve(new Response(JSON.stringify(saved), { status: 200 }));
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(client.getQueryData(["config", DEFAULT_PROFILE_ID])).toEqual(newer);
+    expect(JSON.parse(localStorage.getItem("dashboard:config:default") ?? "null")).toEqual(newer);
   });
 
   it("trägt bei 409 den frischen Stand des Servers im Fehler", async () => {

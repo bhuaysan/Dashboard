@@ -80,6 +80,7 @@ function typeCommand(cmd: string) {
 
 function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResponse: HomelabData = EMPTY_HOMELAB) {
   writeLocalCatalog(PROFILE_CATALOG);
+  writeLocalConfig(DEFAULT_PROFILE_ID, config);
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/profiles") return new Response(JSON.stringify(PROFILE_CATALOG), { status: 200 });
@@ -97,6 +98,10 @@ function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResp
 
 function stubProfiledApi(catalog: ProfileCatalog, configs: Record<string, Config>) {
   writeLocalCatalog(catalog);
+  for (const profile of catalog.profiles) {
+    const config = configs[profile.id];
+    if (config !== undefined) writeLocalConfig(profile.id, config);
+  }
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const parsed = new URL(String(input), "http://dashboard.test");
     if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(catalog), { status: 200 });

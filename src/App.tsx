@@ -113,6 +113,8 @@ export default function App() {
   const configQuery = useConfig(profileId, { enabled: profileReady });
   const saveConfig = useSaveConfig(profileId);
   const config = configQuery.data;
+  const configReady = configQuery.configReady;
+  const profileDataReady = profileReady && configReady;
   const [ui, dispatch] = useReducer(uiReducer, initialUiState);
   const [seed, setSeed] = useState<string | null>(null);
   const [message, setMessage] = useState<Note | undefined>(undefined);
@@ -189,10 +191,11 @@ export default function App() {
   }, [activeProfileId, catalog, switchProfile]);
 
   useEffect(() => {
+    if (!configReady) return;
     const root = document.documentElement;
     if (config.theme === "system") delete root.dataset.theme;
     else root.dataset.theme = config.theme;
-  }, [config.theme]);
+  }, [config.theme, configReady]);
 
   useEffect(() => {
     // Eine Fehlermeldung bleibt stehen, bis eine neue Meldung sie ablöst — wer eine
@@ -206,25 +209,25 @@ export default function App() {
   // nächsten Fokus nachgeladen, und eine Anzeige, die niemand fokussiert, friert ein.
   const wxQuery = useCachedQuery(
     `profile:${profileId}:wx:${config.location.lat},${config.location.lon}`,
-    () => fetchWeather(profileId, config.location),
+    (signal) => fetchWeather(profileId, config.location, signal),
     600_000,
-    { decode: decodeWeather, refetchIntervalMs: 600_000, enabled: profileReady },
+    { decode: decodeWeather, refetchIntervalMs: 600_000, enabled: profileDataReady },
   );
   const calQuery = useCachedQuery(
     `profile:${profileId}:cal:${JSON.stringify(config.calendars)}:${calRange.from.getTime()}:${calRange.to.getTime()}`,
-    () => fetchEvents(profileId, config.calendars, calRange.from, calRange.to),
+    (signal) => fetchEvents(profileId, config.calendars, calRange.from, calRange.to, signal),
     900_000,
-    { decode: decodeEvents, refetchIntervalMs: 900_000, enabled: profileReady },
+    { decode: decodeEvents, refetchIntervalMs: 900_000, enabled: profileDataReady },
   );
   const newsQuery = useCachedQuery(
     `profile:${profileId}:news:${JSON.stringify(config.feeds)}`,
-    () => fetchNews(profileId, config.feeds),
+    (signal) => fetchNews(profileId, config.feeds, signal),
     900_000,
-    { decode: decodeNews, refetchIntervalMs: 900_000, enabled: profileReady },
+    { decode: decodeNews, refetchIntervalMs: 900_000, enabled: profileDataReady },
   );
-  const homelabEnabled = config.homelab.enabled;
-  const labQuery = useCachedQuery(`profile:${profileId}:pve`, () => fetchHomelab(profileId), 60_000, {
-    decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: profileReady && homelabEnabled,
+  const homelabEnabled = configReady && config.homelab.enabled;
+  const labQuery = useCachedQuery(`profile:${profileId}:pve`, (signal) => fetchHomelab(profileId, signal), 60_000, {
+    decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: profileDataReady && homelabEnabled,
   });
 
   // undefined bleibt undefined: „noch keine Termine" ist ein anderer Zustand als
@@ -341,6 +344,10 @@ export default function App() {
   }, [ui.mode, ui.pane, ui.row]);
 
   function updateConfig(next: Config, onSuccess?: () => void) {
+    if (!profileDataReady) {
+      setMessage({ text: "Profil wird noch geladen — bitte gleich erneut versuchen.", level: "error" });
+      return;
+    }
     saveConfig.mutate(next, {
       onSuccess,
       onError: (err) => {
@@ -382,7 +389,7 @@ export default function App() {
 
     switch (normalized) {
       case "export":
-        if (!profileReady || selectedProfile === undefined) {
+        if (!profileDataReady || selectedProfile === undefined) {
           setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
           break;
         }
@@ -390,7 +397,7 @@ export default function App() {
         setMessage({ text: "Konfiguration als Datei gesichert.", level: "info" });
         break;
       case "import":
-        if (!profileReady || selectedProfile === undefined) {
+        if (!profileDataReady || selectedProfile === undefined) {
           setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
           break;
         }
@@ -405,7 +412,7 @@ export default function App() {
         window.location.reload();
         break;
       case "theme": {
-        if (!profileReady || selectedProfile === undefined) {
+        if (!profileDataReady || selectedProfile === undefined) {
           setMessage({ text: "Profile werden noch geladen — bitte gleich erneut versuchen.", level: "error" });
           break;
         }
@@ -425,7 +432,7 @@ export default function App() {
   }
 
   async function onImportFile(file: File | undefined) {
-    if (!file) return;
+    if (!file || !profileDataReady) return;
     const result = await importConfig(file);
     if (result.ok) {
       updateConfig(restoreConfig(result.config, config), () => {
@@ -629,6 +636,7 @@ export default function App() {
       <SettingsPane
         open={settingsOpen}
         config={config}
+        configReady={configReady}
         profileId={profileId}
         profiles={catalog}
         activeProfileId={resolvedProfileId}

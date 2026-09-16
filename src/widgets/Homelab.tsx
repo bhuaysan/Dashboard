@@ -35,8 +35,9 @@ export function decodeHomelab(value: unknown): HomelabData | undefined {
   return legacy.success ? reviveHomelab(legacy.data) : undefined;
 }
 
-export async function fetchHomelab(profileId: ProfileId): Promise<HomelabData> {
-  const res = await fetch(profileApiUrl("/api/homelab", profileId));
+export async function fetchHomelab(profileId: ProfileId, signal?: AbortSignal): Promise<HomelabData> {
+  const url = profileApiUrl("/api/homelab", profileId);
+  const res = signal === undefined ? await fetch(url) : await fetch(url, { signal });
   if (!res.ok) throw new Error(`Homelab nicht ladbar (${res.status})`);
   const data = decodeHomelab(await res.json());
   if (data === undefined) throw new Error("Homelabantwort ungültig");

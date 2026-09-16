@@ -313,6 +313,28 @@ describe("/api/config", () => {
       { location: { label: "Arbeit", lat: 3, lon: 4 } },
     ),
   });
+
+  itWithApp("akzeptiert parallele PUTs in zwei verschiedenen Profilen", async ({ app }) => {
+    const standard = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`);
+    const arbeit = await app.request(`/api/config?profile=${secondProfileId}`);
+    const standardConfig = await standard.json() as Config;
+    const arbeitConfig = await arbeit.json() as Config;
+    const put = (profileId: ProfileId, cfg: Config) => app.request(`/api/config?profile=${profileId}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "If-Match": cfg.updatedAt, host: "localhost:7777" },
+      body: JSON.stringify(cfg),
+    }, connInfo("127.0.0.1"));
+
+    const [standardWrite, arbeitWrite] = await Promise.all([
+      put(DEFAULT_PROFILE_ID, { ...standardConfig, theme: "dark" }),
+      put(secondProfileId, { ...arbeitConfig, theme: "light" }),
+    ]);
+    expect([standardWrite.status, arbeitWrite.status].sort((a, b) => a - b)).toEqual([200, 200]);
+    const savedStandard = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`);
+    const savedArbeit = await app.request(`/api/config?profile=${secondProfileId}`);
+    expect((await savedStandard.json() as Config).theme).toBe("dark");
+    expect((await savedArbeit.json() as Config).theme).toBe("light");
+  }, { document: twoProfileDocument() });
 });
 
 describe("/api/profiles", () => {
@@ -417,6 +439,20 @@ describe("/api/profiles", () => {
     }, connInfo("127.0.0.1"));
     expect(response.status).toBe(409);
   });
+
+  itWithApp("meldet bei konkurrierenden Löschungen den letzten Profilstand fachlich", async ({ app }) => {
+    const initial = await app.request("/api/profiles");
+    const catalog = await initial.json() as { profilesUpdatedAt: string };
+    const remove = (profileId: ProfileId) => app.request(`/api/profiles/${profileId}`, {
+      method: "DELETE",
+      headers: { "If-Match": catalog.profilesUpdatedAt, host: "localhost:7777" },
+    }, connInfo("127.0.0.1"));
+
+    const [first, second] = await Promise.all([remove(DEFAULT_PROFILE_ID), remove(secondProfileId)]);
+    expect([first.status, second.status].sort((a, b) => a - b)).toEqual([200, 409]);
+    const loser = first.status === 409 ? first : second;
+    expect(await loser.json()).toEqual({ error: "last-profile" });
+  }, { document: twoProfileDocument() });
 
   itWithApp("weist ungültige JSON- und zu große Katalog-Bodies ab", async ({ app }) => {
     const malformed = await app.request("/api/profiles", {

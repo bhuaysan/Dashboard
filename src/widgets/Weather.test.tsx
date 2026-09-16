@@ -14,8 +14,9 @@ describe("Weather-Antworten", () => {
   it("meldet eine malformed 200-Antwort als Quellenfehler", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchWeather(PROFILE_ID, { lat: 49, lon: 9 })).rejects.toThrow("Wetterantwort ungültig");
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`profile=${PROFILE_ID}`));
+    const controller = new AbortController();
+    await expect(fetchWeather(PROFILE_ID, { lat: 49, lon: 9 }, controller.signal)).rejects.toThrow("Wetterantwort ungültig");
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`profile=${PROFILE_ID}`), { signal: controller.signal });
   });
 
   it("weist 200-Antworten mit nicht passenden Feldlängen ab", async () => {

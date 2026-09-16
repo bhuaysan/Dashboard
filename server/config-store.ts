@@ -436,14 +436,14 @@ export function createConfigStore(configPath: string): ConfigStore {
   async function deleteProfile(profileId: ProfileId, ifMatch: string | undefined): Promise<CatalogMutationResult> {
     return serialized(async () => {
       const document = await readDocumentUnlocked();
-      if (ifMatch !== document.profilesUpdatedAt) {
-        return { kind: "conflict", current: document.profilesUpdatedAt };
-      }
       const parsedId = profileIdIssues(profileId);
       if (Array.isArray(parsedId)) return { kind: "invalid", issues: parsedId };
       const profileIndex = document.profiles.findIndex((entry) => entry.id === parsedId);
       if (profileIndex < 0) return { kind: "not-found" };
       if (document.profiles.length <= 1) return { kind: "last-profile" };
+      if (ifMatch !== document.profilesUpdatedAt) {
+        return { kind: "conflict", current: document.profilesUpdatedAt };
+      }
 
       const nextDocument = clone(document);
       nextDocument.profiles.splice(profileIndex, 1);

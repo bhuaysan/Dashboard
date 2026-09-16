@@ -57,7 +57,7 @@ function catalogMutationResponse(c: Context, result: CatalogMutationResult): Res
   }
   if (result.kind === "conflict") return c.json({ error: "conflict", current: result.current }, 409);
   if (result.kind === "not-found") return c.json({ error: "Profil nicht gefunden" }, 404);
-  if (result.kind === "last-profile") return c.json({ error: "Letztes Profil kann nicht gelöscht werden" }, 409);
+  if (result.kind === "last-profile") return c.json({ error: "last-profile" }, 409);
   return c.json({ error: "invalid", issues: result.issues }, 400);
 }
 

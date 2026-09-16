@@ -7,6 +7,7 @@ import {
   useDeleteProfile,
   useProfiles,
   useRenameProfile,
+  LastProfileError,
   type ProfileCatalog,
 } from "./profiles";
 import { profileApiUrl } from "./profileUrl";
@@ -169,5 +170,39 @@ describe("profile catalog mutations", () => {
     act(() => result.current.mutate({ profileId: WORK_PROFILE_ID, name: "Office", profilesUpdatedAt: catalog.profilesUpdatedAt }));
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error).toMatchObject({ current });
+  });
+
+  it("erkennt die fachliche Antwort beim Löschen des letzten Profils", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "last-profile" }), { status: 409 })));
+    const { result } = renderHook(() => useDeleteProfile(), { wrapper: wrapperFor(createClient()) });
+
+    act(() => result.current.mutate({ profileId: WORK_PROFILE_ID, profilesUpdatedAt: catalog.profilesUpdatedAt }));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.error).toBeInstanceOf(LastProfileError);
+  });
+
+  it("überschreibt einen neueren Katalog-Poll nicht mit älterer Mutationsantwort", async () => {
+    const put = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") return put.promise;
+      return Promise.resolve(new Response("", { status: 502 }));
+    }));
+    const client = createClient();
+    const { result } = renderHook(() => useCreateProfile(), { wrapper: wrapperFor(client) });
+    const newer: ProfileCatalog = {
+      ...catalog,
+      profilesUpdatedAt: "2026-09-16T00:00:00.000Z",
+      profiles: [...catalog.profiles, { id: "223e4567-e89b-42d3-a456-426614174000" as ProfileId, name: "Privat" }],
+    };
+
+    act(() => result.current.mutate({ name: "Privat", sourceProfileId: DEFAULT_PROFILE_ID, profilesUpdatedAt: catalog.profilesUpdatedAt }));
+    client.setQueryData(["profiles"], newer);
+    writeLocalCatalog(newer);
+    put.resolve(new Response(JSON.stringify({ catalog, createdId: "223e4567-e89b-42d3-a456-426614174000" }), { status: 200 }));
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(client.getQueryData(["profiles"])).toEqual(newer);
+    expect(JSON.parse(localStorage.getItem("dashboard:profiles") ?? "null")).toEqual(newer);
   });
 });

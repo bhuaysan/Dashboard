@@ -444,6 +444,25 @@ describe("SettingsPane", () => {
     expect(screen.queryByText(/Ort A ·/)).toBeNull();
   });
 
+  it("verwirft eine Antwort nach Schließen und erneutem Öffnen desselben Dialogs", async () => {
+    let resolveSearch: (response: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => { resolveSearch = resolve; });
+    vi.stubGlobal("fetch", vi.fn(() => pending));
+    const rendered = renderProfiles({ initialSection: "place" });
+    fireEvent.click(screen.getByRole("button", { name: "suchen" }));
+
+    rendered.rerender(<SettingsPane open={false} config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} initialSection="place" />);
+    rendered.rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} initialSection="place" />);
+    resolveSearch(new Response(JSON.stringify({ results: [{ name: "Alter Ort", latitude: 48, longitude: 8 }] }), { status: 200 }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(screen.queryByText(/Alter Ort/)).toBeNull();
+  });
+
   it("hält Profilaktionen während eines ausstehenden Config-Speicherns gesperrt", () => {
     const onSwitchProfile = vi.fn();
     const onRenameProfile = vi.fn();
@@ -485,6 +504,25 @@ describe("SettingsPane", () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
     expect(screen.getByText(/Ort B ·/)).toBeTruthy();
+  });
+
+  it("ignoriert einen verspäteten Save-Erfolg nach Schließen und erneutem Öffnen", () => {
+    let finishSave: { onSuccess?: () => void; onError?: (error: unknown) => void } | undefined;
+    const save = fakeSave((_config, options) => { finishSave = options; });
+    const onClose = vi.fn();
+    const onSaved = vi.fn();
+    const rendered = renderProfiles({ save, onClose, onSaved });
+    fireEvent.change(screen.getByDisplayValue("Datasphere"), { target: { value: "Entwurf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+
+    rendered.rerender(<SettingsPane open={false} config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={onClose} save={save} onSaved={onSaved} />);
+    rendered.rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} onClose={onClose} save={save} onSaved={onSaved} />);
+    finishSave?.onSuccess?.();
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("sperrt Profilwechsel beim Config-Reload und verwirft keine alte Antwort im neuen Profil", async () => {
@@ -538,6 +576,25 @@ describe("SettingsPane", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("dialog")));
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Tab" });
     expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("übernimmt eine später geladene echte Config im sauberen Dialog-Entwurf", async () => {
+    const loaded: Config = {
+      ...defaultConfig,
+      location: { ...defaultConfig.location, label: "Später geladen" },
+    };
+    const { rerender } = render(<SettingsPane open config={defaultConfig} configReady={false} profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    expect(screen.getByText(/Profile werden geladen/)).toBeTruthy();
+
+    rerender(<SettingsPane open config={loaded} configReady profileId={PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={PROFILE_ID} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onSwitchProfile={() => undefined}
+      onCreateProfile={() => undefined} onRenameProfile={() => undefined} onDeleteProfile={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Später geladen")).toBeTruthy());
   });
 
   it("übersetzt einen strukturellen Konfigurationsfehler und springt zum richtigen Abschnitt", () => {

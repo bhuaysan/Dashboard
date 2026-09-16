@@ -3,6 +3,7 @@ import { configSchema, type Config, type ProfileId } from "../config/schema";
 import { describeIssue, issueRootKey } from "../config/describeIssue";
 import { ConfigConflictError } from "../api/config";
 import {
+  LastProfileError,
   ProfileConflictError,
   type CatalogMutationData,
   type CreateProfileInput,
@@ -48,6 +49,8 @@ type Props = {
   onRenameProfile: RenameProfile;
   onDeleteProfile: DeleteProfile;
   initialSection?: Sec;
+  /** Der lokale/default Config-Fallback ist erst nach Katalog- und Config-Ladung echt. */
+  configReady?: boolean;
   /** Ausschließlich die Erfolgsmeldung außerhalb des Dialogs — Schließen und Fehlerfall
       übernimmt der Dialog selbst, weil nur er weiß, ob der Entwurf erhalten bleiben muss. */
   onSaved: () => void;
@@ -199,7 +202,9 @@ export function SettingsPane({
   onRenameProfile,
   onDeleteProfile,
   initialSection,
+  configReady,
 }: Props) {
+  const actualConfigReady = configReady ?? true;
   const [draft, setDraft] = useState<Config>(config);
   const [sec, setSec] = useState<Sec>(initialSection ?? "links");
   const [error, setError] = useState<string | undefined>(undefined);
@@ -227,6 +232,9 @@ export function SettingsPane({
   const boxRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   const wasOpen = useRef(false);
+  const dialogOpenRef = useRef(open);
+  dialogOpenRef.current = open;
+  const dialogSession = useRef(0);
   const placeRequest = useRef(0);
   const profileContextRef = useRef<{ profileId: ProfileId; activeProfileId: ProfileId | undefined }>({ profileId, activeProfileId });
   const profileContextEpoch = useRef(0);
@@ -241,9 +249,12 @@ export function SettingsPane({
   const expectedProfileChange = useRef<ProfileId | undefined>(undefined);
   const saveRequest = useRef(0);
   const reloadRequest = useRef(0);
+  const profileReloadRequest = useRef(0);
+  const incomingConfigSnapshot = useRef(serializeConfig(config));
+  const configReadySnapshot = useRef(actualConfigReady);
 
   const selectedProfile = profiles?.profiles.find((profile) => profile.id === activeProfileId);
-  const profileReady = profiles !== undefined && activeProfileId !== undefined && selectedProfile !== undefined;
+  const profileReady = actualConfigReady && profiles !== undefined && activeProfileId !== undefined && selectedProfile !== undefined;
   const draftForComparison: Config = {
     ...draft,
     search: {
@@ -274,11 +285,18 @@ export function SettingsPane({
   // einer laufenden Bearbeitung den halb fertigen Entwurf stillschweigend überschreiben.
   useEffect(() => {
     if (open && !wasOpen.current) {
+      dialogSession.current += 1;
       setDraft(config);
       configSnapshot.current = serializeConfig(config);
+      incomingConfigSnapshot.current = serializeConfig(config);
+      configReadySnapshot.current = actualConfigReady;
       activeProfileSnapshot.current = activeProfileId;
       profileIdSnapshot.current = profileId;
       expectedProfileChange.current = undefined;
+      placeRequest.current += 1;
+      saveRequest.current += 1;
+      reloadRequest.current += 1;
+      profileReloadRequest.current += 1;
       setPlaceQuery(config.location.label);
       setBangs(Object.entries(config.search.bangs).map(([key, tpl]) => ({ key, tpl })));
       setSec(initialSection ?? "links");
@@ -291,33 +309,47 @@ export function SettingsPane({
       setOrphanedDraft(false);
       setConflict(false);
       setCatalogConflict(false);
+      setSearching(false);
+      setReloading(false);
+      setReloadingProfiles(false);
+      setProfileBusy(false);
     }
     wasOpen.current = open;
-  }, [open, config, initialSection, profiles, activeProfileId]);
+  }, [open, config, initialSection, profiles, activeProfileId, actualConfigReady, profileId]);
 
   // Ein bestätigter Profilwechsel lässt das Overlay offen. Sobald die neue lokale
   // Config als Prop ankommt, wird deshalb ein neuer Entwurfssnapshot begonnen —
   // spätere Polls desselben Profils dürfen eine laufende Bearbeitung weiterhin nicht
   // überschreiben.
   useEffect(() => {
-    if (!open || !profileReady || (activeProfileSnapshot.current === activeProfileId && profileIdSnapshot.current === profileId)) return;
+    const serialized = serializeConfig(config);
+    const configChanged = incomingConfigSnapshot.current !== serialized;
+    const readinessChanged = configReadySnapshot.current !== actualConfigReady;
+    incomingConfigSnapshot.current = serialized;
+    configReadySnapshot.current = actualConfigReady;
+    if (!open || !profileReady) return;
+
+    const profileChanged = activeProfileSnapshot.current !== activeProfileId || profileIdSnapshot.current !== profileId;
+    if (!profileChanged && !configChanged && !readinessChanged) return;
+
     const expected = expectedProfileChange.current === activeProfileId;
     activeProfileSnapshot.current = activeProfileId;
     profileIdSnapshot.current = profileId;
     expectedProfileChange.current = undefined;
-    if (!expected && draftDirty && activeProfileId !== undefined) {
+    if (profileChanged && !expected && draftDirty && activeProfileId !== undefined) {
       setOrphanedDraft(true);
       setDiscardAction({ kind: "external-switch", profileId: activeProfileId });
       setError("Das aktive Profil wurde außerhalb dieses Fensters geändert. Bitte den Entwurf bewusst verwerfen oder behalten.");
       return;
     }
+    if (!profileChanged && configChanged && draftDirty) return;
     adoptConfig(config);
     setConfirmDelGroup(null);
     setConfirmDelProfile(null);
     setDiscardAction(undefined);
     setError(undefined);
     setConflict(false);
-  }, [activeProfileId, config, draftDirty, open, profileId, profileReady]);
+  }, [activeProfileId, actualConfigReady, config, draftDirty, open, profileId, profileReady]);
 
   useEffect(() => {
     if (open) setSearching(false);
@@ -360,10 +392,13 @@ export function SettingsPane({
   async function searchPlace() {
     const request = placeRequest.current + 1;
     placeRequest.current = request;
+    const originSession = dialogSession.current;
     const originEpoch = profileContextEpoch.current;
     const originProfileId = profileId;
     const originActiveProfileId = activeProfileId;
-    const isCurrentRequest = () => request === placeRequest.current &&
+    const isCurrentRequest = () => originSession === dialogSession.current &&
+      dialogOpenRef.current &&
+      request === placeRequest.current &&
       originEpoch === profileContextEpoch.current &&
       profileContextRef.current.profileId === originProfileId &&
       profileContextRef.current.activeProfileId === originActiveProfileId;
@@ -406,6 +441,8 @@ export function SettingsPane({
     if (err instanceof ProfileConflictError) {
       setCatalogConflict(true);
       setError("Ein anderes Gerät hat den Profilkatalog geändert. Bitte Serverstand neu laden.");
+    } else if (err instanceof LastProfileError) {
+      setError("Das letzte Profil kann nicht gelöscht werden.");
     } else {
       setError("Profiländerung fehlgeschlagen.");
     }
@@ -430,10 +467,15 @@ export function SettingsPane({
     }
     setError(undefined);
     setProfileBusy(true);
+    const originSession = dialogSession.current;
+    const originEpoch = profileContextEpoch.current;
+    const isCurrentProfileRequest = () => originSession === dialogSession.current &&
+      dialogOpenRef.current && originEpoch === profileContextEpoch.current;
     onCreateProfile(
       { name, sourceProfileId: activeProfileId, profilesUpdatedAt: profiles.profilesUpdatedAt },
       {
         onSuccess: (data) => {
+          if (!isCurrentProfileRequest()) return;
           setProfileBusy(false);
           const createdId = data.createdId;
           if (createdId === undefined) {
@@ -447,7 +489,9 @@ export function SettingsPane({
             switchToProfile(createdId);
           }
         },
-        onError: handleProfileError,
+        onError: (error) => {
+          if (isCurrentProfileRequest()) handleProfileError(error);
+        },
       },
     );
   }
@@ -464,10 +508,15 @@ export function SettingsPane({
     }
     setError(undefined);
     setProfileBusy(true);
+    const originSession = dialogSession.current;
+    const originEpoch = profileContextEpoch.current;
+    const isCurrentProfileRequest = () => originSession === dialogSession.current &&
+      dialogOpenRef.current && originEpoch === profileContextEpoch.current;
     onRenameProfile(
       { profileId: profileIdToRename, name, profilesUpdatedAt: profiles.profilesUpdatedAt },
       {
         onSuccess: (data) => {
+          if (!isCurrentProfileRequest()) return;
           setProfileBusy(false);
           const renamed = data.catalog.profiles.find((profile) => profile.id === profileIdToRename);
           if (renamed !== undefined) {
@@ -476,7 +525,9 @@ export function SettingsPane({
             setRenameNames((names) => ({ ...names, [profileIdToRename]: name }));
           }
         },
-        onError: handleProfileError,
+        onError: (error) => {
+          if (isCurrentProfileRequest()) handleProfileError(error);
+        },
       },
     );
   }
@@ -485,10 +536,15 @@ export function SettingsPane({
     if (!profileReady || profiles === undefined || catalogConflict || profileActionsBlocked || profiles.profiles.length <= 1) return;
     setError(undefined);
     setProfileBusy(true);
+    const originSession = dialogSession.current;
+    const originEpoch = profileContextEpoch.current;
+    const isCurrentProfileRequest = () => originSession === dialogSession.current &&
+      dialogOpenRef.current && originEpoch === profileContextEpoch.current;
     onDeleteProfile(
       { profileId: profileIdToDelete, profilesUpdatedAt: profiles.profilesUpdatedAt },
       {
         onSuccess: (data) => {
+          if (!isCurrentProfileRequest()) return;
           setProfileBusy(false);
           setConfirmDelProfile(null);
           if (profileIdToDelete === activeProfileId) {
@@ -496,7 +552,9 @@ export function SettingsPane({
             if (firstRemaining !== undefined) switchToProfile(firstRemaining.id);
           }
         },
-        onError: handleProfileError,
+        onError: (error) => {
+          if (isCurrentProfileRequest()) handleProfileError(error);
+        },
       },
     );
   }
@@ -545,7 +603,7 @@ export function SettingsPane({
   guestChoices.sort((a, b) => a.vmid - b.vmid);
 
   function handleSave() {
-    if (conflict || orphanedDraft || save.isPending || reloading) return;
+    if (!profileReady || conflict || orphanedDraft || save.isPending || reloading) return;
     const hints = draft.linkGroups.flatMap((g) => g.links.map((l) => l.hint)).filter((h): h is string => !!h);
     if (new Set(hints).size !== hints.length) {
       setError("Doppelte Link-Kürzel — jedes Kürzel darf nur einmal vorkommen.");
@@ -616,10 +674,13 @@ export function SettingsPane({
     setError(undefined);
     const request = saveRequest.current + 1;
     saveRequest.current = request;
+    const originSession = dialogSession.current;
     const originEpoch = profileContextEpoch.current;
     const originProfileId = profileId;
     const originActiveProfileId = activeProfileId;
-    const isCurrentSave = () => request === saveRequest.current &&
+    const isCurrentSave = () => originSession === dialogSession.current &&
+      dialogOpenRef.current &&
+      request === saveRequest.current &&
       originEpoch === profileContextEpoch.current &&
       profileContextRef.current.profileId === originProfileId &&
       profileContextRef.current.activeProfileId === originActiveProfileId;
@@ -648,10 +709,13 @@ export function SettingsPane({
     }
     const request = reloadRequest.current + 1;
     reloadRequest.current = request;
+    const originSession = dialogSession.current;
     const originEpoch = profileContextEpoch.current;
     const originProfileId = profileId;
     const originActiveProfileId = activeProfileId;
-    const isCurrentReload = () => request === reloadRequest.current &&
+    const isCurrentReload = () => originSession === dialogSession.current &&
+      dialogOpenRef.current &&
+      request === reloadRequest.current &&
       originEpoch === profileContextEpoch.current &&
       profileContextRef.current.profileId === originProfileId &&
       profileContextRef.current.activeProfileId === originActiveProfileId;
@@ -669,7 +733,7 @@ export function SettingsPane({
     } catch {
       if (isCurrentReload()) setError("Serverstand konnte nicht geladen werden.");
     } finally {
-      if (request === reloadRequest.current) setReloading(false);
+      if (isCurrentReload()) setReloading(false);
     }
   }
 
@@ -678,9 +742,17 @@ export function SettingsPane({
       setError("Profilkatalog kann hier nicht neu geladen werden.");
       return;
     }
+    const request = profileReloadRequest.current + 1;
+    profileReloadRequest.current = request;
+    const originSession = dialogSession.current;
+    const originEpoch = profileContextEpoch.current;
+    const isCurrentReload = () => originSession === dialogSession.current &&
+      dialogOpenRef.current && request === profileReloadRequest.current &&
+      originEpoch === profileContextEpoch.current;
     setReloadingProfiles(true);
     try {
       const current = await onReloadProfiles();
+      if (!isCurrentReload()) return;
       if (current === undefined) {
         setError("Profilkatalog konnte nicht geladen werden.");
         return;
@@ -688,9 +760,9 @@ export function SettingsPane({
       setCatalogConflict(false);
       setError(undefined);
     } catch {
-      setError("Profilkatalog konnte nicht geladen werden.");
+      if (isCurrentReload()) setError("Profilkatalog konnte nicht geladen werden.");
     } finally {
-      setReloadingProfiles(false);
+      if (isCurrentReload()) setReloadingProfiles(false);
     }
   }
 

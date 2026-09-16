@@ -22,10 +22,12 @@ afterEach(() => {
 
 describe("fetchNews", () => {
   it("meldet einen Fehler, wenn keine einzige Quelle antwortet", async () => {
-    const fetchMock = vi.fn(async () => new Response("", { status: 502 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("", { status: 502 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchNews(PROFILE_ID, feeds)).rejects.toThrow("Kein Feed erreichbar");
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`profile=${PROFILE_ID}`));
+    const controller = new AbortController();
+    await expect(fetchNews(PROFILE_ID, feeds, controller.signal)).rejects.toThrow("Kein Feed erreichbar");
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`profile=${PROFILE_ID}`), { signal: controller.signal });
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal === controller.signal)).toBe(true);
   });
 
   it("liefert die erreichbaren Quellen, wenn nur eine ausfällt", async () => {

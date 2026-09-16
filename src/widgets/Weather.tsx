@@ -88,7 +88,7 @@ export function decodeWeather(value: unknown): WeatherData | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-export async function fetchWeather(profileId: ProfileId, loc: { lat: number; lon: number }): Promise<WeatherData> {
+export async function fetchWeather(profileId: ProfileId, loc: { lat: number; lon: number }, signal?: AbortSignal): Promise<WeatherData> {
   // timeformat=unixtime, weil die sonst gelieferten Zeitangaben ohne Zeitzone stehen und
   // der Browser sie als seine eigene deutet. timezone=auto richtet sich nach dem Ort,
   // die Antwort nennt die verwendete Zone.
@@ -98,7 +98,8 @@ export async function fetchWeather(profileId: ProfileId, loc: { lat: number; lon
     `&hourly=temperature_2m,precipitation_probability` +
     `&daily=temperature_2m_min,temperature_2m_max,weather_code,sunrise,sunset,daylight_duration` +
     `&timezone=auto&timeformat=unixtime&forecast_days=5`;
-  const res = await fetch(profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: target })));
+  const url = profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: target }));
+  const res = signal === undefined ? await fetch(url) : await fetch(url, { signal });
   if (!res.ok) throw new Error(`Wetter nicht ladbar (${res.status})`);
   const raw: unknown = await res.json();
   const parsed = openMeteoSchema.safeParse(raw);

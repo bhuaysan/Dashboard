@@ -50,8 +50,9 @@ describe("decodeHomelab", () => {
     };
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(response), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchHomelab(PROFILE_ID)).resolves.toEqual(response);
-    expect(fetchMock).toHaveBeenCalledWith(`/api/homelab?profile=${PROFILE_ID}`);
+    const controller = new AbortController();
+    await expect(fetchHomelab(PROFILE_ID, controller.signal)).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/homelab?profile=${PROFILE_ID}`, { signal: controller.signal });
   });
 
   it("verwirft eine formal gültige, aber strukturell leere Antwort", () => {

@@ -27,16 +27,18 @@ export function decodeNews(value: unknown): NewsFetchResult | undefined {
 
 type FeedSourceResult = { items: NewsItem[]; failure?: string };
 
-export async function fetchNews(profileId: ProfileId, feeds: Config["feeds"]): Promise<NewsFetchResult> {
+export async function fetchNews(profileId: ProfileId, feeds: Config["feeds"], signal?: AbortSignal): Promise<NewsFetchResult> {
   const results = await Promise.all(feeds.map(async (feed): Promise<FeedSourceResult> => {
     try {
-      const res = await fetch(profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: feed.url })));
+      const url = profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: feed.url }));
+      const res = signal === undefined ? await fetch(url) : await fetch(url, { signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const items = parseFeed(await res.text(), feed.label, feed.url)
         .sort((a, b) => b.date.getTime() - a.date.getTime())
         .slice(0, feed.limit);
       return { items };
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return { items: [], failure: feed.label };   // ein kaputter Feed blockiert die anderen nicht
     }
   }));

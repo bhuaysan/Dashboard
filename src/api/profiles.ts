@@ -42,6 +42,13 @@ export class ProfileConflictError extends Error {
   }
 }
 
+export class LastProfileError extends Error {
+  constructor() {
+    super("Letztes Profil kann nicht gelöscht werden");
+    this.name = "LastProfileError";
+  }
+}
+
 export { ProfileConflictError as CatalogConflictError };
 
 const catalogMutationResponseSchema = z.object({
@@ -57,28 +64,43 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 }
 
-async function conflictRevision(response: Response): Promise<string | undefined> {
+async function parseConflict(response: Response): Promise<never> {
+  let body: unknown;
   try {
-    const body: unknown = await response.json();
-    return isRecord(body) && typeof body.current === "string" ? body.current : undefined;
+    body = await response.json();
   } catch {
-    return undefined;
+    body = undefined;
   }
+  if (isRecord(body) && body.error === "last-profile") throw new LastProfileError();
+  const current = isRecord(body) && typeof body.current === "string" ? body.current : undefined;
+  throw new ProfileConflictError(current);
 }
 
 async function parseCatalogMutation(response: Response): Promise<CatalogMutationData> {
-  if (response.status === 409) throw new ProfileConflictError(await conflictRevision(response));
+  if (response.status === 409) return parseConflict(response);
   if (!response.ok) throw new Error("Profiländerung fehlgeschlagen");
   const parsed = catalogMutationResponseSchema.safeParse(await response.json());
   if (!parsed.success) throw new Error("Ungültige Profilantwort");
   return parsed.data;
 }
 
+function compareRevision(left: string, right: string): number {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
+  return left.localeCompare(right);
+}
+
 async function updateCatalogCache(queryClient: ReturnType<typeof useQueryClient>, catalog: ProfileCatalog): Promise<void> {
   // A poll that started before a catalog mutation must not restore an older revision.
   await queryClient.cancelQueries({ queryKey: ["profiles"] });
-  writeLocalCatalog(catalog);
-  queryClient.setQueryData(["profiles"], catalog);
+  const cached = queryClient.getQueryData<ProfileCatalog>(["profiles"]);
+  const local = readLocalCatalog();
+  let freshest = catalog;
+  if (cached !== undefined && compareRevision(cached.profilesUpdatedAt, freshest.profilesUpdatedAt) > 0) freshest = cached;
+  if (local !== undefined && compareRevision(local.profilesUpdatedAt, freshest.profilesUpdatedAt) > 0) freshest = local;
+  writeLocalCatalog(freshest);
+  queryClient.setQueryData(["profiles"], freshest);
 }
 
 export function useProfiles(): UseQueryResult<ProfileCatalog> {

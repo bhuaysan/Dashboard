@@ -24,17 +24,19 @@ describe("fetchEvents", () => {
     ].join("\r\n");
     const fetchMock = vi.fn(async () => new Response(ics, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
 
     const result = await fetchEvents(
       PROFILE_ID,
       [{ label: "lokal", url: "/static/arbeit.ics" }],
       new Date("2026-08-05T00:00:00"),
       new Date("2026-08-08T23:59:59"),
+      controller.signal,
     );
 
     expect(result.failures).toEqual([]);
     expect(result.items.map((item) => item.title)).toEqual(["Lokaler Termin"]);
-    expect(fetchMock).toHaveBeenCalledWith("/static/arbeit.ics");
+    expect(fetchMock).toHaveBeenCalledWith("/static/arbeit.ics", { signal: controller.signal });
   });
 
   it("schickt einen ungültigen protocol-relativen Kalender nie direkt an eine Fremd-Origin", async () => {

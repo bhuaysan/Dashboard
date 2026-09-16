@@ -36,6 +36,7 @@ export async function fetchEvents(
   cals: Config["calendars"],
   fromOrTo: Date,
   maybeTo?: Date,
+  signal?: AbortSignal,
 ): Promise<EventFetchResult> {
   const from = maybeTo === undefined ? (() => {
     const start = new Date();
@@ -49,10 +50,11 @@ export async function fetchEvents(
       const url = isSafeLocalCalendarPath(cal.url)
         ? cal.url
         : profileApiUrl("/api/proxy", profileId, new URLSearchParams({ url: cal.url }));
-      const res = await fetch(url);
+      const res = signal === undefined ? await fetch(url) : await fetch(url, { signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return { items: parseIcs(await res.text(), from, to) };
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return { items: [], failure: cal.label };   // ein kaputter Kalender blockiert die anderen nicht
     }
   }));

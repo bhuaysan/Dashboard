@@ -39,12 +39,13 @@ async function conflictRevision(res: Response): Promise<string | undefined> {
   }
 }
 
-export function useConfig(profileId: ProfileId, options: { enabled?: boolean } = {}): DefinedUseQueryResult<Config> {
+export function useConfig(profileId: ProfileId, options: { enabled?: boolean } = {}): DefinedUseQueryResult<Config> & { configReady: boolean } {
   const queryKey = ["config", profileId];
   const url = profileApiUrl("/api/config", profileId);
-  const initialConfig = readLocalConfig(profileId) ?? defaultConfig;
+  const localConfig = readLocalConfig(profileId);
+  const initialConfig = localConfig ?? defaultConfig;
 
-  return useQuery<Config>({
+  const query = useQuery<Config>({
     queryKey,
     queryFn: async ({ signal }) => {
       const res = await fetch(url, { signal });
@@ -71,6 +72,18 @@ export function useConfig(profileId: ProfileId, options: { enabled?: boolean } =
     refetchOnWindowFocus: "always",
     retry: 1,
   });
+
+  return {
+    ...query,
+    configReady: localConfig !== undefined || (query.isFetched && query.isSuccess),
+  };
+}
+
+function compareRevision(left: string, right: string): number {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
+  return left.localeCompare(right);
 }
 
 function isProfileDataSourceKey(key: string, profileId: ProfileId, config: Config): boolean {
@@ -105,13 +118,22 @@ export function useSaveConfig(profileId: ProfileId): UseMutationResult<Config, E
       // Ein Poll, der vor dem PUT begonnen hat, darf danach weder Query-Cache noch
       // localStorage mit der alten Revision überschreiben.
       await qc.cancelQueries({ queryKey });
-      writeLocalConfig(profileId, cfg);
-      qc.setQueryData(queryKey, cfg);
+      const cached = qc.getQueryData<Config>(queryKey);
+      const local = readLocalConfig(profileId);
+      let freshest = cfg;
+      if (cached !== undefined && compareRevision(cached.updatedAt, freshest.updatedAt) > 0) {
+        freshest = cached;
+      }
+      if (local !== undefined && compareRevision(local.updatedAt, freshest.updatedAt) > 0) {
+        freshest = local;
+      }
+      writeLocalConfig(profileId, freshest);
+      qc.setQueryData(queryKey, freshest);
       void qc.invalidateQueries({
         predicate: (query) => {
           const key = query.queryKey[0];
           if (typeof key !== "string") return false;
-          return isProfileDataSourceKey(key, profileId, cfg);
+          return isProfileDataSourceKey(key, profileId, freshest);
         },
       });
     },
