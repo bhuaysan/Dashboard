@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_PROFILE_ID, type Config, type ProfileDocument, type ProfileId } from "../src/config/schema";
+import { configSchema, DEFAULT_PROFILE_ID, type Config, type ProfileDocument, type ProfileId } from "../src/config/schema";
 import { defaultConfig } from "../src/config/defaults";
 import { createApp, inertProxyResponse, readJsonBody } from "./app.ts";
 import type { DashboardEnvironment } from "./env.ts";
@@ -317,8 +317,8 @@ describe("/api/config", () => {
   itWithApp("akzeptiert parallele PUTs in zwei verschiedenen Profilen", async ({ app }) => {
     const standard = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`);
     const arbeit = await app.request(`/api/config?profile=${secondProfileId}`);
-    const standardConfig = await standard.json() as Config;
-    const arbeitConfig = await arbeit.json() as Config;
+    const standardConfig = configSchema.parse(await standard.json());
+    const arbeitConfig = configSchema.parse(await arbeit.json());
     const put = (profileId: ProfileId, cfg: Config) => app.request(`/api/config?profile=${profileId}`, {
       method: "PUT",
       headers: { "content-type": "application/json", "If-Match": cfg.updatedAt, host: "localhost:7777" },
@@ -332,8 +332,8 @@ describe("/api/config", () => {
     expect([standardWrite.status, arbeitWrite.status].sort((a, b) => a - b)).toEqual([200, 200]);
     const savedStandard = await app.request(`/api/config?profile=${DEFAULT_PROFILE_ID}`);
     const savedArbeit = await app.request(`/api/config?profile=${secondProfileId}`);
-    expect((await savedStandard.json() as Config).theme).toBe("dark");
-    expect((await savedArbeit.json() as Config).theme).toBe("light");
+    expect(configSchema.parse(await savedStandard.json()).theme).toBe("dark");
+    expect(configSchema.parse(await savedArbeit.json()).theme).toBe("light");
   }, { document: twoProfileDocument() });
 });
 

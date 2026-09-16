@@ -352,7 +352,11 @@ export function SettingsPane({
   }, [activeProfileId, actualConfigReady, config, draftDirty, open, profileId, profileReady]);
 
   useEffect(() => {
-    if (open) setSearching(false);
+    if (!open) return;
+    setSearching(false);
+    setReloading(false);
+    setReloadingProfiles(false);
+    setProfileBusy(false);
   }, [activeProfileId, open, profileId]);
 
   // Fokus in den Dialog und beim Schließen zurück auf die Stelle, von der er kam.

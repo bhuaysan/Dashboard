@@ -243,6 +243,7 @@ describe("App", () => {
   });
 
   it("gibt jeder Linkzeile ein echtes href", () => {
+    setInitialConfig(defaultConfig);
     render(
       <QueryClientProvider client={new QueryClient()}>
         <App />
@@ -255,6 +256,7 @@ describe("App", () => {
   });
 
   it(":refresh lädt die Quellen neu, ohne die Seite neu zu laden", () => {
+    setInitialConfig(defaultConfig);
     const client = new QueryClient();
     const invalidate = vi.spyOn(client, "invalidateQueries");
     render(
@@ -269,6 +271,7 @@ describe("App", () => {
 
   it(":refresh holt die Quellen tatsächlich erneut ab", async () => {
     writeLocalCatalog(PROFILE_CATALOG);
+    writeLocalConfig(DEFAULT_PROFILE_ID, defaultConfig);
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     try {
@@ -287,6 +290,7 @@ describe("App", () => {
   });
 
   it("nimmt ein Kommando auch mit doppeltem Doppelpunkt an", () => {
+    setInitialConfig(defaultConfig);
     const client = new QueryClient();
     const invalidate = vi.spyOn(client, "invalidateQueries");
     render(
@@ -300,6 +304,7 @@ describe("App", () => {
   });
 
   it("meldet ein unbekanntes Kommando, statt es stillschweigend zu schlucken", () => {
+    setInitialConfig(defaultConfig);
     render(
       <QueryClientProvider client={new QueryClient()}>
         <App />
@@ -388,13 +393,46 @@ describe("App", () => {
     );
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/profiles")).toBe(true));
-    typeCommand(":profile Arbeit");
-    expect(screen.getByRole("alert").textContent).toContain("Profile werden noch geladen");
+    fireEvent.keyDown(window, { key: ":" });
+    expect(screen.queryByLabelText("Suche oder Kommando")).toBeNull();
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config?profile=default")).toBe(false);
     resolveProfiles(new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 }));
   });
 
+  it("bleibt ohne echte Config neutral und öffnet keine Default-Ziele per UI oder Keymap", async () => {
+    writeLocalCatalog(PROFILE_CATALOG);
+    let resolveConfig: (response: Response) => void = () => undefined;
+    const configPending = new Promise<Response>((resolve) => { resolveConfig = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") return configPending;
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config?profile=default")).toBe(true));
+    expect(screen.getByRole("status").textContent).toContain("Profil-Konfiguration wird geladen");
+    expect(screen.queryByText("Datasphere")).toBeNull();
+    expect(screen.queryByLabelText("Suche oder Kommando")).toBeNull();
+
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "d", shiftKey: true });
+    fireEvent.keyDown(window, { key: ":" });
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Suche oder Kommando")).toBeNull();
+
+    resolveConfig(new Response(JSON.stringify(defaultConfig), { status: 200 }));
+  });
+
   it("isoliert das Raster, solange das Settings-Dialog offen ist", () => {
+    setInitialConfig(defaultConfig);
     render(
       <QueryClientProvider client={new QueryClient()}>
         <App />
@@ -471,6 +509,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><App /></QueryClientProvider>);
 
+    await waitFor(() => expect(screen.getByText("Datasphere")).toBeTruthy());
     typeCommand(":settings");
     fireEvent.click(await screen.findByRole("tab", { name: "PROFILE" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Neuer Profilname" }), { target: { value: "  Zuhause  " } });

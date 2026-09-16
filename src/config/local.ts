@@ -49,6 +49,13 @@ function writeRaw(key: string, value: string): boolean {
   }
 }
 
+function compareRevision(left: string, right: string): number {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
+  return left.localeCompare(right);
+}
+
 function removeRaw(key: string): void {
   try {
     localStorage.removeItem(key);
@@ -96,6 +103,8 @@ export function writeLocalCatalog(catalog: ProfileCatalog): void {
   const parsed = profileCatalogSchema.safeParse(catalog);
   if (!parsed.success) return;
   try {
+    const current = readLocalCatalog();
+    if (current !== undefined && compareRevision(current.profilesUpdatedAt, parsed.data.profilesUpdatedAt) > 0) return;
     writeRaw(CATALOG_KEY, JSON.stringify(parsed.data));
   } catch {
     // JSON.stringify kann bei Laufzeitwerten außerhalb des Schemas scheitern.
@@ -128,6 +137,8 @@ export function writeLocalConfig(profileId: ProfileId, config: Config): void {
   const parsed = configSchema.safeParse(config);
   if (!parsed.success) return;
   try {
+    const current = readLocalConfig(profileId);
+    if (current !== undefined && compareRevision(current.updatedAt, parsed.data.updatedAt) > 0) return;
     writeRaw(configStorageKey(profileId), JSON.stringify(parsed.data));
   } catch {
     // Speicher voll oder ein nicht serialisierbarer Laufzeitwert: Cache ignorieren.

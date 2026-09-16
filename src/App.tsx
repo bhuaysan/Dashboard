@@ -225,7 +225,7 @@ export default function App() {
     900_000,
     { decode: decodeNews, refetchIntervalMs: 900_000, enabled: profileDataReady },
   );
-  const homelabEnabled = configReady && config.homelab.enabled;
+  const homelabEnabled = profileDataReady && config.homelab.enabled;
   const labQuery = useCachedQuery(`profile:${profileId}:pve`, (signal) => fetchHomelab(profileId, signal), 60_000, {
     decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: profileDataReady && homelabEnabled,
   });
@@ -246,11 +246,12 @@ export default function App() {
   );
 
   const flatLinks = useMemo<FlatLink[]>(
-    () =>
-      config.linkGroups.flatMap((g) =>
+    () => profileDataReady
+      ? config.linkGroups.flatMap((g) =>
         g.links.map((l) => ({ label: l.label, url: l.url, hint: l.hint, group: g.title })),
-      ),
-    [config.linkGroups],
+      )
+      : [],
+    [config.linkGroups, profileDataReady],
   );
 
   const hints = useMemo<Record<string, string>>(() => {
@@ -260,10 +261,10 @@ export default function App() {
   }, [flatLinks]);
 
   const layoutById = useMemo(
-    () => Object.fromEntries(config.layout.map((l) => [l.id, l])),
-    [config.layout],
+    () => profileDataReady ? Object.fromEntries(config.layout.map((l) => [l.id, l])) : {},
+    [config.layout, profileDataReady],
   );
-  const paneVisible = (id: PaneId) => id === "homelab"
+  const paneVisible = (id: PaneId) => !profileDataReady ? false : id === "homelab"
     ? homelabEnabled && (layoutById[id]?.visible ?? true)
     : layoutById[id]?.visible ?? true;
   const paneSpan = (id: PaneId): 1 | 2 => {
@@ -271,9 +272,9 @@ export default function App() {
     return layout && "span" in layout ? layout.span : 1;
   };
   const visiblePanes = useMemo(
-    () => new Set(PANE_ORDER.map((p) => p.id).filter((id) => id !== "homelab" || homelabEnabled)
+    () => !profileDataReady ? new Set<PaneId>() : new Set(PANE_ORDER.map((p) => p.id).filter((id) => id !== "homelab" || homelabEnabled)
       .filter((id) => layoutById[id]?.visible ?? true)),
-    [layoutById, homelabEnabled],
+    [layoutById, homelabEnabled, profileDataReady],
   );
 
   const consoleUrl = useCallback(
@@ -328,13 +329,21 @@ export default function App() {
 
   useKeymap({
     state: ui, dispatch, hints, rowCount, selectedUrl, onSeed,
-    overlayOpen: modalOpen,
+    overlayOpen: modalOpen || !profileDataReady,
     onOverlayEscape: () => {
+      if (!profileDataReady) return;
       if (settingsOpen) setSettingsOpen(false);
       else dispatch({ type: "help", show: false });
     },
     visiblePanes,
   });
+
+  useEffect(() => {
+    if (!profileDataReady) {
+      setSeed(null);
+      dispatch({ type: "resetSelection" });
+    }
+  }, [profileDataReady]);
 
   useEffect(() => {
     if (ui.mode !== "NORMAL" || !ui.pane) return;
@@ -470,6 +479,61 @@ export default function App() {
     : partialProblems.join(" · ") || undefined;
 
   let linkRow = -1;
+
+  const settingsPane = (
+    <SettingsPane
+      open={settingsOpen}
+      config={config}
+      configReady={configReady}
+      profileId={profileId}
+      profiles={catalog}
+      activeProfileId={resolvedProfileId}
+      guests={homelabEnabled ? labQuery.data?.guests ?? [] : []}
+      onClose={() => setSettingsOpen(false)}
+      save={saveConfig}
+      onReload={async () => {
+        const result = await configQuery.refetch();
+        return result.isSuccess ? result.data : undefined;
+      }}
+      onReloadProfiles={async () => {
+        const result = await profilesQuery.refetch();
+        return result.isSuccess ? result.data : undefined;
+      }}
+      onSwitchProfile={switchProfile}
+      onCreateProfile={createProfile}
+      onRenameProfile={renameProfile}
+      onDeleteProfile={deleteProfile}
+      initialSection={settingsInitialSection}
+      // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
+      // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
+      onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}
+    />
+  );
+  const fileInput = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept="application/json"
+      hidden
+      onChange={(e) => {
+        void onImportFile(e.target.files?.[0]);
+        e.target.value = "";
+      }}
+    />
+  );
+
+  if (!profileDataReady) {
+    return (
+      <>
+        <div className="app">
+          <h1 className="sr-only">Dashboard</h1>
+          <div className="dim" role="status">Profil-Konfiguration wird geladen …</div>
+        </div>
+        {settingsPane}
+        {fileInput}
+      </>
+    );
+  }
 
   return (
     <>
@@ -633,43 +697,8 @@ export default function App() {
       </div>
 
       <KeymapOverlay open={ui.showHelp} onClose={() => dispatch({ type: "help", show: false })} />
-      <SettingsPane
-        open={settingsOpen}
-        config={config}
-        configReady={configReady}
-        profileId={profileId}
-        profiles={catalog}
-        activeProfileId={resolvedProfileId}
-        guests={homelabEnabled ? labQuery.data?.guests ?? [] : []}
-        onClose={() => setSettingsOpen(false)}
-        save={saveConfig}
-        onReload={async () => {
-          const result = await configQuery.refetch();
-          return result.isSuccess ? result.data : undefined;
-        }}
-        onReloadProfiles={async () => {
-          const result = await profilesQuery.refetch();
-          return result.isSuccess ? result.data : undefined;
-        }}
-        onSwitchProfile={switchProfile}
-        onCreateProfile={createProfile}
-        onRenameProfile={renameProfile}
-        onDeleteProfile={deleteProfile}
-        initialSection={settingsInitialSection}
-        // Der Dialog schließt sich erst, wenn saveConfig wirklich erfolgreich war —
-        // vorher schloss onSave sofort, egal ob die Anfrage nachher scheiterte.
-        onSaved={() => setMessage({ text: "Konfiguration gespeichert.", level: "info" })}
-      />
-      <input
-        ref={fileRef}
-        type="file"
-        accept="application/json"
-        hidden
-        onChange={(e) => {
-          void onImportFile(e.target.files?.[0]);
-          e.target.value = "";
-        }}
-      />
+      {settingsPane}
+      {fileInput}
     </>
   );
 }

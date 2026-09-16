@@ -58,6 +58,34 @@ describe("device-local profile state", () => {
     expect(localStorage.getItem(`dashboard:config:${WORK_PROFILE_ID}`)).not.toBeNull();
   });
 
+  it("schreibt Config-Snapshots revisionsmonoton", () => {
+    const older = { ...defaultConfig, updatedAt: "2026-09-15T00:00:00.000Z" };
+    const newer = { ...defaultConfig, theme: "light" as const, updatedAt: "2026-09-15T00:00:01.000Z" };
+    const equal = { ...defaultConfig, theme: "dark" as const, updatedAt: newer.updatedAt };
+
+    writeLocalConfig(DEFAULT_PROFILE_ID, newer);
+    writeLocalConfig(DEFAULT_PROFILE_ID, older);
+    expect(readLocalConfig(DEFAULT_PROFILE_ID)).toEqual(newer);
+
+    writeLocalConfig(DEFAULT_PROFILE_ID, equal);
+    expect(readLocalConfig(DEFAULT_PROFILE_ID)).toEqual(equal);
+  });
+
+  it("schreibt Katalog-Snapshots revisionsmonoton", () => {
+    const second = catalog.profiles[1];
+    if (second === undefined) throw new Error("Testkatalog unvollständig");
+    const older = { ...catalog, profilesUpdatedAt: "2026-09-15T00:00:00.000Z" };
+    const newer = { ...catalog, profilesUpdatedAt: "2026-09-15T00:00:01.000Z", profiles: [{ id: DEFAULT_PROFILE_ID, name: "Neu" }, second] };
+    const equal = { ...newer, profiles: [{ id: DEFAULT_PROFILE_ID, name: "Gleich" }, second] };
+
+    writeLocalCatalog(newer);
+    writeLocalCatalog(older);
+    expect(readLocalCatalog()).toEqual(newer);
+
+    writeLocalCatalog(equal);
+    expect(readLocalCatalog()).toEqual(equal);
+  });
+
   it("migrates the legacy config once and preserves unrelated storage", () => {
     localStorage.setItem("dashboard:config", JSON.stringify(defaultConfig));
     localStorage.setItem("unrelated", "keep");

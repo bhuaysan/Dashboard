@@ -549,7 +549,7 @@ describe("SettingsPane", () => {
       profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
       save={saveSucceeds()} onReload={onReload} onSwitchProfile={onSwitchProfile}
       onSaved={() => undefined} initialSection="profile" />);
-    expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(false);
 
     resolveReload({ ...defaultConfig, location: { ...defaultConfig.location, label: "Alter Serverstand" } });
     await Promise.resolve();
@@ -557,6 +557,62 @@ describe("SettingsPane", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Ort & Zeit" }));
     await waitFor(() => expect(screen.getByText(/Ort B ·/)).toBeTruthy());
     expect(screen.queryByDisplayValue("Alter Serverstand")).toBeNull();
+  });
+
+  it("setzt eine laufende Config-Reload-Sperre beim Profilkontextwechsel zurück", async () => {
+    let resolveReload: (config: Config) => void = () => undefined;
+    const reloadPending = new Promise<Config>((resolve) => { resolveReload = resolve; });
+    const onReload = vi.fn(() => reloadPending);
+    const { rerender } = renderProfiles({
+      save: saveConflicts("other-revision"),
+      onReload,
+      initialSection: "profile",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand neu laden" }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+
+    rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onReload={onReload} onSaved={() => undefined} initialSection="profile" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(false));
+    resolveReload(defaultConfig);
+  });
+
+  it("setzt eine laufende Sperre beim Schließen und erneuten Öffnen zurück", async () => {
+    let resolveReload: (config: Config) => void = () => undefined;
+    const reloadPending = new Promise<Config>((resolve) => { resolveReload = resolve; });
+    const onReload = vi.fn(() => reloadPending);
+    const rendered = renderProfiles({
+      save: saveConflicts("other-revision"),
+      onReload,
+      initialSection: "profile",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Speichern" }));
+    fireEvent.click(screen.getByRole("button", { name: "Serverstand neu laden" }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+
+    rendered.rerender(<SettingsPane open={false} config={defaultConfig} guests={guests}
+      onClose={() => undefined} save={saveSucceeds()} onReload={onReload} onSaved={() => undefined} initialSection="profile" />);
+    rendered.rerender(<SettingsPane open config={defaultConfig} guests={guests}
+      onClose={() => undefined} save={saveSucceeds()} onReload={onReload} onSaved={() => undefined} initialSection="profile" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(false));
+    resolveReload(defaultConfig);
+  });
+
+  it("setzt eine laufende Profilmutations-Sperre beim Profilkontextwechsel zurück", async () => {
+    let finishRename: ProfileMutationOptions | undefined;
+    const onRenameProfile = vi.fn((_input: RenameProfileInput, options?: ProfileMutationOptions) => { finishRename = options; });
+    const { rerender } = renderProfiles({ onRenameProfile, initialSection: "profile" });
+    fireEvent.change(screen.getByRole("textbox", { name: 'Profilname „Arbeit"' }), { target: { value: "Büro" } });
+    fireEvent.click(screen.getByRole("button", { name: 'Profil „Arbeit" umbenennen' }));
+    expect((screen.getByRole("button", { name: 'Profil „Privat" wechseln' }) as HTMLButtonElement).disabled).toBe(true);
+
+    rerender(<SettingsPane open config={defaultConfig} guests={guests} profileId={SECOND_PROFILE_ID}
+      profiles={PROFILE_CATALOG} activeProfileId={SECOND_PROFILE_ID} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} onRenameProfile={onRenameProfile} initialSection="profile" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: 'Profil „Arbeit" wechseln' }) as HTMLButtonElement).disabled).toBe(false));
+    finishRename?.onSuccess?.({ catalog: PROFILE_CATALOG });
   });
 
   it("fokussiert und begrenzt auch den Readiness-Dialog vor dem Katalog", async () => {
