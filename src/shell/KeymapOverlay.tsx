@@ -59,7 +59,7 @@ export function KeymapOverlay({ open, onClose }: Props) {
           <dt>Enter</dt><dd>ausgewählte Zeile öffnen</dd>
           <dt>Shift+Enter</dt><dd>in neuem Tab öffnen</dd>
           <dt>Tab</dt><dd>Zeile für Zeile ohne Maus — jede Zeile ist ein Link</dd>
-          <dt>g, dann Zeichen</dt><dd>Link direkt öffnen — das Kürzel neben dem Link, z. B. gd → Datasphere</dd>
+          <dt>g, dann 1–2 Zeichen</dt><dd>Link direkt öffnen — das Kürzel neben dem Link, z. B. gd → Datasphere</dd>
           <dt>:</dt><dd>Kommando — :settings, :profile, :profile &lt;name&gt;, :export, :import, :refresh, :reload, :theme</dd>
           <dt>?</dt><dd>diese Übersicht</dd>
           <dt>Esc</dt><dd>zurück nach NORMAL</dd>

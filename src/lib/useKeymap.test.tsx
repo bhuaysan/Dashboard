@@ -56,6 +56,24 @@ describe("Kürzel", () => {
     press("x");
     expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "" });
   });
+
+  it("öffnet ein dreistelliges Kürzel erst nach dem dritten Zeichen", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const dispatch = setup({}, { hints: { gha: "https://example.com/home" } });
+    press("g");
+    press("h");
+    expect(open).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "gh" });
+    press("a", { shiftKey: true });
+    expect(open).toHaveBeenCalledWith("https://example.com/home", "_blank", "noopener");
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "hint", buffer: "" });
+  });
+
+  it("löscht mit Backspace das letzte Zeichen eines begonnenen Kürzels", () => {
+    const dispatch = setup({ hintBuffer: "gh" }, { hints: { gha: "https://example.com/home" } });
+    press("Backspace");
+    expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "g" });
+  });
 });
 
 describe("Auswahl-Synchronisierung", () => {

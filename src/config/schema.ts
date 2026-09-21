@@ -110,7 +110,7 @@ const resizablePaneId = z.enum(["clock", "weather", "month", "links", "news", "a
 const linkSchema = z.object({
   label: text(MAX_TEXT_LENGTH),
   url: httpUrl,
-  hint: z.string().regex(/^g[A-Za-z0-9]$/).optional(),
+  hint: z.string().regex(/^g[A-Za-z0-9]{1,2}$/).optional(),
 });
 
 const layoutSchema = z.array(z.discriminatedUnion("id", [
@@ -200,14 +200,23 @@ export const configSchema = baseConfigSchema.superRefine((config, ctx) => {
   const hints = new Set<string>();
   config.linkGroups.forEach((group, groupIndex) => {
     group.links.forEach((link, linkIndex) => {
-      if (link.hint && hints.has(link.hint)) {
+      const hint = link.hint;
+      if (hint && hints.has(hint)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["linkGroups", groupIndex, "links", linkIndex, "hint"],
           message: "Kürzel darf nur einmal vorkommen",
         });
       }
-      if (link.hint) hints.add(link.hint);
+      if (hint && [...hints].some((existing) =>
+        existing !== hint && (existing.startsWith(hint) || hint.startsWith(existing)))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["linkGroups", groupIndex, "links", linkIndex, "hint"],
+          message: "Kürzel darf kein Präfix eines anderen Kürzels sein",
+        });
+      }
+      if (hint) hints.add(hint);
     });
   });
 });

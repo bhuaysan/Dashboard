@@ -193,6 +193,26 @@ describe("SettingsPane", () => {
     expect(screen.getByRole("alert").textContent).toContain("muss mit g beginnen");
   });
 
+  it("blockt Kürzel, die Präfix eines anderen Kürzels sind", () => {
+    const save = saveSucceeds();
+    const cfg = structuredClone(defaultConfig);
+    const first = cfg.linkGroups[0]?.links[0];
+    const second = cfg.linkGroups[0]?.links[1];
+    if (first) first.hint = "gx";
+    if (second) second.hint = "gxa";
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(save.mutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Präfix");
+  });
+
+  it("erlaubt bis zu drei Zeichen im Kürzelfeld", () => {
+    render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
+      save={saveSucceeds()} onSaved={() => undefined} />);
+    expect(screen.getByLabelText(/Kürzel von Link „Datasphere"/).getAttribute("maxlength")).toBe("3");
+  });
+
   it("normalisiert ein geleertes optionales Link-Kürzel vor dem Speichern", () => {
     const save = saveSucceeds();
     render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}

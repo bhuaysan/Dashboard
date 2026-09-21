@@ -613,10 +613,16 @@ export function SettingsPane({
       setError("Doppelte Link-Kürzel — jedes Kürzel darf nur einmal vorkommen.");
       return;
     }
-    // Getippt wird g und dann ein Zeichen; das Kürzel enthält das g, sonst wird es nie erkannt.
-    const badHint = hints.find((h) => !/^g.$/u.test(h));
+    const prefixConflict = hints.find((hint, index) =>
+      hints.some((other, otherIndex) => index !== otherIndex && other.startsWith(hint)));
+    if (prefixConflict !== undefined) {
+      setError(`Kürzel „${prefixConflict}" ist ein Präfix eines anderen Kürzels.`);
+      return;
+    }
+    // Getippt wird g und danach ein oder zwei Zeichen; das Kürzel enthält das g.
+    const badHint = hints.find((h) => !/^g[A-Za-z0-9]{1,2}$/.test(h));
     if (badHint !== undefined) {
-      setError(`Kürzel „${badHint}" ist ungültig — es muss mit g beginnen und genau zwei Zeichen haben.`);
+      setError(`Kürzel „${badHint}" ist ungültig — es muss mit g beginnen und zwei oder drei Zeichen haben.`);
       return;
     }
     const badUrl = draft.linkGroups
@@ -941,7 +947,7 @@ export function SettingsPane({
 
             {sec === "links" && (
               <section>
-                <p className="set-hint">Kürzel beginnen mit <b>g</b> und sind genau zwei Zeichen lang — <b>gd</b> heißt: erst g, dann d. Doppelte Kürzel werden beim Speichern abgelehnt.</p>
+                <p className="set-hint">Kürzel beginnen mit <b>g</b> und sind zwei oder drei Zeichen lang — etwa <b>gd</b> oder <b>gha</b>. Kein Kürzel darf Präfix eines anderen sein.</p>
                 {draft.linkGroups.map((g, gi) => (
                   <div key={gi}>
                     <div className="grouprow">
@@ -999,7 +1005,7 @@ export function SettingsPane({
                       <div className="tbl-head"><span>Kürzel</span><span>Name</span><span>URL</span><span /></div>
                       {g.links.map((l, li) => (
                         <div className="tbl-row" key={li}>
-                          <input className="inp inp--hint" value={l.hint ?? ""} maxLength={2} aria-label={`Kürzel von Link „${l.label}" Zeile ${li + 1}`}
+                          <input className="inp inp--hint" value={l.hint ?? ""} maxLength={3} aria-label={`Kürzel von Link „${l.label}" Zeile ${li + 1}`}
                             onChange={(e) => upd((d) => ({
                               ...d,
                               linkGroups: d.linkGroups.map((x, i) => i !== gi ? x : {

@@ -120,6 +120,22 @@ describe("configSchema", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("akzeptiert dreistellige Link-Kürzel", () => {
+    const linkGroups = structuredClone(defaultConfig.linkGroups);
+    const link = linkGroups[0]?.links[0];
+    if (link) link.hint = "gxa";
+    expect(configSchema.safeParse({ ...defaultConfig, linkGroups }).success).toBe(true);
+  });
+
+  it("weist Kürzel ab, wenn eines Präfix eines anderen ist", () => {
+    const linkGroups = structuredClone(defaultConfig.linkGroups);
+    const first = linkGroups[0]?.links[0];
+    const second = linkGroups[0]?.links[1];
+    if (first) first.hint = "gx";
+    if (second) second.hint = "gxa";
+    expect(configSchema.safeParse({ ...defaultConfig, linkGroups }).success).toBe(false);
+  });
+
   it.each(["/", "..", "../cluster", "pve?x=1", "pve#x", "pve\\home", "pve home"])(
     "weist einen unsicheren Proxmox-Node-Namen ab: %s",
     (node) => {

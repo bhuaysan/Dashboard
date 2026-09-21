@@ -148,6 +148,13 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
         return;
       }
       if (live.current.hintBuffer !== "") {
+        if (e.key === "Backspace") {
+          const next = live.current.hintBuffer.slice(0, -1);
+          live.current.hintBuffer = next;
+          dispatch({ type: "hint", buffer: next });
+          e.preventDefault();
+          return;
+        }
         if (e.key.length !== 1) return;
         const buf = (live.current.hintBuffer + e.key).toLowerCase();
         const url = hints[buf];
@@ -156,8 +163,9 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
           live.current.hintBuffer = "";
           dispatch({ type: "hint", buffer: "" });
         } else {
-          // Kürzel sind genau zwei Zeichen: nach dem zweiten steht fest, dass keines passt.
-          const next = buf.length >= 2 ? "" : buf;
+          // Solange mindestens ein konfiguriertes Kürzel so beginnt, wartet die
+          // Tastatursteuerung auf das nächste Zeichen. Sonst ist die Folge ungültig.
+          const next = Object.keys(hints).some((hint) => hint.startsWith(buf)) ? buf : "";
           live.current.hintBuffer = next;
           dispatch({ type: "hint", buffer: next });
         }
