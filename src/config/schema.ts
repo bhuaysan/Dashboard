@@ -113,6 +113,22 @@ const linkSchema = z.object({
   hint: z.string().regex(/^g[A-Za-z0-9]{1,2}$/).optional(),
 });
 
+export const uptimeTargetSchema = z.discriminatedUnion("type", [
+  z.object({
+    id: z.string().uuid(),
+    type: z.literal("http"),
+    label: text(MAX_TEXT_LENGTH),
+    url: httpUrl,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    type: z.literal("tcp"),
+    label: text(MAX_TEXT_LENGTH),
+    host: hostname,
+    port,
+  }),
+]);
+
 const layoutSchema = z.array(z.discriminatedUnion("id", [
   z.object({
     id: resizablePaneId,
@@ -186,6 +202,10 @@ const baseConfigSchema = z.object({
       port,
     })).max(64).default([]),
   }),
+  uptime: z.object({
+    enabled: z.boolean(),
+    targets: z.array(uptimeTargetSchema).max(32),
+  }).default({ enabled: false, targets: [] }),
 });
 
 export const configSchema = baseConfigSchema.superRefine((config, ctx) => {
@@ -219,9 +239,22 @@ export const configSchema = baseConfigSchema.superRefine((config, ctx) => {
       if (hint) hints.add(hint);
     });
   });
+
+  const uptimeIds = new Set<string>();
+  config.uptime.targets.forEach((target, index) => {
+    if (uptimeIds.has(target.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["uptime", "targets", index, "id"],
+        message: "Uptime-Ziel-ID darf nur einmal vorkommen",
+      });
+    }
+    uptimeIds.add(target.id);
+  });
 });
 
 export type Config = z.infer<typeof configSchema>;
+export type UptimeTarget = z.infer<typeof uptimeTargetSchema>;
 
 export const DEFAULT_PROFILE_ID = "default" as const;
 export const profileIdSchema = z.string().refine(

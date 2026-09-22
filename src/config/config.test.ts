@@ -4,6 +4,9 @@ import { defaultConfig, defaultProfileDocument } from "./defaults";
 import { readLocalConfig } from "./local";
 import { exportConfig, importConfig, restoreConfig } from "./io";
 
+const HTTP_ID = "123e4567-e89b-42d3-a456-426614174010";
+const TCP_ID = "123e4567-e89b-42d3-a456-426614174011";
+
 function configFile(value: unknown): File {
   const source = JSON.stringify(value);
   const file = new File([source], "config.json");
@@ -26,6 +29,67 @@ describe("configSchema", () => {
     const { holidayRegion: _omit, ...legacy } = defaultConfig;
     const parsed = configSchema.parse(legacy);
     expect(parsed.holidayRegion).toBe("BW");
+  });
+
+  it("ergänzt Uptime bei einer alten Config deterministisch", () => {
+    const { uptime: _omit, ...legacy } = defaultConfig;
+    expect(configSchema.parse(legacy).uptime).toEqual({ enabled: false, targets: [] });
+  });
+
+  it("akzeptiert HTTP- und TCP-Ziele mit frei wählbarem Port", () => {
+    const parsed = configSchema.parse({
+      ...defaultConfig,
+      uptime: {
+        enabled: true,
+        targets: [
+          { id: HTTP_ID, type: "http", label: "Immich", url: "https://photos.example/health" },
+          { id: TCP_ID, type: "tcp", label: "Minecraft", host: "MC.Example", port: 25567 },
+        ],
+      },
+    });
+    expect(parsed.uptime.targets[1]).toMatchObject({ host: "mc.example", port: 25567 });
+  });
+
+  it.each([
+    ["URL mit Zugangsdaten", [{ id: HTTP_ID, type: "http", label: "Web", url: "https://user:pass@example.com/" }]],
+    ["Nicht-HTTP-URL", [{ id: HTTP_ID, type: "http", label: "Web", url: "ftp://example.com/" }]],
+    ["ungültige UUID", [{ id: "nicht-eindeutig", type: "http", label: "Web", url: "https://example.com/" }]],
+    ["leeres Label", [{ id: HTTP_ID, type: "http", label: "   ", url: "https://example.com/" }]],
+    ["Label mit Steuerzeichen", [{ id: HTTP_ID, type: "http", label: "Web\nIntern", url: "https://example.com/" }]],
+    ["ungültiger Host", [{ id: TCP_ID, type: "tcp", label: "TCP", host: "bad..host", port: 80 }]],
+    ["Port 0", [{ id: TCP_ID, type: "tcp", label: "TCP", host: "tcp.example", port: 0 }]],
+    ["Port 65536", [{ id: TCP_ID, type: "tcp", label: "TCP", host: "tcp.example", port: 65536 }]],
+  ])("weist Uptime-Ziele mit %s ab", (_reason, targets) => {
+    expect(configSchema.safeParse({
+      ...defaultConfig,
+      uptime: { enabled: true, targets },
+    }).success).toBe(false);
+  });
+
+  it("weist doppelte Uptime-Ziel-IDs ab", () => {
+    expect(configSchema.safeParse({
+      ...defaultConfig,
+      uptime: {
+        enabled: true,
+        targets: [
+          { id: HTTP_ID, type: "http", label: "Web", url: "https://example.com/" },
+          { id: HTTP_ID, type: "tcp", label: "TCP", host: "tcp.example", port: 80 },
+        ],
+      },
+    }).success).toBe(false);
+  });
+
+  it("weist mehr als 32 Uptime-Ziele ab", () => {
+    const targets = Array.from({ length: 33 }, (_, index) => ({
+      id: `123e4567-e89b-42d3-a456-${String(index).padStart(12, "0")}`,
+      type: "http" as const,
+      label: `Web ${index}`,
+      url: `https://service-${index}.example/`,
+    }));
+    expect(configSchema.safeParse({
+      ...defaultConfig,
+      uptime: { enabled: true, targets },
+    }).success).toBe(false);
   });
 
   it("aktiviert Homelab-Monitoring bei einer alten Config ohne Schalter", () => {

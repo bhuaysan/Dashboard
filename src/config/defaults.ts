@@ -92,6 +92,10 @@ export const defaultConfig: Config = {
     thresholds: { cpu: 90, mem: 85, storage: 80, backupAgeHours: 36 },
     reachability: [],
   },
+  uptime: {
+    enabled: false,
+    targets: [],
+  },
 };
 
 export const defaultProfileDocument: ProfileDocument = {
