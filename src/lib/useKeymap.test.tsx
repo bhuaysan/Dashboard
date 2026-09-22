@@ -4,7 +4,7 @@ import { initialUiState, uiReducer, useKeymap, type Mode, type PaneId, type UiAc
 import { openUrl } from "./url";
 
 const ALL_PANES: ReadonlySet<PaneId> = new Set<PaneId>([
-  "clock", "weather", "month", "links", "agenda", "news", "homelab",
+  "clock", "weather", "month", "links", "agenda", "news", "homelab", "uptime",
 ]);
 
 function setup(state: Partial<UiState>, options: {
@@ -85,6 +85,7 @@ describe("Auswahl-Synchronisierung", () => {
     news: 2,
     agenda: 0,
     homelab: 0,
+    uptime: 0,
   };
 
   it("klemmt eine Auswahl auf die letzte sichtbare Zeile", () => {
@@ -172,6 +173,14 @@ describe("Pane-Tasten", () => {
     const dispatch = setup({});
     press("7");
     expect(dispatch).toHaveBeenCalledWith({ type: "focusPane", pane: "homelab" });
+  });
+
+  it("hängt Uptime als achte Pane an, ohne Homelab umzunummerieren", () => {
+    const dispatch = setup({});
+    press("7");
+    press("8");
+    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "focusPane", pane: "homelab" });
+    expect(dispatch).toHaveBeenNthCalledWith(2, { type: "focusPane", pane: "uptime" });
   });
 });
 

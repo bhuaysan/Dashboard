@@ -7,6 +7,8 @@ import { defaultConfig } from "./config/defaults";
 import { DEFAULT_PROFILE_ID, type Config, type ProfileId } from "./config/schema";
 import { writeActiveProfileId, writeLocalCatalog, writeLocalConfig, type ProfileCatalog } from "./config/local";
 import type { HomelabData } from "./widgets/Homelab";
+import type { UptimeResponse, UptimeStatus } from "./lib/uptime";
+import { decodeUptime } from "./widgets/Uptime";
 
 const EMPTY_HOMELAB: HomelabData = {
   configured: false,
@@ -30,6 +32,46 @@ const FULL_HOMELAB: HomelabData = {
   storage: [{ name: "local-lvm", pct: 58, level: "ok" }],
   alerts: [{ level: "crit", text: "PVE-Alarm" }],
 };
+
+const HTTP_TARGET_ID = "423e4567-e89b-42d3-a456-426614174000";
+const TCP_TARGET_ID = "523e4567-e89b-42d3-a456-426614174000";
+
+function uptimeConfig(enabled: boolean, visible = true): Config {
+  return {
+    ...monitoringConfig(false),
+    uptime: {
+      enabled,
+      targets: [
+        { id: HTTP_TARGET_ID, type: "http", label: "Startseite", url: "https://start.example/" },
+        { id: TCP_TARGET_ID, type: "tcp", label: "Minecraft", host: "minecraft.example", port: 25565 },
+      ],
+    },
+    layout: defaultConfig.layout.map((entry) => entry.id === "uptime" ? { ...entry, visible } : entry),
+  };
+}
+
+function uptimeResponse(status: UptimeStatus = "up", options: {
+  updatedAt?: string | null;
+  storageOk?: boolean;
+} = {}): UptimeResponse {
+  const failed = status === "degraded" || status === "down";
+  const result = (id: string) => ({
+    id,
+    status,
+    statusSince: "2026-09-22T12:00:00.000Z",
+    checkedAt: "2026-09-22T12:01:00.000Z",
+    responseTimeMs: failed || status === "unknown" ? null : 31,
+    uptime24h: 99.93,
+    measuredMinutes: 1440,
+    history: Array.from({ length: 24 }, () => status === "down" ? "down" as const : "ok" as const),
+    error: failed ? { code: "timeout" as const } : null,
+  });
+  return {
+    updatedAt: options.updatedAt === undefined ? new Date().toISOString() : options.updatedAt,
+    storageOk: options.storageOk ?? true,
+    targets: [result(HTTP_TARGET_ID), result(TCP_TARGET_ID)],
+  };
+}
 
 const PROFILE_CATALOG = {
   profilesUpdatedAt: "2026-09-15T00:00:00.000Z",
@@ -78,7 +120,12 @@ function typeCommand(cmd: string) {
   fireEvent.keyDown(input, { key: "Enter" });
 }
 
-function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResponse: HomelabData = EMPTY_HOMELAB) {
+function stubBaseApi(
+  config = defaultConfig,
+  putResponse?: Response,
+  homelabResponse: HomelabData = EMPTY_HOMELAB,
+  uptimeData: UptimeResponse = uptimeResponse(),
+) {
   writeLocalCatalog(PROFILE_CATALOG);
   writeLocalConfig(DEFAULT_PROFILE_ID, config);
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -90,6 +137,7 @@ function stubBaseApi(config = defaultConfig, putResponse?: Response, homelabResp
     }
     if (parsed.pathname === "/api/config") return new Response(JSON.stringify(config), { status: 200 });
     if (parsed.pathname === "/api/homelab") return new Response(JSON.stringify(homelabResponse), { status: 200 });
+    if (parsed.pathname === "/api/uptime") return new Response(JSON.stringify(uptimeData), { status: 200 });
     return new Response("", { status: 502 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -174,6 +222,61 @@ describe("App", () => {
     expect(screen.getByLabelText("Suche oder Kommando")).toBeTruthy();
     expect(screen.getByText("NORMAL")).toBeTruthy();
     expect(screen.getByText("Datasphere")).toBeTruthy();
+    expect(document.querySelector(".grid--grouped > .pane--full")).toBeTruthy();
+  });
+
+  it("lässt ausgeblendete Standardspalten vollständig entfallen", async () => {
+    const config: Config = {
+      ...defaultConfig,
+      feeds: [],
+      calendars: [],
+      homelab: { ...defaultConfig.homelab, enabled: false },
+      layout: defaultConfig.layout.map((entry) =>
+        entry.id === "clock" || entry.id === "links" ? { ...entry, visible: false } : entry,
+      ),
+    };
+    setInitialConfig(config);
+    stubBaseApi(config);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Weather/ })).toBeTruthy());
+    const grid = document.querySelector(".grid");
+    expect(grid?.classList.contains("grid--grouped")).toBe(true);
+    expect(grid?.querySelector(".column--left")).toBeNull();
+    expect(grid?.querySelector(".column--center")).toBeTruthy();
+    expect(grid?.querySelector(".column--right")).toBeTruthy();
+  });
+
+  it("fällt bei einer sichtbaren Span-2-Pane auf das direkte Legacy-Raster zurück", async () => {
+    const config: Config = {
+      ...uptimeConfig(true),
+      feeds: [],
+      calendars: [],
+      homelab: { ...defaultConfig.homelab, enabled: false },
+      layout: defaultConfig.layout.map((entry) =>
+        entry.id === "weather" ? { ...entry, span: 2 } : entry,
+      ),
+    };
+    setInitialConfig(config);
+    stubBaseApi(config);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Weather/ })).toBeTruthy());
+    const grid = document.querySelector(".grid");
+    expect(grid?.classList.contains("grid--legacy")).toBe(true);
+    expect(grid?.querySelector(".column")).toBeNull();
+    expect(grid?.querySelector(".pane--wide")).toBeTruthy();
+    const uptimePane = screen.getByRole("region", { name: "Uptime" });
+    expect(uptimePane.classList.contains("pane--full")).toBe(true);
+    expect(uptimePane.parentElement).toBe(grid);
   });
 
   it("unterbindet bei deaktiviertem Monitoring Request, Pane, Statusquelle und Alarme", async () => {
@@ -192,6 +295,80 @@ describe("App", () => {
     expect(document.querySelector(".sl-panes")?.textContent).not.toContain("lab");
     expect(screen.queryByLabelText(/^pve:/)).toBeNull();
     expect(screen.queryByText("PVE-Alarm")).toBeNull();
+  });
+
+  it("zeigt deaktiviertes Uptime als unkonfiguriert ohne Request oder Pane", async () => {
+    const config = uptimeConfig(false);
+    const fetchMock = stubBaseApi(config);
+    render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/config?profile=default")).toBe(true));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/uptime?profile=default")).toHaveLength(0);
+    expect(screen.queryByRole("heading", { name: "Uptime" })).toBeNull();
+    expect(screen.getByLabelText(/^up: nicht konfiguriert/)).toBeTruthy();
+  });
+
+  it("lädt Uptime profilbezogen, rendert beide Zeilentypen und hält die Pane vollbreit", async () => {
+    const config = uptimeConfig(true);
+    const snapshot = uptimeResponse();
+    expect(decodeUptime(snapshot)).toBeDefined();
+    const fetchMock = stubBaseApi(config, undefined, EMPTY_HOMELAB, snapshot);
+    render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/uptime?profile=default")).toBe(true));
+    expect(screen.getByRole("heading", { name: "Uptime" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Startseite")).toBeTruthy());
+    expect(screen.getByText("Minecraft")).toBeTruthy();
+    const pane = screen.getByRole("region", { name: "Uptime" });
+    expect(pane.classList.contains("pane--full")).toBe(true);
+    expect(pane.parentElement?.classList.contains("grid--grouped")).toBe(true);
+    expect(pane.querySelector(".uptime-row--responsive")?.getAttribute("style")).toBeNull();
+  });
+
+  it("überwacht ausgeblendetes Uptime weiter und meldet Zielausfälle kritisch", async () => {
+    const config = uptimeConfig(true, false);
+    const fetchMock = stubBaseApi(config, undefined, EMPTY_HOMELAB, uptimeResponse("down"));
+    render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/uptime?profile=default")).toBe(true));
+    expect(screen.queryByRole("heading", { name: "Uptime" })).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText(/up: in Ordnung.*2 Alarme/)).toBeTruthy());
+    expect(screen.getByText("!!2")).toBeTruthy();
+  });
+
+  it("bewertet degradierte Ziele, Speicherfehler und alte Serverrunden getrennt", async () => {
+    const degraded = uptimeResponse("degraded", { storageOk: false, updatedAt: null });
+    const config = uptimeConfig(true);
+    stubBaseApi(config, undefined, EMPTY_HOMELAB, degraded);
+    render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByText("Uptime-Historie nicht speicherbar")).toBeTruthy());
+    expect(screen.getByLabelText(/^up: Fehler/)).toBeTruthy();
+    expect(screen.getByText("!2")).toBeTruthy();
+  });
+
+  it.each([null, "2020-01-01T00:00:00.000Z"])(
+    "markiert eine frisch geladene, aber serverseitig alte oder fehlende Uptime-Runde als veraltet (%s)",
+    async (updatedAt) => {
+    const config = uptimeConfig(true);
+    stubBaseApi(config, undefined, EMPTY_HOMELAB, uptimeResponse("up", { updatedAt }));
+    render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByLabelText(/^up: veraltet/)).toBeTruthy());
+    },
+  );
+
+  it("navigiert Uptime-Zeilen und öffnet mit Enter nur HTTP-Ziele", async () => {
+    if (!HTMLElement.prototype.scrollIntoView) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+    }
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const config = uptimeConfig(true);
+    stubBaseApi(config, undefined, EMPTY_HOMELAB, uptimeResponse());
+    render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByText("Startseite")).toBeTruthy());
+    fireEvent.keyDown(window, { key: "8" });
+    fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
+    expect(open).toHaveBeenCalledWith("https://start.example/", "_blank", "noopener");
+    fireEvent.keyDown(window, { key: "j" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(open).toHaveBeenCalledTimes(1);
+    open.mockRestore();
   });
 
   it("überwacht bei aktivem Monitoring auch ohne sichtbare Pane weiter", async () => {
@@ -929,5 +1106,45 @@ describe("App", () => {
     resolveWork(new Response(rss("Arbeit"), { status: 200 }));
     await waitFor(() => expect(screen.queryByText("Arbeit")).toBeNull());
     expect(screen.getAllByText("Privat").length).toBeGreaterThan(0);
+  });
+
+  it("wechselt Uptime auf die neue Profil-ID und verwirft die alte Antwort", async () => {
+    const work = uptimeConfig(true);
+    const privateConfig = {
+      ...uptimeConfig(true),
+      uptime: {
+        enabled: true,
+        targets: uptimeConfig(true).uptime.targets.map((target) => ({ ...target, label: `Privat ${target.label}` })),
+      },
+    };
+    writeLocalCatalog(TWO_PROFILE_CATALOG);
+    writeActiveProfileId(WORK_PROFILE_ID);
+    writeLocalConfig(WORK_PROFILE_ID, work);
+    writeLocalConfig(PRIVATE_PROFILE_ID, privateConfig);
+    let resolveWork: (value: Response) => void = () => undefined;
+    const workPending = new Promise<Response>((resolve) => { resolveWork = resolve; });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const parsed = new URL(String(input), "http://dashboard.test");
+      const profileId = parsed.searchParams.get("profile");
+      if (parsed.pathname === "/api/profiles") return new Response(JSON.stringify(TWO_PROFILE_CATALOG), { status: 200 });
+      if (parsed.pathname === "/api/config") {
+        return new Response(JSON.stringify(profileId === WORK_PROFILE_ID ? work : privateConfig), { status: 200 });
+      }
+      if (parsed.pathname === "/api/uptime" && profileId === WORK_PROFILE_ID) return workPending;
+      if (parsed.pathname === "/api/uptime") return new Response(JSON.stringify(uptimeResponse("up")), { status: 200 });
+      return new Response("", { status: 502 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/uptime?profile=${WORK_PROFILE_ID}`)).toBe(true));
+
+    client.setQueryData(["profiles"], { ...TWO_PROFILE_CATALOG, profiles: [TWO_PROFILE_CATALOG.profiles[1]] });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/uptime?profile=${PRIVATE_PROFILE_ID}`)).toBe(true));
+    await waitFor(() => expect(screen.getByText("Privat Startseite")).toBeTruthy());
+
+    resolveWork(new Response(JSON.stringify(uptimeResponse("down")), { status: 200 }));
+    await waitFor(() => expect(screen.queryByText("nicht erreichbar")).toBeNull());
+    expect(screen.getAllByText("erreichbar").length).toBeGreaterThan(0);
   });
 });

@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Pane } from "./shell/Pane";
-import { PaneGrid } from "./shell/PaneGrid";
+import { PaneGrid, type PaneColumn } from "./shell/PaneGrid";
 import { StatusLine } from "./shell/StatusLine";
 import { CommandBar, type FlatLink } from "./shell/CommandBar";
 import { KeymapOverlay } from "./shell/KeymapOverlay";
@@ -42,6 +42,7 @@ import { eventFetchRange } from "./lib/date";
 import { linkHost } from "./lib/host";
 import type { Note, SourceState } from "./shell/StatusLine";
 import { decodeHomelab, fetchHomelab, Homelab } from "./widgets/Homelab";
+import { decodeUptime, fetchUptime, Uptime } from "./widgets/Uptime";
 import {
   SettingsPane,
   type ProfileMutationOptions,
@@ -231,6 +232,13 @@ export default function App() {
   const labQuery = useCachedQuery(`profile:${profileId}:pve`, (signal) => fetchHomelab(profileId, signal), 60_000, {
     decode: decodeHomelab, refetchIntervalMs: 60_000, enabled: profileDataReady && homelabEnabled,
   });
+  const uptimeEnabled = profileDataReady && config.uptime.enabled;
+  const uptimeQuery = useCachedQuery(
+    `profile:${profileId}:up`,
+    (signal) => fetchUptime(profileId, signal),
+    60_000,
+    { decode: decodeUptime, refetchIntervalMs: 60_000, enabled: uptimeEnabled },
+  );
 
   // undefined bleibt undefined: „noch keine Termine" ist ein anderer Zustand als
   // „keine Termine in den nächsten Tagen", und die Agenda unterscheidet beide.
@@ -266,17 +274,22 @@ export default function App() {
     () => profileDataReady ? Object.fromEntries(config.layout.map((l) => [l.id, l])) : {},
     [config.layout, profileDataReady],
   );
-  const paneVisible = (id: PaneId) => !profileDataReady ? false : id === "homelab"
-    ? homelabEnabled && (layoutById[id]?.visible ?? true)
-    : layoutById[id]?.visible ?? true;
+  const paneVisible = (id: PaneId) => {
+    if (!profileDataReady) return false;
+    if (id === "homelab") return homelabEnabled && (layoutById[id]?.visible ?? true);
+    if (id === "uptime") return uptimeEnabled && (layoutById[id]?.visible ?? true);
+    return layoutById[id]?.visible ?? true;
+  };
   const paneSpan = (id: PaneId): 1 | 2 => {
     const layout = layoutById[id];
     return layout && "span" in layout ? layout.span : 1;
   };
   const visiblePanes = useMemo(
-    () => !profileDataReady ? new Set<PaneId>() : new Set(PANE_ORDER.map((p) => p.id).filter((id) => id !== "homelab" || homelabEnabled)
+    () => !profileDataReady ? new Set<PaneId>() : new Set(PANE_ORDER.map((p) => p.id)
+      .filter((id) => id !== "homelab" || homelabEnabled)
+      .filter((id) => id !== "uptime" || uptimeEnabled)
       .filter((id) => layoutById[id]?.visible ?? true)),
-    [layoutById, homelabEnabled, profileDataReady],
+    [layoutById, homelabEnabled, uptimeEnabled, profileDataReady],
   );
 
   const consoleUrl = useCallback(
@@ -295,11 +308,14 @@ export default function App() {
       homelab: (labQuery.data?.guests ?? []).map((g) => (
         g.running ? { url: consoleUrl(g.vmid) } : {}
       )),
+      uptime: config.uptime.targets.map((target) => (
+        target.type === "http" ? { url: target.url } : {}
+      )),
     };
     // Ausgeblendete Panes haben keine Zeilen — sonst wandert die Auswahl unsichtbar weiter.
     for (const id of PANE_ORDER.map((p) => p.id)) if (!visiblePanes.has(id)) rows[id] = [];
     return rows;
-  }, [flatLinks, agendaEvents, newsQuery.data, labQuery.data, consoleUrl, visiblePanes]);
+  }, [flatLinks, agendaEvents, newsQuery.data, labQuery.data, consoleUrl, config.uptime.targets, visiblePanes]);
 
   const rowCounts = useMemo<Record<PaneId, number>>(() => ({
     clock: rowsByPane.clock.length,
@@ -309,6 +325,7 @@ export default function App() {
     news: rowsByPane.news.length,
     agenda: rowsByPane.agenda.length,
     homelab: rowsByPane.homelab.length,
+    uptime: rowsByPane.uptime.length,
   }), [rowsByPane]);
 
   useEffect(() => {
@@ -468,6 +485,17 @@ export default function App() {
 
   const labAlerts = homelabEnabled ? labQuery.data?.alerts ?? [] : [];
   const labAlertLevel: "warn" | "crit" = labAlerts.some((a) => a.level === "crit") ? "crit" : "warn";
+  const uptimeResults = uptimeEnabled ? uptimeQuery.data?.targets ?? [] : [];
+  const uptimeDown = uptimeResults.filter((result) => result.status === "down").length;
+  const uptimeDegraded = uptimeResults.filter((result) => result.status === "degraded").length;
+  const uptimeAlertCount = uptimeDown + uptimeDegraded;
+  const uptimeRoundMs = Date.parse(uptimeQuery.data?.updatedAt ?? "");
+  const uptimeRoundStale = !Number.isFinite(uptimeRoundMs) || Date.now() - uptimeRoundMs > 150_000;
+  const uptimeSourceState: SourceState = !uptimeEnabled
+    ? "unconfigured"
+    : uptimeQuery.data?.storageOk === false
+      ? "crit"
+      : queryState(uptimeQuery, uptimeRoundStale);
 
   const catalogProblem = profilesQuery.error !== null
     ? "Profilkatalog konnte nicht geladen werden."
@@ -491,6 +519,7 @@ export default function App() {
     ["news", newsQuery.error],
     ["cal", calQuery.error],
     ["pve", homelabEnabled ? labQuery.error : null],
+    ["up", uptimeEnabled ? uptimeQuery.error : null],
     ["cfg", configQuery.error],
   ] as const).find(([, err]) => err !== null);
   const partialProblems = [
@@ -545,6 +574,165 @@ export default function App() {
     />
   );
 
+  const paneNodes: Partial<Record<PaneId, ReactNode>> = {};
+  if (paneVisible("clock")) {
+    paneNodes.clock = (
+      <Pane
+        key="clock"
+        title="Clock"
+        label="Uhr"
+        span={paneSpan("clock")}
+        id="pane-1"
+        ref={(el: HTMLElement | null) => { paneRefs.current.clock = el; }}
+      >
+        <div className="clock">
+          <div>
+            <div className="clock-time">{timeFmt.format(now)}</div>
+            <div className="clock-date">
+              {new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(now)}
+            </div>
+          </div>
+          {/* Zwei Spalten statt einer Fließzeile mit Trennpunkten: die Zeiten stehen
+              untereinander und lassen sich vergleichen, was der Zweck der Liste ist.
+              Unten verankert, damit die Pane zwei Anker hat statt oben zu kleben. */}
+          {config.clock.secondary.length > 0 && (
+            <dl className="clock-zones">
+              {config.clock.secondary.map((z) => (
+                <Fragment key={z.label}>
+                  <dt>{z.label}</dt>
+                  <dd>
+                    {new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: z.tz }).format(now)}
+                  </dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+        </div>
+      </Pane>
+    );
+  }
+
+  if (paneVisible("weather")) {
+    paneNodes.weather = (
+      <Pane key="weather" title="Weather" label="Wetter" subtitle={config.location.label} span={paneSpan("weather")} id="pane-2"
+        ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
+      >
+        <Weather data={wxQuery.data} now={now} />
+      </Pane>
+    );
+  }
+
+  if (paneVisible("month")) {
+    paneNodes.month = (
+      <Pane key="month" title="Month" label="Monat" subtitle={monthLabel(now)} span={paneSpan("month")} id="pane-7"
+        ref={(el: HTMLElement | null) => { paneRefs.current.month = el; }}
+      >
+        <Month now={now} events={monthEvents} holidayRegion={config.holidayRegion} />
+      </Pane>
+    );
+  }
+
+  if (paneVisible("links")) {
+    paneNodes.links = (
+      <Pane key="links" title="Links" label="Links" span={paneSpan("links")} clip id="pane-3"
+        ref={(el: HTMLElement | null) => { paneRefs.current.links = el; }}
+      >
+        <nav aria-label="Links">
+          {config.linkGroups.map((g) => (
+            <div className="link-group" key={g.title}>
+              <div className="group-label">{g.title}</div>
+              <ul>
+                {g.links.map((l) => {
+                  linkRow += 1;
+                  const i = linkRow;
+                  const href = safeHref(l.url);
+                  return (
+                    <li key={l.url}>
+                      {/* Die Zeile ist der Link, nicht nur der Text darin: so trifft die
+                          Maus die ganze Breite und Mittelklick öffnet einen neuen Tab. */}
+                      <a
+                        className={`row${isSel("links", i) ? " is-sel" : ""}`}
+                        href={href ?? undefined}
+                        data-row
+                      >
+                        <span className="hint">{l.hint ?? ""}</span>
+                        <span className="link-copy">
+                          <span className="link-label">{l.label}</span>
+                          {/* Der Zielhost unter dem Namen. Bei „Drive" oder „NAS" sagt
+                              erst er, wohin die Zeile führt. Aus der Adresse, nicht aus
+                              der Config. */}
+                          <span className="link-host">{linkHost(l.url)}</span>
+                        </span>
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
+      </Pane>
+    );
+  }
+
+  if (paneVisible("news")) {
+    paneNodes.news = (
+      <Pane key="news" title="News" label="Nachrichten" span={paneSpan("news")} clip id="pane-5"
+        ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
+      >
+        <News items={newsQuery.data?.items} failures={newsQuery.data?.failures}
+          selIndex={selIndex("news")} feedCount={config.feeds.length} />
+      </Pane>
+    );
+  }
+
+  if (paneVisible("agenda")) {
+    paneNodes.agenda = (
+      <Pane key="agenda" title="Agenda" label="Termine" span={paneSpan("agenda")} clip id="pane-4"
+        ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
+      >
+        <Agenda events={agendaEvents} failures={calQuery.data?.failures}
+          selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
+      </Pane>
+    );
+  }
+
+  if (paneVisible("homelab")) {
+    paneNodes.homelab = (
+      <Pane key="homelab" title="Homelab" label="Homelab" subtitle={config.homelab.node} span="full" id="pane-6"
+        ref={(el: HTMLElement | null) => { paneRefs.current.homelab = el; }}
+      >
+        <Homelab data={labQuery.data} selIndex={selIndex("homelab")} consoleUrl={consoleUrl} />
+      </Pane>
+    );
+  }
+
+  if (paneVisible("uptime")) {
+    paneNodes.uptime = (
+      <Pane key="uptime" title="Uptime" label="Uptime" span="full" id="pane-8"
+        ref={(el: HTMLElement | null) => { paneRefs.current.uptime = el; }}
+      >
+        <Uptime targets={config.uptime.targets} data={uptimeQuery.data} selIndex={selIndex("uptime")} now={now} />
+      </Pane>
+    );
+  }
+
+  const paneFor = (id: PaneId): ReactNode[] => {
+    const pane = paneNodes[id];
+    return pane === undefined || pane === null ? [] : [pane];
+  };
+  const groupedColumns: PaneColumn[] = [
+    { id: "left", children: [...paneFor("clock"), ...paneFor("links")] },
+    { id: "center", children: [...paneFor("weather"), ...paneFor("news")] },
+    { id: "right", children: [...paneFor("month"), ...paneFor("agenda")] },
+  ];
+  const hasVisibleWidePane = PANE_ORDER.some(({ id }) =>
+    id !== "homelab" && id !== "uptime" && visiblePanes.has(id) && paneSpan(id) === 2,
+  );
+  const paneGrid = hasVisibleWidePane
+    ? <PaneGrid>{PANE_ORDER.flatMap(({ id }) => paneFor(id))}</PaneGrid>
+    : <PaneGrid columns={groupedColumns} full={[...paneFor("homelab"), ...paneFor("uptime")]} />;
+
   if (!profileDataReady) {
     return (
       <>
@@ -595,122 +783,7 @@ export default function App() {
               )}
             </div>
           )}
-          <PaneGrid>
-          {paneVisible("clock") && (
-          <Pane
-            title="Clock"
-            label="Uhr"
-            span={paneSpan("clock")}
-            id="pane-1"
-            ref={(el: HTMLElement | null) => { paneRefs.current.clock = el; }}
-          >
-            <div className="clock">
-              <div>
-                <div className="clock-time">{timeFmt.format(now)}</div>
-                <div className="clock-date">
-                  {new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }).format(now)}
-                </div>
-              </div>
-              {/* Zwei Spalten statt einer Fließzeile mit Trennpunkten: die Zeiten stehen
-                  untereinander und lassen sich vergleichen, was der Zweck der Liste ist.
-                  Unten verankert, damit die Pane zwei Anker hat statt oben zu kleben. */}
-              {config.clock.secondary.length > 0 && (
-                <dl className="clock-zones">
-                  {config.clock.secondary.map((z) => (
-                    <Fragment key={z.label}>
-                      <dt>{z.label}</dt>
-                      <dd>
-                        {new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: z.tz }).format(now)}
-                      </dd>
-                    </Fragment>
-                  ))}
-                </dl>
-              )}
-            </div>
-          </Pane>
-          )}
-
-          {paneVisible("weather") && (
-          <Pane title="Weather" label="Wetter" subtitle={config.location.label} span={paneSpan("weather")} id="pane-2"
-            ref={(el: HTMLElement | null) => { paneRefs.current.weather = el; }}
-          >
-            <Weather data={wxQuery.data} now={now} />
-          </Pane>
-          )}
-
-          {paneVisible("month") && (
-          <Pane title="Month" label="Monat" subtitle={monthLabel(now)} span={paneSpan("month")} id="pane-7"
-            ref={(el: HTMLElement | null) => { paneRefs.current.month = el; }}
-          >
-            <Month now={now} events={monthEvents} holidayRegion={config.holidayRegion} />
-          </Pane>
-          )}
-
-          {paneVisible("links") && (
-          <Pane title="Links" label="Links" span={paneSpan("links")} clip id="pane-3"
-            ref={(el: HTMLElement | null) => { paneRefs.current.links = el; }}
-          >
-            <nav aria-label="Links">
-              {config.linkGroups.map((g) => (
-                <div className="link-group" key={g.title}>
-                  <div className="group-label">{g.title}</div>
-                  <ul>
-                    {g.links.map((l) => {
-                      linkRow += 1;
-                      const i = linkRow;
-                      const href = safeHref(l.url);
-                      return (
-                        <li key={l.url}>
-                          {/* Die Zeile ist der Link, nicht nur der Text darin: so trifft die
-                              Maus die ganze Breite und Mittelklick öffnet einen neuen Tab. */}
-                          <a
-                            className={`row${isSel("links", i) ? " is-sel" : ""}`}
-                            href={href ?? undefined}
-                            data-row
-                          >
-                            <span className="hint">{l.hint ?? ""}</span>
-                            <span className="link-label">{l.label}</span>
-                            {/* Der Zielhost an der rechten Panekante. Er füllt nicht nur
-                                die Breite — bei „Drive" oder „NAS" sagt erst er, wohin
-                                die Zeile führt. Aus der Adresse, nicht aus der Config. */}
-                            <span className="link-host">{linkHost(l.url)}</span>
-                          </a>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
-            </nav>
-          </Pane>
-          )}
-
-          {paneVisible("news") && (
-          <Pane title="News" label="Nachrichten" span={paneSpan("news")} clip id="pane-5"
-            ref={(el: HTMLElement | null) => { paneRefs.current.news = el; }}
-          >
-            <News items={newsQuery.data?.items} failures={newsQuery.data?.failures}
-              selIndex={selIndex("news")} feedCount={config.feeds.length} />
-          </Pane>
-          )}
-
-          {paneVisible("agenda") && (
-          <Pane title="Agenda" label="Termine" span={paneSpan("agenda")} clip id="pane-4"
-            ref={(el: HTMLElement | null) => { paneRefs.current.agenda = el; }}
-          >
-            <Agenda events={agendaEvents} failures={calQuery.data?.failures}
-              selIndex={selIndex("agenda")} calendarCount={config.calendars.length} />
-          </Pane>
-          )}
-
-          {paneVisible("homelab") && (
-          <Pane title="Homelab" label="Homelab" subtitle={config.homelab.node} span="full" id="pane-6"
-            ref={(el: HTMLElement | null) => { paneRefs.current.homelab = el; }}
-          >
-            <Homelab data={labQuery.data} selIndex={selIndex("homelab")} consoleUrl={consoleUrl} />
-          </Pane>
-          )}
-        </PaneGrid>
+          {paneGrid}
 
         {/* Kommandozeile und Statusline bleiben zusammen am unteren Rand stehen — sie sind
             die einzige Anzeige für Modus, Alter der Quellen und Fehler. */}
@@ -743,6 +816,14 @@ export default function App() {
                   ? { alerts: { count: labAlerts.length, level: labAlertLevel } }
                   : {}),
               }] : []),
+              {
+                label: "up",
+                state: uptimeSourceState,
+                updatedAt: Number.isFinite(uptimeRoundMs) ? uptimeRoundMs : undefined,
+                ...(uptimeAlertCount > 0
+                  ? { alerts: { count: uptimeAlertCount, level: uptimeDown > 0 ? "crit" as const : "warn" as const } }
+                  : {}),
+              },
               { label: "cfg", state: queryState(configQuery), updatedAt: configQuery.dataUpdatedAt },
             ]}
             clock={timeFmt.format(now)}

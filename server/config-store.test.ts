@@ -283,7 +283,7 @@ describe("profile document migration", () => {
 
   itWithStore("normalisiert unbekannte und fehlende Panes in jedem Version-2-Profil", async ({ configPath, store }) => {
     const workId = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
-    const firstLayout = defaultConfig.layout.filter((entry) => entry.id !== "news");
+    const firstLayout = defaultConfig.layout.filter((entry) => entry.id !== "news" && entry.id !== "uptime");
     await writeFile(configPath, JSON.stringify({
       version: 2,
       profilesUpdatedAt: defaultConfig.updatedAt,
@@ -308,6 +308,8 @@ describe("profile document migration", () => {
     if (standard.kind !== "ok" || work.kind !== "ok") return;
     expect(standard.config.layout.map((entry) => entry.id)).toEqual(expect.arrayContaining(Array.from(PANE_IDS)));
     expect(work.config.layout.map((entry) => entry.id)).toEqual(expect.arrayContaining(Array.from(PANE_IDS)));
+    expect(standard.config.layout.find((entry) => entry.id === "uptime")).toEqual({ id: "uptime", visible: true });
+    expect(work.config.layout.find((entry) => entry.id === "uptime")).toEqual({ id: "uptime", visible: true });
   });
 
   itWithStore("liest alle Profil-Configs validiert, migriert und als unabhängige Kopien", async ({ configPath, store }) => {

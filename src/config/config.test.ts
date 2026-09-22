@@ -113,6 +113,20 @@ describe("configSchema", () => {
     });
   });
 
+  it("entfernt das historische, wirkungslose Uptime-span beim Parsen", () => {
+    const legacy = {
+      ...defaultConfig,
+      layout: [
+        ...defaultConfig.layout.filter((entry) => entry.id !== "uptime"),
+        { id: "uptime", visible: true, span: 2 },
+      ],
+    };
+    expect(configSchema.parse(legacy).layout.find((entry) => entry.id === "uptime")).toEqual({
+      id: "uptime",
+      visible: true,
+    });
+  });
+
   it.each([
     ["ungültige Zeitzone", { clock: { secondary: [{ label: "x", tz: "Nicht/Real" }] } }],
     ["ungültige Koordinaten", { location: { ...defaultConfig.location, lat: 91 } }],

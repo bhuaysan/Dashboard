@@ -23,11 +23,11 @@ export type UiAction =
   | { type: "resetSelection" }
   | { type: "reset" };
 
-// Reihenfolge und Kürzel der Statusline. Die Ziffern 1–7 folgen dieser Liste, sie muss
+// Reihenfolge und Kürzel der Statusline. Die Ziffern 1–8 folgen dieser Liste, sie muss
 // deshalb dieselbe Reihenfolge haben wie PANE_IDS und die Panes in App.tsx.
 const PANE_LABELS: Record<PaneId, string> = {
   clock: "clock", weather: "weather", month: "month", links: "links",
-  news: "news", agenda: "agenda", homelab: "lab",
+  news: "news", agenda: "agenda", homelab: "lab", uptime: "up",
 };
 export const PANE_ORDER: { id: PaneId; label: string }[] = PANE_IDS.map((id) => ({
   id,

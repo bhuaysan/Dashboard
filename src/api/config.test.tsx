@@ -183,7 +183,7 @@ describe("useSaveConfig", () => {
     const testWrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    for (const key of ["profile:default:pve", "profile:default:wx:test", "profile:default:cal:test", "profile:default:news:test", "profile:other:wx:test"]) {
+    for (const key of ["profile:default:pve", "profile:default:up", "profile:default:wx:test", "profile:default:cal:test", "profile:default:news:test", "profile:other:wx:test", "profile:other:up"]) {
       client.setQueryData([key], { cached: true });
     }
     vi.stubGlobal("fetch", vi.fn(async () =>
@@ -195,9 +195,27 @@ describe("useSaveConfig", () => {
     await waitFor(() => expect(client.getQueryState(["profile:default:wx:test"])?.isInvalidated).toBe(true));
 
     expect(client.getQueryState(["profile:default:pve"])?.isInvalidated).not.toBe(true);
+    expect(client.getQueryState(["profile:default:up"])?.isInvalidated).not.toBe(true);
     expect(client.getQueryState(["profile:default:cal:test"])?.isInvalidated).toBe(true);
     expect(client.getQueryState(["profile:default:news:test"])?.isInvalidated).toBe(true);
     expect(client.getQueryState(["profile:other:wx:test"])?.isInvalidated).not.toBe(true);
+    expect(client.getQueryState(["profile:other:up"])?.isInvalidated).not.toBe(true);
+  });
+
+  it("invalidiert Uptime nur für das aktive Profil, wenn Monitoring aktiv ist", async () => {
+    const client = new QueryClient();
+    const testWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    client.setQueryData(["profile:default:up"], { cached: true });
+    client.setQueryData(["profile:other:up"], { cached: true });
+    const enabled = { ...defaultConfig, uptime: { ...defaultConfig.uptime, enabled: true } };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(enabled), { status: 200 })));
+    const { result } = renderHook(() => useSaveConfig(DEFAULT_PROFILE_ID), { wrapper: testWrapper });
+    act(() => result.current.mutate(enabled));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(client.getQueryState(["profile:default:up"])?.isInvalidated).toBe(true));
+    expect(client.getQueryState(["profile:other:up"])?.isInvalidated).not.toBe(true);
   });
 
   it("lässt einen älteren Config-Poll einen erfolgreichen Save nicht zurückrollen", async () => {

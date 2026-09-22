@@ -1210,11 +1210,12 @@ export function SettingsPane({
                       <span>{l.id}</span>
                       <label className="check">
                           <input type="checkbox" aria-label={`${l.id.toUpperCase()} sichtbar`} checked={l.visible}
-                            disabled={l.id === "homelab" && !draft.homelab.enabled}
+                            disabled={(l.id === "homelab" && !draft.homelab.enabled) ||
+                              (l.id === "uptime" && !draft.uptime.enabled)}
                             onChange={(e) => upd((d) => ({ ...d, layout: d.layout.map((x, j) => j === i ? { ...x, visible: e.target.checked } : x) }))} />
                           <span className="check-state">{l.visible ? "an" : "aus"}</span>
                       </label>
-                      {l.id === "homelab" ? (
+                      {l.id === "homelab" || l.id === "uptime" ? (
                         <span className="dim">volle Breite</span>
                       ) : (
                         <span>
@@ -1224,7 +1225,7 @@ export function SettingsPane({
                               if (span === 1 || span === 2) {
                                 upd((d) => ({
                                   ...d,
-                                  layout: d.layout.map((x, j) => j === i && x.id !== "homelab"
+                                  layout: d.layout.map((x, j) => j === i && x.id !== "homelab" && x.id !== "uptime"
                                     ? { ...x, span }
                                     : x),
                                 }));

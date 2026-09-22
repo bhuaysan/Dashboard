@@ -330,8 +330,41 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 /* Feste Breite, damit „!" und „!!" den Text auf derselben Flucht beginnen lassen. */
 .alert .mark { flex: none; font-weight: 700; width: 2ch; }
 
-.ev { display: grid; grid-template-columns: 11.5ch 1fr; gap: .6rem;
-      padding: .05rem .4rem; margin: 0 -.4rem; }
+.uptime { display: grid; gap: .2rem; }
+.uptime-row {
+  display: grid;
+  grid-template-columns: 2ch minmax(10ch, 15ch) minmax(12ch, 1fr) 7ch 8ch minmax(12rem, 1.2fr);
+  gap: .6rem;
+  align-items: baseline;
+  padding: .1rem .4rem;
+  margin: 0 -.4rem;
+  color: var(--color-fg);
+  text-decoration: none;
+}
+.uptime-row.is-sel { background: var(--color-bg-sel); }
+.uptime-status,
+.uptime-target { display: flex; flex-direction: column; min-width: 0; }
+.uptime-name,
+.uptime-endpoint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uptime-latency,
+.uptime-percent { text-align: right; white-space: nowrap; }
+.uptime-history { display: flex; min-width: 0; overflow: hidden; color: var(--color-dim); }
+.uptime-mark.ok,
+.uptime-history-ok { color: var(--color-accent); }
+.uptime-mark.warn,
+.uptime-history-mixed { color: var(--color-warn); }
+.uptime-mark.crit,
+.uptime-history-down { color: var(--color-crit); }
+.uptime-history-unknown { color: var(--color-dim); }
+@media (max-width: 700px) {
+  .uptime-row--responsive {
+    grid-template-columns: 2ch minmax(7ch, auto) minmax(0, 1fr) auto auto;
+    gap: .25rem .5rem;
+  }
+  .uptime-row--responsive .uptime-history { grid-column: 1 / -1; }
+}
+
+.ev { padding: 9px 0; }
 .ev.is-sel { background: var(--color-bg-sel); }
 /* „läuft gerade" trägt den Akzent auf Zeit und Titel, nicht dieselbe Auswahlfläche wie der
    Cursor — sonst sehen das laufende und das angewählte Ereignis gleich aus. So bleiben beide

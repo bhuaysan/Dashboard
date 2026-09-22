@@ -214,10 +214,29 @@ describe("SettingsPane", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
     expect(screen.getByRole("checkbox", { name: "CLOCK sichtbar" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Breite von CLOCK" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Breite von UPTIME" })).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "Links" }));
     expect(screen.getByRole("button", { name: 'Link „Datasphere" nach unten' })).toBeTruthy();
     expect(screen.getByRole("button", { name: 'Link „Datasphere" löschen' })).toBeTruthy();
+  });
+
+  it("lässt eine aktiv überwachte Uptime-Pane ausblenden", () => {
+    const cfg = {
+      ...structuredClone(defaultConfig),
+      uptime: { enabled: true, targets: [] },
+    };
+    let sent: Config | undefined;
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined}
+      save={fakeSave((config) => { sent = config; })} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Layout" }));
+    const visible = screen.getByRole("checkbox", { name: "UPTIME sichtbar" });
+    if (!(visible instanceof HTMLInputElement)) throw new Error("Uptime-Sichtbarkeit ist kein Eingabefeld");
+    expect(visible.disabled).toBe(false);
+    fireEvent.click(visible);
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(sent?.uptime.enabled).toBe(true);
+    expect(sent?.layout.find((entry) => entry.id === "uptime")?.visible).toBe(false);
   });
 
   it("speichert den aktivierten Proxmox-Monitoring-Schalter ohne andere Homelab-Werte zu verändern", () => {

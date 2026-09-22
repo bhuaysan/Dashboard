@@ -90,7 +90,8 @@ function isProfileDataSourceKey(key: string, profileId: ProfileId, config: Confi
   const prefix = `profile:${profileId}:`;
   if (!key.startsWith(prefix)) return false;
   const sourceKey = key.slice(prefix.length);
-  return (config.homelab.enabled && sourceKey === "pve") || sourceKey.startsWith("wx:") ||
+  return (config.homelab.enabled && sourceKey === "pve") ||
+    (config.uptime.enabled && sourceKey === "up") || sourceKey.startsWith("wx:") ||
     sourceKey.startsWith("cal:") || sourceKey.startsWith("news:");
 }
 

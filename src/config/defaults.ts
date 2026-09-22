@@ -67,8 +67,8 @@ export const defaultConfig: Config = {
       mdn: "https://developer.mozilla.org/search?q=%s",
     },
   },
-  // Zeile 1: Uhr, Wetter, Monat. Zeile 2: Links, News, Termine. Darunter Homelab
-  // über die volle Breite.
+  // Standardlayout: links Clock + Links, mittig Weather + News, rechts Month +
+  // Agenda. PaneGrid hält diese Spans getrennt vom Legacy-Raster mit Span-2.
   layout: [
     { id: "clock", visible: true, span: 1 },
     { id: "weather", visible: true, span: 1 },
@@ -77,6 +77,7 @@ export const defaultConfig: Config = {
     { id: "news", visible: true, span: 1 },
     { id: "agenda", visible: true, span: 1 },
     { id: "homelab", visible: true },
+    { id: "uptime", visible: true },
   ],
   proxyAllowlist: [
     "api.open-meteo.com",

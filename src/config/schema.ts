@@ -3,7 +3,7 @@ import { z } from "zod";
 // Die Panes in Lesereihenfolge. Diese Liste bestimmt das Layout-Schema und die
 // Zifferntasten (src/lib/useKeymap.ts). Fehlt eine Pane in einer älteren config.json,
 // ergänzt der Server sie beim Lesen aus defaultConfig (server/config-store.ts).
-export const PANE_IDS = ["clock", "weather", "month", "links", "news", "agenda", "homelab"] as const;
+export const PANE_IDS = ["clock", "weather", "month", "links", "news", "agenda", "homelab", "uptime"] as const;
 export type PaneId = (typeof PANE_IDS)[number];
 export const HOLIDAY_REGIONS = ["BW", "NRW"] as const;
 export type HolidayRegion = (typeof HOLIDAY_REGIONS)[number];
@@ -135,9 +135,10 @@ const layoutSchema = z.array(z.discriminatedUnion("id", [
     visible: z.boolean(),
     span: z.union([z.literal(1), z.literal(2)]),
   }),
-  // HOMELAB ist laut Layoutvertrag immer vollbreit. Alte Configs dürfen noch ein
+  // HOMELAB und UPTIME sind laut Layoutvertrag immer vollbreit. Alte Configs dürfen noch ein
   // span-Feld enthalten; Zod entfernt es beim Parsen als unbekanntes Feld.
   z.object({ id: z.literal("homelab"), visible: z.boolean() }),
+  z.object({ id: z.literal("uptime"), visible: z.boolean() }),
 ])).max(PANE_IDS.length).superRefine((layout, ctx) => {
   const seen = new Set<PaneId>();
   layout.forEach((entry, index) => {
