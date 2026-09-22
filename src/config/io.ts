@@ -1,12 +1,20 @@
 import { configSchema, type Config } from "./schema";
 import { describeIssue } from "./describeIssue";
 
-export function exportConfig(cfg: Config): void {
+function safeProfileName(profileName: string): string {
+  const safe = profileName
+    .toLocaleLowerCase("de-DE")
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  return safe || "profil";
+}
+
+export function exportConfig(cfg: Config, profileName: string): void {
   const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "dashboard-config.json";
+  a.download = `dashboard-${safeProfileName(profileName)}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }

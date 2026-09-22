@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dirname, join } from "node:path";
 
 export type EnvRecord = Readonly<Record<string, string | undefined>>;
 
@@ -12,6 +13,7 @@ export type PveEnvironment = {
 export type DashboardEnvironment = {
   port: number;
   configPath: string;
+  uptimePath: string;
   staticPath: string;
   writeAllow: string[];
   writeHosts: string[];
@@ -68,6 +70,7 @@ const listValue = (item: z.ZodType<string>) => z.string().transform((value) => v
 const baseEnvironmentSchema = z.object({
   PORT: portValue,
   DASHBOARD_CONFIG: pathValue,
+  DASHBOARD_UPTIME: pathValue,
   DASHBOARD_STATIC: pathValue,
   DASHBOARD_WRITE_ALLOW: listValue(cidrValue),
   DASHBOARD_WRITE_HOSTS: listValue(hostValue),
@@ -96,9 +99,12 @@ function invalidVariables(issues: z.ZodIssue[]): string[] {
 }
 
 export function parseEnv(record: EnvRecord): DashboardEnvironment {
+  const configPathInput = record.DASHBOARD_CONFIG ?? "./config.json";
+  const uptimePathInput = record.DASHBOARD_UPTIME ?? join(dirname(configPathInput), "uptime.json");
   const parsed = baseEnvironmentSchema.safeParse({
     PORT: record.PORT ?? "7777",
-    DASHBOARD_CONFIG: record.DASHBOARD_CONFIG ?? "./config.json",
+    DASHBOARD_CONFIG: configPathInput,
+    DASHBOARD_UPTIME: uptimePathInput,
     DASHBOARD_STATIC: record.DASHBOARD_STATIC ?? "./static",
     DASHBOARD_WRITE_ALLOW: record.DASHBOARD_WRITE_ALLOW ?? "127.0.0.1",
     DASHBOARD_WRITE_HOSTS: record.DASHBOARD_WRITE_HOSTS ?? "start.home.arpa,10.0.10.20,localhost,127.0.0.1",
@@ -126,6 +132,7 @@ export function parseEnv(record: EnvRecord): DashboardEnvironment {
   return {
     port: parsed.data.PORT,
     configPath: parsed.data.DASHBOARD_CONFIG,
+    uptimePath: parsed.data.DASHBOARD_UPTIME,
     staticPath: parsed.data.DASHBOARD_STATIC,
     writeAllow: parsed.data.DASHBOARD_WRITE_ALLOW,
     writeHosts: parsed.data.DASHBOARD_WRITE_HOSTS,

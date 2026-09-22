@@ -3,7 +3,7 @@ import { z } from "zod";
 // Die Panes in Lesereihenfolge. Diese Liste bestimmt das Layout-Schema und die
 // Zifferntasten (src/lib/useKeymap.ts). Fehlt eine Pane in einer älteren config.json,
 // ergänzt der Server sie beim Lesen aus defaultConfig (server/config-store.ts).
-export const PANE_IDS = ["clock", "weather", "month", "links", "news", "agenda", "homelab"] as const;
+export const PANE_IDS = ["clock", "weather", "month", "links", "news", "agenda", "homelab", "uptime"] as const;
 export type PaneId = (typeof PANE_IDS)[number];
 export const HOLIDAY_REGIONS = ["BW", "NRW"] as const;
 export type HolidayRegion = (typeof HOLIDAY_REGIONS)[number];
@@ -110,8 +110,24 @@ const resizablePaneId = z.enum(["clock", "weather", "month", "links", "news", "a
 const linkSchema = z.object({
   label: text(MAX_TEXT_LENGTH),
   url: httpUrl,
-  hint: z.string().regex(/^g[A-Za-z0-9]$/).optional(),
+  hint: z.string().regex(/^g[A-Za-z0-9]{1,2}$/).optional(),
 });
+
+export const uptimeTargetSchema = z.discriminatedUnion("type", [
+  z.object({
+    id: z.string().uuid(),
+    type: z.literal("http"),
+    label: text(MAX_TEXT_LENGTH),
+    url: httpUrl,
+  }),
+  z.object({
+    id: z.string().uuid(),
+    type: z.literal("tcp"),
+    label: text(MAX_TEXT_LENGTH),
+    host: hostname,
+    port,
+  }),
+]);
 
 const layoutSchema = z.array(z.discriminatedUnion("id", [
   z.object({
@@ -119,9 +135,10 @@ const layoutSchema = z.array(z.discriminatedUnion("id", [
     visible: z.boolean(),
     span: z.union([z.literal(1), z.literal(2)]),
   }),
-  // HOMELAB ist laut Layoutvertrag immer vollbreit. Alte Configs dürfen noch ein
+  // HOMELAB und UPTIME sind laut Layoutvertrag immer vollbreit. Alte Configs dürfen noch ein
   // span-Feld enthalten; Zod entfernt es beim Parsen als unbekanntes Feld.
   z.object({ id: z.literal("homelab"), visible: z.boolean() }),
+  z.object({ id: z.literal("uptime"), visible: z.boolean() }),
 ])).max(PANE_IDS.length).superRefine((layout, ctx) => {
   const seen = new Set<PaneId>();
   layout.forEach((entry, index) => {
@@ -186,6 +203,10 @@ const baseConfigSchema = z.object({
       port,
     })).max(64).default([]),
   }),
+  uptime: z.object({
+    enabled: z.boolean(),
+    targets: z.array(uptimeTargetSchema).max(32),
+  }).default({ enabled: false, targets: [] }),
 });
 
 export const configSchema = baseConfigSchema.superRefine((config, ctx) => {
@@ -200,16 +221,81 @@ export const configSchema = baseConfigSchema.superRefine((config, ctx) => {
   const hints = new Set<string>();
   config.linkGroups.forEach((group, groupIndex) => {
     group.links.forEach((link, linkIndex) => {
-      if (link.hint && hints.has(link.hint)) {
+      const hint = link.hint;
+      if (hint && hints.has(hint)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["linkGroups", groupIndex, "links", linkIndex, "hint"],
           message: "Kürzel darf nur einmal vorkommen",
         });
       }
-      if (link.hint) hints.add(link.hint);
+      if (hint && [...hints].some((existing) =>
+        existing !== hint && (existing.startsWith(hint) || hint.startsWith(existing)))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["linkGroups", groupIndex, "links", linkIndex, "hint"],
+          message: "Kürzel darf kein Präfix eines anderen Kürzels sein",
+        });
+      }
+      if (hint) hints.add(hint);
     });
+  });
+
+  const uptimeIds = new Set<string>();
+  config.uptime.targets.forEach((target, index) => {
+    if (uptimeIds.has(target.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["uptime", "targets", index, "id"],
+        message: "Uptime-Ziel-ID darf nur einmal vorkommen",
+      });
+    }
+    uptimeIds.add(target.id);
   });
 });
 
 export type Config = z.infer<typeof configSchema>;
+export type UptimeTarget = z.infer<typeof uptimeTargetSchema>;
+
+export const DEFAULT_PROFILE_ID = "default" as const;
+export const profileIdSchema = z.string().refine(
+  (value) => value === DEFAULT_PROFILE_ID || /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value),
+  "Ungültige Profil-ID",
+);
+export type ProfileId = z.infer<typeof profileIdSchema>;
+
+export const profileMetaSchema = z.object({
+  id: profileIdSchema,
+  name: text(64).transform((value) => value.trim()),
+});
+export type ProfileMeta = z.infer<typeof profileMetaSchema>;
+
+export const profileDocumentSchema = z.object({
+  version: z.literal(2),
+  profilesUpdatedAt: isoDateTime,
+  profiles: z.array(profileMetaSchema.extend({ config: configSchema })).min(1).max(16),
+}).superRefine((document, ctx) => {
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  document.profiles.forEach((profile, index) => {
+    if (ids.has(profile.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profiles", index, "id"],
+        message: "Profil-ID darf nur einmal vorkommen",
+      });
+    }
+    ids.add(profile.id);
+
+    const normalizedName = profile.name.toLocaleLowerCase("de-DE");
+    if (names.has(normalizedName)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profiles", index, "name"],
+        message: "Profilname darf nur einmal vorkommen",
+      });
+    }
+    names.add(normalizedName);
+  });
+});
+export type ProfileDocument = z.infer<typeof profileDocumentSchema>;

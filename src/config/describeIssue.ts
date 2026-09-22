@@ -12,7 +12,7 @@ const FIELD_LABEL: Record<string, string> = {
   backupAgeHours: "Backup-Alter", host: "Host", port: "Port",
   reachability: "Erreichbarkeit", linkGroups: "Links", feeds: "Feeds",
   calendars: "Kalender", proxyAllowlist: "Proxy", layout: "Layout",
-  location: "Ort", clock: "Uhr", search: "Suche", homelab: "Homelab", theme: "Theme",
+  location: "Ort", clock: "Uhr", search: "Suche", homelab: "Homelab", uptime: "Uptime", theme: "Theme",
   holidayRegion: "Feiertagsregion",
 };
 

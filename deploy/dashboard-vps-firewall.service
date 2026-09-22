@@ -1,0 +1,12 @@
+[Unit]
+Description=Private Dashboard-Zugriffsregeln vor Docker-DNAT
+Before=dashboard-vps.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/dashboard/firewall.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

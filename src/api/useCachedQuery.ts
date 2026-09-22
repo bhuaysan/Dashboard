@@ -18,6 +18,10 @@ type Options<T> = {
   decode?: (data: unknown) => T | undefined;
 };
 
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -82,12 +86,13 @@ function readEnvelope(key: string): CacheEnvelope | undefined {
   }
 }
 
-export function useCachedQuery<T>(key: string, fn: () => Promise<T>, ttlMs: number, options: Options<T> = {}) {
+export function useCachedQuery<T>(key: string, fn: (signal: AbortSignal) => Promise<T>, ttlMs: number, options: Options<T> = {}) {
   const { enabled = true, refetchIntervalMs, decode } = options;
   return useQuery<T>({
     queryKey: [key],
-    queryFn: async () => {
-      const data = await fn();
+    queryFn: async ({ signal }) => {
+      const data = await fn(signal);
+      throwIfAborted(signal);
       try { localStorage.setItem(storageKey(key),
               JSON.stringify({ version: CACHE_VERSION, t: Date.now(), data })); } catch {}
       cleanupCache();

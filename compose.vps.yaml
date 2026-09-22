@@ -1,0 +1,43 @@
+name: dashboard
+services:
+  dashboard:
+    image: ${DASHBOARD_IMAGE:?DASHBOARD_IMAGE muss gesetzt sein}
+    user: "1000:1000"
+    init: true
+    labels:
+      traefik.enable: "false"
+    read_only: true
+    mem_limit: 192m
+    memswap_limit: 192m
+    cpus: 0.5
+    pids_limit: 128
+    environment:
+      NODE_OPTIONS: --max-old-space-size=128
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    env_file:
+      - /etc/dashboard/dashboard.env
+    ports:
+      - "100.113.86.223:8080:7777"
+    volumes:
+      - type: bind
+        source: /var/lib/dashboard
+        target: /data
+        bind:
+          create_host_path: false
+    networks:
+      dashboard:
+        ipv4_address: 172.29.80.2
+networks:
+  dashboard:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-dashboard
+    ipam:
+      config:
+        - subnet: 172.29.80.0/24

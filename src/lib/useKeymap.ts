@@ -20,13 +20,14 @@ export type UiAction =
   | { type: "hint"; buffer: string }
   | { type: "help"; show: boolean }
   | { type: "sync"; rowCounts: Readonly<Record<PaneId, number>>; visiblePanes: ReadonlySet<PaneId> }
+  | { type: "resetSelection" }
   | { type: "reset" };
 
-// Reihenfolge und Kürzel der Statusline. Die Ziffern 1–7 folgen dieser Liste, sie muss
+// Reihenfolge und Kürzel der Statusline. Die Ziffern 1–8 folgen dieser Liste, sie muss
 // deshalb dieselbe Reihenfolge haben wie PANE_IDS und die Panes in App.tsx.
 const PANE_LABELS: Record<PaneId, string> = {
   clock: "clock", weather: "weather", month: "month", links: "links",
-  news: "news", agenda: "agenda", homelab: "lab",
+  news: "news", agenda: "agenda", homelab: "lab", uptime: "up",
 };
 export const PANE_ORDER: { id: PaneId; label: string }[] = PANE_IDS.map((id) => ({
   id,
@@ -61,6 +62,8 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
     }
     case "reset":
       return { ...state, mode: "NORMAL", hintBuffer: "", showHelp: false };
+    case "resetSelection":
+      return { ...state, mode: "NORMAL", pane: null, row: 0, hintBuffer: "", showHelp: false };
   }
 }
 
@@ -145,6 +148,13 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
         return;
       }
       if (live.current.hintBuffer !== "") {
+        if (e.key === "Backspace") {
+          const next = live.current.hintBuffer.slice(0, -1);
+          live.current.hintBuffer = next;
+          dispatch({ type: "hint", buffer: next });
+          e.preventDefault();
+          return;
+        }
         if (e.key.length !== 1) return;
         const buf = (live.current.hintBuffer + e.key).toLowerCase();
         const url = hints[buf];
@@ -153,8 +163,9 @@ export function useKeymap({ state, dispatch, hints, rowCount, selectedUrl, onSee
           live.current.hintBuffer = "";
           dispatch({ type: "hint", buffer: "" });
         } else {
-          // Kürzel sind genau zwei Zeichen: nach dem zweiten steht fest, dass keines passt.
-          const next = buf.length >= 2 ? "" : buf;
+          // Solange mindestens ein konfiguriertes Kürzel so beginnt, wartet die
+          // Tastatursteuerung auf das nächste Zeichen. Sonst ist die Folge ungültig.
+          const next = Object.keys(hints).some((hint) => hint.startsWith(buf)) ? buf : "";
           live.current.hintBuffer = next;
           dispatch({ type: "hint", buffer: next });
         }

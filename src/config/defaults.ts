@@ -1,4 +1,5 @@
-import type { Config } from "./schema";
+import { DEFAULT_PROFILE_ID } from "./schema";
+import type { Config, ProfileDocument } from "./schema";
 
 export const defaultConfig: Config = {
   version: 1,
@@ -66,8 +67,8 @@ export const defaultConfig: Config = {
       mdn: "https://developer.mozilla.org/search?q=%s",
     },
   },
-  // Zeile 1: Uhr, Wetter, Monat. Zeile 2: Links, News, Termine. Darunter Homelab
-  // über die volle Breite.
+  // Standardlayout: links Clock + Links, mittig Weather + News, rechts Month +
+  // Agenda. PaneGrid hält diese Spans getrennt vom Legacy-Raster mit Span-2.
   layout: [
     { id: "clock", visible: true, span: 1 },
     { id: "weather", visible: true, span: 1 },
@@ -76,6 +77,7 @@ export const defaultConfig: Config = {
     { id: "news", visible: true, span: 1 },
     { id: "agenda", visible: true, span: 1 },
     { id: "homelab", visible: true },
+    { id: "uptime", visible: true },
   ],
   proxyAllowlist: [
     "api.open-meteo.com",
@@ -91,4 +93,14 @@ export const defaultConfig: Config = {
     thresholds: { cpu: 90, mem: 85, storage: 80, backupAgeHours: 36 },
     reachability: [],
   },
+  uptime: {
+    enabled: false,
+    targets: [],
+  },
+};
+
+export const defaultProfileDocument: ProfileDocument = {
+  version: 2,
+  profilesUpdatedAt: defaultConfig.updatedAt,
+  profiles: [{ id: DEFAULT_PROFILE_ID, name: "Standard", config: defaultConfig }],
 };

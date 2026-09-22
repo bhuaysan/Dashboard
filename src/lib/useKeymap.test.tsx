@@ -4,7 +4,7 @@ import { initialUiState, uiReducer, useKeymap, type Mode, type PaneId, type UiAc
 import { openUrl } from "./url";
 
 const ALL_PANES: ReadonlySet<PaneId> = new Set<PaneId>([
-  "clock", "weather", "month", "links", "agenda", "news", "homelab",
+  "clock", "weather", "month", "links", "agenda", "news", "homelab", "uptime",
 ]);
 
 function setup(state: Partial<UiState>, options: {
@@ -56,6 +56,24 @@ describe("Kürzel", () => {
     press("x");
     expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "" });
   });
+
+  it("öffnet ein dreistelliges Kürzel erst nach dem dritten Zeichen", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const dispatch = setup({}, { hints: { gha: "https://example.com/home" } });
+    press("g");
+    press("h");
+    expect(open).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "gh" });
+    press("a", { shiftKey: true });
+    expect(open).toHaveBeenCalledWith("https://example.com/home", "_blank", "noopener");
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "hint", buffer: "" });
+  });
+
+  it("löscht mit Backspace das letzte Zeichen eines begonnenen Kürzels", () => {
+    const dispatch = setup({ hintBuffer: "gh" }, { hints: { gha: "https://example.com/home" } });
+    press("Backspace");
+    expect(dispatch).toHaveBeenCalledWith({ type: "hint", buffer: "g" });
+  });
 });
 
 describe("Auswahl-Synchronisierung", () => {
@@ -67,6 +85,7 @@ describe("Auswahl-Synchronisierung", () => {
     news: 2,
     agenda: 0,
     homelab: 0,
+    uptime: 0,
   };
 
   it("klemmt eine Auswahl auf die letzte sichtbare Zeile", () => {
@@ -82,6 +101,32 @@ describe("Auswahl-Synchronisierung", () => {
     const next = uiReducer(state, { type: "sync", rowCounts, visiblePanes: visible });
     expect(next.pane).toBe("clock");
     expect(next.row).toBe(0);
+  });
+
+  it("setzt die Auswahl für einen Profilwechsel vollständig zurück", () => {
+    const state: UiState = {
+      ...initialUiState,
+      mode: "INSERT",
+      pane: "news",
+      row: 1,
+      hintBuffer: "g",
+      showHelp: true,
+    };
+    const next = uiReducer(state, { type: "resetSelection" });
+    expect(next).toEqual({
+      ...state,
+      mode: "NORMAL",
+      pane: null,
+      row: 0,
+      hintBuffer: "",
+      showHelp: false,
+    });
+  });
+
+  it("behält beim bestehenden Reset die Auswahl für Escape bei", () => {
+    const state: UiState = { ...initialUiState, mode: "COMMAND", pane: "news", row: 1, showHelp: true };
+    const next = uiReducer(state, { type: "reset" });
+    expect(next).toEqual({ ...state, mode: "NORMAL", hintBuffer: "", showHelp: false });
   });
 });
 
@@ -128,6 +173,14 @@ describe("Pane-Tasten", () => {
     const dispatch = setup({});
     press("7");
     expect(dispatch).toHaveBeenCalledWith({ type: "focusPane", pane: "homelab" });
+  });
+
+  it("hängt Uptime als achte Pane an, ohne Homelab umzunummerieren", () => {
+    const dispatch = setup({});
+    press("7");
+    press("8");
+    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "focusPane", pane: "homelab" });
+    expect(dispatch).toHaveBeenNthCalledWith(2, { type: "focusPane", pane: "uptime" });
   });
 });
 

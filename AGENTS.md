@@ -53,34 +53,63 @@ pnpm vitest run -t "Kontraste"
 ## Architektur
 
 Ein einziger Node-Prozess (Hono, `server/index.ts` mit App-Fabrik in `server/app.ts`) liefert `dist/`
-**und** vier Endpunkte: `/api/config` (GET offen, PUT geschützt), `/api/proxy`, `/api/homelab`
-und `/api/health`. Kein Bundling auf dem
-Server — `tsx` führt `server/` direkt aus, und weil der Server aus `src/` importiert
+**und** den offenen Profilkatalog `/api/profiles` (Schreibzugriffe geschützt), die profilabhängigen
+Endpunkte `/api/config?profile=<id>`, `/api/proxy?profile=<id>&url=<url>` und `/api/homelab?profile=<id>`
+sowie `/api/health`. Kein Bundling auf dem Server — `tsx` führt `server/` direkt aus, und weil der Server aus `src/` importiert
 (`config/schema.ts`, `lib/relativeTime.ts`), wird `src/` mitdeployt. Ein Import aus `src/` in den
 Server zieht also Produktionscode nach — nichts Browserspezifisches dort hineinziehen.
 
-**Config.** `config.json` liegt nur auf dem Server-State (`/var/lib/dashboard`) und ist die Quelle der Wahrheit; ein einziges
-Zod-Schema (`src/config/schema.ts`) validiert sie auf beiden Seiten. `PUT` verlangt
-`If-Match: <updatedAt>` (optimistisches Sperren, 409 bei Konflikt) und eine Absenderadresse aus
-`DASHBOARD_WRITE_ALLOW` (`server/write-guard.ts`, versteht CIDR). Geschrieben wird atomar über
-`rename`; eine unlesbare Datei wandert nach `config.json.bak`, danach gelten die Defaults. Im
-Browser hält `src/api/config.ts` die Config in React Query (Polling 15 s, Refetch bei Tab-Fokus)
-und spiegelt sie nach `localStorage`, damit die Seite auch ohne Server sofort rendert.
+**Config und Profile.** `config.json` liegt nur auf dem Server-State (`/var/lib/dashboard`) und ist die Quelle der Wahrheit;
+`profileDocumentSchema` validiert das Version-2-Dokument auf dem Server, während der Browser Katalog und aktive Config
+getrennt mit `profileCatalogSchema` beziehungsweise `configSchema` validiert:
+`{ version: 2, profilesUpdatedAt, profiles: [{ id, name, config }] }`. Die IDs sind serverseitige UUIDs (für die
+Migration ist `default` reserviert), Namen werden getrimmt und ohne Beachtung der Groß-/Kleinschreibung eindeutig
+gehalten; es gibt mindestens ein und höchstens 16 Profile. `GET /api/profiles` liefert nur den Katalog aus IDs und
+Namen, nie eine Config. `POST`, `PATCH` und `DELETE` am Katalog verlangen `If-Match: <profilesUpdatedAt>` und
+die Schreibschutzprüfungen aus `DASHBOARD_WRITE_ALLOW` und `DASHBOARD_WRITE_HOSTS`.
 
-`homelab.enabled` steuert das Proxmox-Monitoring und den Zugriff auf `/api/homelab`.
+Eine gültige alte Einzel-Config wird beim Lesen verlustfrei im Speicher zum Profil `default` / `Standard` migriert;
+das reine Lesen schreibt nicht um. Der erste erfolgreiche Profil- oder Config-Schreibvorgang persistiert Version 2.
+Unbekannte Panes werden je Profil entfernt, fehlende Panes je Profil aus den Defaults ergänzt. Eine syntaktisch oder
+semantisch unlesbare Datei wird nach `config.json.bak` kopiert; zunächst gelten die Defaults nur im Speicher. Erst
+eine spätere erfolgreiche Mutation persistiert das Ersatzdokument als Version 2. Jede Mutation läuft durch die
+Schreibqueue, rotiert das vollständige Profildokument in `config.json.1` bis `config.json.7` und schreibt atomar über
+`rename`. Die Profil-Revision `profilesUpdatedAt` und die Config-Revision `config.updatedAt` sind getrennte
+optimistische Sperren; ein Konflikt liefert 409, eine ungültige Mutation 400. Überschreitet der Request-Body oder das
+resultierende Dokument 512 KiB, liefert die Mutation 413 ohne Änderung an Datei oder Backups; eine bereits beim Lesen
+zu große aktive Datei führt dagegen zu 503.
+
+Die profilabhängigen Endpunkte sind `GET /api/config?profile=<id>`, `PUT /api/config?profile=<id>`,
+`GET /api/proxy?profile=<id>&url=<url>` und `GET /api/homelab?profile=<id>`. Die Profil-ID ist verpflichtend;
+fehlend oder syntaktisch ungültig liefert 400, unbekannt 404. `PUT` prüft zusätzlich `If-Match: <config.updatedAt>`.
+`/api/health` liest und validiert weiterhin das vollständige Dokument, gibt aber ausschließlich einen Status zurück.
+`.env` und alle Secrets (einschließlich des PVE-Tokens) bleiben global für den Serverprozess, stehen nie in einem
+Profil und werden von keinem Endpunkt zurückgegeben.
+
+Im Browser hält `src/api/profiles.ts` den Katalog in React Query (Polling 15 s, Refetch bei Tab-Fokus),
+`src/api/config.ts` die Config mit einem Query-Key pro Profil (ebenfalls Polling 15 s und Fokus-Refetch). Die lokale
+Auswahl steht je Gerät unter `dashboard:active-profile`; Katalog und letzte gültige Config jedes verwendeten Profils
+liegen getrennt in `localStorage`. Der alte Einzel-Cache wird einmalig für `default` übernommen. Wird das aktive
+Profil entfernt, wechselt das Gerät zum ersten verbleibenden Profil und zeigt die definierte deutsche Meldung.
+
+`homelab.enabled` des aktiven Profils steuert das Proxmox-Monitoring und den Zugriff auf
+`/api/homelab?profile=<id>`.
 `layout.homelab.visible` steuert nur die HOMELAB-Pane: Bei aktiviertem Monitoring bleibt die
 Überwachung auch bei ausgeblendeter Pane aktiv. Bei deaktiviertem Monitoring gibt es keine
 PVE-Requests und keine PVE-Status- oder Alarmanzeige. Fehlt `PVE_TOKEN_SECRET`, bleibt davon
 unabhängig der Zustand `configured: false` („nicht konfiguriert“).
 
 **Datenpfad der Panes.** Widget-Modul → `useCachedQuery` (React Query + `localStorage`-Cache mit
-TTL) → `/api/proxy?url=...`. Der Proxy prüft die manuelle Allowlist plus die aus Feed- und
-Kalenderquellen abgeleiteten Hosts, löst den Host
-selbst auf und blockt private Ziele, prüft jede Weiterleitung erneut, begrenzt auf 2 MB und 5 s.
-Proxmox läuft **nicht** darüber, sondern über den aggregierten `/api/homelab` (60 s Server-Cache);
-das Token verlässt den Server nie. Weil der `localStorage`-Cache reines JSON ist, brauchen Daten
-mit `Date`-Feldern eine Zod-`decode`-Funktion, die ISO-Strings wieder in `Date` umwandelt — sonst
-leere Seite nach Reload.
+TTL und Schlüsselpräfix `profile:<id>:`) → `/api/proxy?profile=<id>&url=...`. Config-Abfragen laufen über
+`useConfig(profileId)` und alle Browseraufrufe an Config, Proxy und Homelab übertragen die aktive Profil-ID.
+Beim Wechsel werden die Abfragen des vorherigen Profils abgebrochen; getrennte Query- und Storage-Schlüssel
+verhindern, dass späte Antworten den neuen Stand überschreiben. Der Proxy prüft vor jedem Cachetreffer die
+manuelle Allowlist plus die aus Feed- und Kalenderquellen des gewählten Profils abgeleiteten Hosts, löst den Host
+selbst auf und blockt private Ziele, prüft jede Weiterleitung erneut, begrenzt auf 2 MB und 5 s. Proxmox läuft
+**nicht** darüber, sondern über den aggregierten `/api/homelab?profile=<id>` mit einem Server-Cache je Profil-ID und
+Config-Revision (`<profileId>:<updatedAt>`); das Token verlässt den Server nie. Weil der `localStorage`-Cache reines
+JSON ist, brauchen Daten mit `Date`-Feldern weiterhin eine Zod-`decode`-Funktion, die ISO-Strings wieder in `Date`
+umwandelt — sonst leere Seite nach Reload.
 
 **Homelab.** `fetchHomelab` holt sieben Quellen parallel, `buildHomelab` ist eine reine Funktion
 mit Tests in `server/pve.test.ts`. Alarmregeln und Schwellwerte gehören dorthin, nicht in
@@ -94,7 +123,9 @@ zurück — das ist kein Fehler, sondern unabhängig von `homelab.enabled` der Z
 (`src/config/schema.ts`, speist zugleich `PaneId` und das `layout`-Enum), in `PANE_ORDER`, in
 `rowsByPane`, in `defaultConfig.layout` und die Pane selbst in `App.tsx`. Eine `config.json`, die
 die neue Pane noch nicht kennt, ergänzt der Server beim Lesen aus `defaultConfig`
-(`server/config-store.ts`) — eine Migration braucht es nicht.
+(`server/config-store.ts`) — das gilt innerhalb jedes Profils. `:profile` öffnet das Settings-Overlay direkt im
+Abschnitt `PROFILE`; `:profile <name>` vergleicht Namen exakt und ohne Beachtung der Groß-/Kleinschreibung und
+wechselt nur dieses Gerät. `:export` und `:import` beziehen sich auf die Config des aktiven Profils.
 
 **Farben.** `src/index.css` definiert die Tokens dreimal (Dark als Default, `prefers-color-scheme:
 light`, plus `data-theme`-Overrides für den manuellen Umschalter); `tailwind.config.js` bildet sie
@@ -126,10 +157,11 @@ Verstöße sind Fehler, auch wenn der Code läuft.
    Komponente. Keine Tailwind-Opacity-Modifier auf diesen Farben. Die Werte sind gegen WCAG AA
    nachgerechnet — ändere keinen ohne neue Rechnung.
 4. **Secrets nur in `.env`,** gelesen ausschließlich über `process.env`. Niemals in `config.json`,
-   niemals in einer HTTP-Antwort, niemals in einem Log. `GET /api/config` geht unauthentifiziert an
-   das ganze LAN. Gib den Inhalt von `.env` auch nicht im Chat wieder.
-5. **`/api/proxy` bekommt kein Loch.** Private Adressen inklusive `10.x` bleiben gesperrt.
-   Proxmox-Daten laufen ausschließlich über den aggregierten Endpunkt `GET /api/homelab`.
+   niemals in einer HTTP-Antwort, niemals in einem Log. `GET /api/profiles` und
+   `GET /api/config?profile=<id>` gehen unauthentifiziert an das ganze LAN. Gib den Inhalt von `.env`
+   auch nicht im Chat wieder.
+5. **`/api/proxy?profile=<id>` bekommt kein Loch.** Private Adressen inklusive `10.x` bleiben gesperrt.
+   Proxmox-Daten laufen ausschließlich über den aggregierten Endpunkt `GET /api/homelab?profile=<id>`.
 6. **Sprache:** Pane-Titel und Statusline-Kürzel englisch und groß (`CLOCK`, `wx`, `cfg`), alle
    Inhalte und Meldungen für den Benutzer deutsch, Code-Identifier englisch.
 7. **Nach jeder Änderung** `pnpm test` **und** `pnpm build`. Beide grün, bevor du fertig meldest.
@@ -152,9 +184,19 @@ Verstöße sind Fehler, auch wenn der Code läuft.
   mDNS auf und fragt den Pi-hole nicht).
 - Browser sind Firefox und Safari. **Kein Chrome** — keine Chrome-Extension bauen.
 
+## VPS-Betriebsweg (15.09.2026)
+
+Der zusätzlich freigegebene Betriebsweg ist Docker auf `ben@5.252.224.168`, ausschließlich
+über NetBird `http://100.113.86.223:8080`. `pnpm deploy:vps` verwendet eigene Skripte;
+`pnpm deploy` bleibt der Heim-LXC. Siehe README Abschnitt VPS. Proxmox bleibt dort vorerst
+deaktiviert. Kein Zugriff auf das Heimnetz und keine Übertragung der bisherigen Secrets.
+Docker und privater Fernzugriff über NetBird sind damit ausdrücklich erlaubt; öffentliche
+Dashboard-Freigaben bleiben ausgeschlossen. `.env` und die VPS-Laufzeitdatei sind weiterhin
+für das Werkzeug gesperrt. Status und Tests des tatsächlichen Deployments getrennt berichten.
+
 ## Nicht bauen
 
-To-Dos, Notizen, Drag-and-Drop-Layout, Multi-Profile, HTTPS, Zugriff von außerhalb des LAN,
-Browser-Extensions, Microsoft Graph oder OAuth, Datenbank, Docker, Login, Pi-hole-Widget,
+To-Dos, Notizen, Drag-and-Drop-Layout, HTTPS, öffentlicher Zugriff,
+Browser-Extensions, Microsoft Graph oder OAuth, Datenbank, Login, Pi-hole-Widget,
 Speedtest, SMART-Werte, Graphen pro Gast. Die vollständige Liste mit Begründungen steht am Ende
 von `PLAN.md`.

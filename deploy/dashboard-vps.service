@@ -1,0 +1,21 @@
+[Unit]
+Description=Dashboard ueber NetBird (Docker Compose)
+Requires=docker.service dashboard-vps-firewall.service
+Wants=netbird.service
+After=docker.service netbird.service dashboard-vps-firewall.service network-online.target
+StartLimitIntervalSec=0
+ConditionPathExists=/opt/dashboard/current/compose.vps.yaml
+
+[Service]
+Type=simple
+User=ben
+Group=ben
+SupplementaryGroups=docker
+ExecStart=/usr/local/libexec/dashboard-vps-run
+ExecStop=/usr/local/libexec/dashboard-vps-run stop
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

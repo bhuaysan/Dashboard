@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /opt/dashboard/current
+compose=(/usr/bin/docker compose --project-name personal-dashboard --env-file image.env -f compose.vps.yaml)
+if [[ "${1:-}" == stop ]]; then
+  exec "${compose[@]}" down --timeout 20
+fi
+# Kein Start auf einer Ersatzadresse, auch wenn der Tunnel erst später hochkommt.
+until /usr/sbin/ip -4 -o address show dev wt0 2>/dev/null | /usr/bin/grep -q ' inet 100\.113\.86\.223/'; do
+  sleep 2
+done
+exec "${compose[@]}" up --no-build --abort-on-container-exit --exit-code-from dashboard
