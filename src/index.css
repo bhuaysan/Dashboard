@@ -514,6 +514,18 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
 .tbl--hosts .tbl-head, .tbl--hosts .tbl-row { grid-template-columns: minmax(0,1fr) minmax(7.5rem,max-content); }
 .tbl--zones .tbl-head, .tbl--zones .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) minmax(7.5rem,max-content); }
 .tbl--reach .tbl-head, .tbl--reach .tbl-row { grid-template-columns: minmax(0,12ch) minmax(0,1fr) 8ch minmax(7.5rem,max-content); }
+.tbl--uptime .tbl-head, .tbl--uptime .tbl-row {
+  grid-template-columns: 6ch minmax(0,12ch) minmax(0,1fr) 8ch minmax(7.5rem,max-content);
+}
+.uptime-add { display: flex; flex-wrap: wrap; gap: .5rem; }
+@media (max-width: 759px) {
+  .tbl--uptime .tbl-head { display: none; }
+  .tbl--uptime .tbl-row { grid-template-columns: minmax(0,1fr) minmax(7.5rem,max-content); }
+  .tbl--uptime .uptime-label,
+  .tbl--uptime .uptime-endpoint { grid-column: 1 / -1; }
+  .tbl--uptime .uptime-port { grid-column: 1; }
+  .tbl--uptime .rowacts { grid-column: 2; }
+}
 .rowacts { display: flex; gap: .35rem; justify-content: flex-end; min-width: max-content; }
 .rowact { border: 0; background: transparent; color: var(--color-dim); font: inherit;
           cursor: pointer; padding: 0 .35rem; min-width: 2.25rem; min-height: 2.25rem; }

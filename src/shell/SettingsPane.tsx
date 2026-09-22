@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { configSchema, type Config, type ProfileId } from "../config/schema";
+import { configSchema, type Config, type ProfileId, type UptimeTarget } from "../config/schema";
 import { describeIssue, issueRootKey } from "../config/describeIssue";
 import { ConfigConflictError } from "../api/config";
 import {
@@ -64,6 +64,7 @@ const SECTIONS = [
   ["place", "Ort & Zeit"],
   ["layout", "Layout"],
   ["lab", "Homelab"],
+  ["uptime", "Uptime"],
   ["search", "Suche"],
   ["proxy", "Proxy"],
 ] as const;
@@ -80,7 +81,16 @@ const SECTION_BY_ROOT: Record<string, Sec> = {
   search: "search",
   proxyAllowlist: "proxy",
   homelab: "lab",
+  uptime: "uptime",
 };
+
+const newHttpTarget = (): UptimeTarget => ({
+  id: crypto.randomUUID(), type: "http", label: "neu", url: "https://example.com/",
+});
+
+const newTcpTarget = (): UptimeTarget => ({
+  id: crypto.randomUUID(), type: "tcp", label: "neu", host: "minecraft.example", port: 25565,
+});
 
 function RowActs({ label, first, last, onMove, onDel }: {
   label: string; first: boolean; last: boolean; onMove: (delta: number) => void; onDel: () => void;
@@ -1307,6 +1317,96 @@ export function SettingsPane({
                   <button type="button" className="btn" onClick={() => upd((d) => ({
                     ...d, homelab: { ...d.homelab, reachability: [...d.homelab.reachability, { label: "neu", host: "", port: 80 }] },
                   }))}>+ Ziel</button>
+                </p>
+              </section>
+            )}
+
+            {sec === "uptime" && (
+              <section>
+                <div className="checks">
+                  <label className="check">
+                    <input type="checkbox" aria-label="Uptime-Monitoring aktiv" checked={draft.uptime.enabled}
+                      onChange={(e) => upd((d) => ({ ...d, uptime: { ...d.uptime, enabled: e.target.checked } }))} />
+                    Uptime-Monitoring aktiv <span className="check-state">{draft.uptime.enabled ? "an" : "aus"}</span>
+                  </label>
+                </div>
+                <p className="set-hint" style={{ marginTop: "1rem" }}>
+                  HTTP prüft eine Webadresse, TCP die Erreichbarkeit eines Hosts und Ports. Maximal 32 Ziele.
+                </p>
+                <div className="tbl tbl--uptime">
+                  <div className="tbl-head"><span>Typ</span><span>Name</span><span>Ziel</span><span>Port</span><span /></div>
+                  {draft.uptime.targets.map((target, i) => (
+                    <div className="tbl-row" key={target.id}>
+                      <span className="uptime-kind">{target.type.toUpperCase()}</span>
+                      <input className="inp uptime-label" value={target.label}
+                        aria-label={`Name von Uptime-Ziel ${target.label}`}
+                        onChange={(e) => upd((d) => ({
+                          ...d,
+                          uptime: {
+                            ...d.uptime,
+                            targets: d.uptime.targets.map((item) => item.id === target.id
+                              ? { ...item, label: e.target.value }
+                              : item),
+                          },
+                        }))} />
+                      {target.type === "http" ? (
+                        <input className="inp uptime-endpoint" value={target.url}
+                          aria-label={`URL von Uptime-Ziel ${target.label}`}
+                          onChange={(e) => upd((d) => ({
+                            ...d,
+                            uptime: {
+                              ...d.uptime,
+                              targets: d.uptime.targets.map((item) => item.id === target.id && item.type === "http"
+                                ? { ...item, url: e.target.value }
+                                : item),
+                            },
+                          }))} />
+                      ) : (
+                        <input className="inp uptime-endpoint" value={target.host}
+                          aria-label={`Host von Uptime-Ziel ${target.label}`}
+                          onChange={(e) => upd((d) => ({
+                            ...d,
+                            uptime: {
+                              ...d.uptime,
+                              targets: d.uptime.targets.map((item) => item.id === target.id && item.type === "tcp"
+                                ? { ...item, host: e.target.value }
+                                : item),
+                            },
+                          }))} />
+                      )}
+                      {target.type === "tcp" ? (
+                        <NumInput className="inp inp--num uptime-port" value={target.port} min={1}
+                          aria-label={`Port von Uptime-Ziel ${target.label}`}
+                          onCommit={(port) => upd((d) => ({
+                            ...d,
+                            uptime: {
+                              ...d.uptime,
+                              targets: d.uptime.targets.map((item) => item.id === target.id && item.type === "tcp"
+                                ? { ...item, port }
+                                : item),
+                            },
+                          }))} />
+                      ) : <span className="uptime-port" aria-hidden="true">—</span>}
+                      <RowActs label={`Uptime-Ziel ${target.label}`} first={i === 0} last={i === draft.uptime.targets.length - 1}
+                        onMove={(delta) => upd((d) => ({
+                          ...d, uptime: { ...d.uptime, targets: move(d.uptime.targets, i, delta) },
+                        }))}
+                        onDel={() => upd((d) => ({
+                          ...d,
+                          uptime: { ...d.uptime, targets: d.uptime.targets.filter((item) => item.id !== target.id) },
+                        }))} />
+                    </div>
+                  ))}
+                </div>
+                <p className="addline uptime-add">
+                  <button type="button" className="btn" disabled={draft.uptime.targets.length >= 32}
+                    onClick={() => upd((d) => ({
+                      ...d, uptime: { ...d.uptime, targets: [...d.uptime.targets, newHttpTarget()] },
+                    }))}>+ HTTP</button>
+                  <button type="button" className="btn" disabled={draft.uptime.targets.length >= 32}
+                    onClick={() => upd((d) => ({
+                      ...d, uptime: { ...d.uptime, targets: [...d.uptime.targets, newTcpTarget()] },
+                    }))}>+ TCP</button>
                 </p>
               </section>
             )}

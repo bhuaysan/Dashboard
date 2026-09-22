@@ -96,13 +96,116 @@ function saveFailsNetwork(): SaveConfig {
 }
 
 describe("SettingsPane", () => {
-  it("zeigt alle acht Abschnitte und die Link-Tabelle", () => {
+  it("zeigt alle neun Konfigurationsabschnitte und die Link-Tabelle", () => {
     render(<SettingsPane open config={defaultConfig} guests={guests} onClose={() => undefined}
       save={saveSucceeds()} onSaved={() => undefined} />);
-    for (const label of ["Links", "Feeds", "Kalender", "Ort & Zeit", "Layout", "Homelab", "Suche", "Proxy"]) {
+    for (const label of ["Links", "Feeds", "Kalender", "Ort & Zeit", "Layout", "Homelab", "Uptime", "Suche", "Proxy"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
     expect(screen.getByDisplayValue("Datasphere")).toBeTruthy();
+  });
+
+  it("bearbeitet und ergänzt HTTP- und TCP-Uptime-Ziele", () => {
+    const httpId = "423e4567-e89b-42d3-a456-426614174000";
+    const tcpId = "523e4567-e89b-42d3-a456-426614174000";
+    const newHttpId = "623e4567-e89b-42d3-a456-426614174000";
+    const newTcpId = "723e4567-e89b-42d3-a456-426614174000";
+    const cfg: Config = {
+      ...structuredClone(defaultConfig),
+      uptime: {
+        enabled: false,
+        targets: [
+          { id: httpId, type: "http", label: "Web", url: "https://example.com/" },
+          { id: tcpId, type: "tcp", label: "Game", host: "game.example", port: 25565 },
+        ],
+      },
+    };
+    const randomUuid = vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce(newHttpId)
+      .mockReturnValueOnce(newTcpId);
+    let sent: Config | undefined;
+    const save = fakeSave((config) => { sent = config; });
+
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Uptime" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Uptime-Monitoring aktiv" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "URL von Uptime-Ziel Web" }), { target: { value: "https://start.example/health" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name von Uptime-Ziel Web" }), { target: { value: "Startseite" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Host von Uptime-Ziel Game" }), { target: { value: "minecraft.example" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Port von Uptime-Ziel Game" }), { target: { value: "25567" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name von Uptime-Ziel Game" }), { target: { value: "Minecraft" } });
+    fireEvent.click(screen.getByRole("button", { name: "+ HTTP" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ TCP" }));
+    fireEvent.click(screen.getByText("Speichern"));
+
+    expect(sent?.uptime).toEqual({
+      enabled: true,
+      targets: [
+        { id: httpId, type: "http", label: "Startseite", url: "https://start.example/health" },
+        { id: tcpId, type: "tcp", label: "Minecraft", host: "minecraft.example", port: 25567 },
+        { id: newHttpId, type: "http", label: "neu", url: "https://example.com/" },
+        { id: newTcpId, type: "tcp", label: "neu", host: "minecraft.example", port: 25565 },
+      ],
+    });
+    randomUuid.mockRestore();
+  });
+
+  it("sortiert und löscht Uptime-Ziele anhand stabiler IDs", () => {
+    const ids = [
+      "423e4567-e89b-42d3-a456-426614174000",
+      "523e4567-e89b-42d3-a456-426614174000",
+      "623e4567-e89b-42d3-a456-426614174000",
+    ];
+    const cfg: Config = {
+      ...structuredClone(defaultConfig),
+      uptime: {
+        enabled: true,
+        targets: ids.map((id, index) => ({
+          id, type: "http" as const, label: ["Alpha", "Beta", "Gamma"][index] ?? "Ziel", url: `https://${index}.example/`,
+        })),
+      },
+    };
+    let sent: Config | undefined;
+    const save = fakeSave((config) => { sent = config; });
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Uptime" }));
+    fireEvent.click(screen.getByRole("button", { name: "Uptime-Ziel Beta nach oben" }));
+    fireEvent.click(screen.getByRole("button", { name: "Uptime-Ziel Alpha löschen" }));
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(sent?.uptime.targets.map((target) => target.id)).toEqual([ids[1], ids[2]]);
+  });
+
+  it("begrenzt Uptime-Ziele und ordnet Schemafehler dem Uptime-Abschnitt zu", () => {
+    const cfg: Config = {
+      ...structuredClone(defaultConfig),
+      uptime: {
+        enabled: true,
+        targets: Array.from({ length: 32 }, (_, index) => ({
+          id: `${String(index).padStart(8, "0")}-e89b-42d3-a456-426614174000`,
+          type: "http" as const,
+          label: `Ziel ${index + 1}`,
+          url: index === 0 ? "ungültig" : `https://${index}.example/`,
+        })),
+      },
+    };
+    const save = saveSucceeds();
+    render(<SettingsPane open config={cfg} guests={guests} onClose={() => undefined}
+      save={save} onSaved={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Uptime" }));
+    const addHttp = screen.getByRole("button", { name: "+ HTTP" });
+    const addTcp = screen.getByRole("button", { name: "+ TCP" });
+    if (!(addHttp instanceof HTMLButtonElement) || !(addTcp instanceof HTMLButtonElement)) {
+      throw new Error("Uptime-Hinzufügen-Aktionen sind keine Schaltflächen");
+    }
+    expect(addHttp.disabled).toBe(true);
+    expect(addTcp.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("tab", { name: "Suche" }));
+    fireEvent.click(screen.getByText("Speichern"));
+    expect(save.mutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Uptime");
+    expect(screen.getByRole("tab", { name: "Uptime", selected: true })).toBeTruthy();
   });
 
   it("benennt Layout-Checkbox, Breite und Zeilenaktionen eindeutig", () => {

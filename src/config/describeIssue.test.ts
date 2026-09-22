@@ -32,6 +32,17 @@ describe("describeIssue", () => {
     expect(describeIssue(issue)).toContain("gültige Adresse");
   });
 
+  it("benennt Fehler in Uptime-Zielen lesbar", () => {
+    const bad = structuredClone(defaultConfig);
+    bad.uptime.targets = [{
+      id: "423e4567-e89b-42d3-a456-426614174000",
+      type: "http",
+      label: "Startseite",
+      url: "nicht-http",
+    }];
+    expect(describeIssue(firstIssue(bad))).toContain("Uptime");
+  });
+
   it("übersetzt ein fehlendes Feld", () => {
     const bad = structuredClone(defaultConfig) as unknown as Record<string, unknown>;
     delete bad.location;
