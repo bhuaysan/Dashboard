@@ -185,6 +185,7 @@ export type ConfigStore = {
   writeConfig: (cfg: Config) => Promise<void>;
   readCatalog: () => Promise<ProfileCatalog>;
   readProfileConfig: (profileId: ProfileId) => Promise<ConfigReadResult>;
+  readAllProfileConfigs: () => Promise<Array<{ profileId: ProfileId; config: Config }>>;
   createProfile: CreateProfileFunction;
   renameProfile: RenameProfileFunction;
   deleteProfile: (profileId: ProfileId, ifMatch: string | undefined) => Promise<CatalogMutationResult>;
@@ -353,6 +354,11 @@ export function createConfigStore(configPath: string): ConfigStore {
     const profile = document.profiles.find((entry) => entry.id === profileId);
     if (profile === undefined) return { kind: "not-found" };
     return { kind: "ok", config: clone(profile.config) };
+  }
+
+  async function readAllProfileConfigs(): Promise<Array<{ profileId: ProfileId; config: Config }>> {
+    const document = await readDocumentUnlocked();
+    return document.profiles.map(({ id, config }) => ({ profileId: id, config: clone(config) }));
   }
 
   async function createProfile(ifMatch: string | undefined, name: unknown, sourceProfileId: unknown): Promise<CatalogMutationResult>;
@@ -535,6 +541,7 @@ export function createConfigStore(configPath: string): ConfigStore {
     writeConfig,
     readCatalog,
     readProfileConfig,
+    readAllProfileConfigs,
     createProfile,
     renameProfile,
     deleteProfile,

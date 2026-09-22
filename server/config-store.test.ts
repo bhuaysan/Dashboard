@@ -310,6 +310,31 @@ describe("profile document migration", () => {
     expect(work.config.layout.map((entry) => entry.id)).toEqual(expect.arrayContaining(Array.from(PANE_IDS)));
   });
 
+  itWithStore("liest alle Profil-Configs validiert, migriert und als unabhängige Kopien", async ({ configPath, store }) => {
+    const workId = "123e4567-e89b-42d3-a456-426614174000";
+    const { uptime: _uptime, ...legacyConfig } = defaultConfig;
+    await writeFile(configPath, JSON.stringify({
+      version: 2,
+      profilesUpdatedAt: defaultConfig.updatedAt,
+      profiles: [
+        { id: DEFAULT_PROFILE_ID, name: "Standard", config: legacyConfig },
+        { id: workId, name: "Arbeit", config: { ...legacyConfig, theme: "light" } },
+      ],
+    }));
+
+    const first = await store.readAllProfileConfigs();
+    expect(first.map(({ profileId }) => profileId)).toEqual([DEFAULT_PROFILE_ID, workId]);
+    expect(first.map(({ config }) => config.uptime)).toEqual([
+      { enabled: false, targets: [] },
+      { enabled: false, targets: [] },
+    ]);
+    if (first[0] !== undefined) first[0].config.theme = "dark";
+
+    const second = await store.readAllProfileConfigs();
+    expect(second[0]?.config.theme).toBe(defaultConfig.theme);
+    expect(second[1]?.config.theme).toBe("light");
+  });
+
   itWithStore("rotiert bei Mutationen vollständige Version-2-Dokumente", async ({ configPath, store }) => {
     const catalog = await store.readCatalog();
     const created = await store.createProfile(catalog.profilesUpdatedAt, "Arbeit", DEFAULT_PROFILE_ID);
