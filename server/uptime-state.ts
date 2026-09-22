@@ -26,14 +26,40 @@ export const storedTargetStateSchema = z.object({
   error: uptimeErrorSchema.nullable(),
 }).strict();
 
+const storedProfileStateSchema = z.object({
+  id: profileIdSchema,
+  updatedAt: z.string().datetime({ offset: true }).nullable(),
+  targets: z.array(storedTargetStateSchema).max(32),
+}).strict().superRefine((profile, ctx) => {
+  const targetIds = new Set<string>();
+  profile.targets.forEach((target, index) => {
+    if (targetIds.has(target.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targets", index, "id"],
+        message: "Uptime-Ziel-ID darf nur einmal vorkommen",
+      });
+    }
+    targetIds.add(target.id);
+  });
+});
+
 export const uptimeStateDocumentSchema = z.object({
   version: z.literal(1),
-  profiles: z.array(z.object({
-    id: profileIdSchema,
-    updatedAt: z.string().datetime({ offset: true }).nullable(),
-    targets: z.array(storedTargetStateSchema).max(32),
-  }).strict()).max(16),
-}).strict();
+  profiles: z.array(storedProfileStateSchema).max(16),
+}).strict().superRefine((document, ctx) => {
+  const profileIds = new Set<string>();
+  document.profiles.forEach((profile, index) => {
+    if (profileIds.has(profile.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["profiles", index, "id"],
+        message: "Profil-ID darf nur einmal vorkommen",
+      });
+    }
+    profileIds.add(profile.id);
+  });
+});
 
 export type StoredTargetState = z.infer<typeof storedTargetStateSchema>;
 export type UptimeStateDocument = z.infer<typeof uptimeStateDocumentSchema>;
