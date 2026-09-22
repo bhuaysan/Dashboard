@@ -57,6 +57,11 @@ if find "$test_root/bundle/src" "$test_root/bundle/server" -type f -path '*/test
   echo 'Testunterstützung wurde paketiert.' >&2
   exit 1
 fi
+grep -Fxq '**/uptime.json' "$test_root/bundle/.dockerignore" || { echo 'uptime.json fehlt in .dockerignore.' >&2; exit 1; }
+grep -Fxq '**/uptime.json.*' "$test_root/bundle/.dockerignore" || { echo 'Uptime-Nebendateien fehlen in .dockerignore.' >&2; exit 1; }
+grep -Fq 'set_env DASHBOARD_UPTIME /var/lib/dashboard/uptime.json' "$repo_root/deploy/deploy.sh" || exit 1
+grep -Fq 'set_env DASHBOARD_UPTIME /var/lib/dashboard/uptime.json' "$repo_root/deploy/provision.sh" || exit 1
+grep -Fq 'DASHBOARD_UPTIME=/data/uptime.json' "$repo_root/deploy/provision-vps.sh" || exit 1
 
 real_git="$(command -v git)"
 cat > "$test_root/bin/git" <<GIT

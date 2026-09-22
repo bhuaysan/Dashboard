@@ -22,5 +22,7 @@ cat > "$bundle/.dockerignore" <<'IGNORE'
 **/.env
 **/.env.*
 **/config.json
+**/uptime.json
+**/uptime.json.*
 **/pve-ca.pem
 IGNORE

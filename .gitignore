@@ -17,6 +17,9 @@ dist-ssr
 .env
 config.json
 config.json.*
+uptime.json
+uptime.json.*
+uptime.json.tmp-*
 pve-ca.pem
 static/*
 

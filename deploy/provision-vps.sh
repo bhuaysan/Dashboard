@@ -18,6 +18,7 @@ if [[ ! -e /etc/dashboard/dashboard.env ]]; then
   (umask 027; cat > /etc/dashboard/dashboard.env <<'ENV'
 PORT=7777
 DASHBOARD_CONFIG=/data/config.json
+DASHBOARD_UPTIME=/data/uptime.json
 DASHBOARD_STATIC=/data/static
 DASHBOARD_WRITE_ALLOW=100.113.131.20,100.113.29.51
 DASHBOARD_WRITE_HOSTS=100.113.86.223:8080,netcup.netbird.selfhosted:8080

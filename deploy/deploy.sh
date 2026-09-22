@@ -44,6 +44,7 @@ set_env() {
 }
 
 set_env DASHBOARD_CONFIG /var/lib/dashboard/config.json
+set_env DASHBOARD_UPTIME /var/lib/dashboard/uptime.json
 set_env DASHBOARD_STATIC /var/lib/dashboard/static
 set_env PVE_CA_PATH /etc/dashboard/pve-ca.pem
 chown root:root /etc/dashboard/dashboard.env

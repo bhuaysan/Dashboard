@@ -32,6 +32,7 @@ run_case() {
   local root="$test_root/$name"
   mkdir -p "$root/releases/20260915000001" "$root/releases/20260915000002" "$root/state"
   printf 'preserve' > "$root/state/marker"
+  printf 'uptime-preserve' > "$root/state/uptime.json"
   touch "$root/releases/20260915000002/compose.vps.yaml" "$root/releases/20260915000002/image.env"
   if [[ "$old" == 1 ]]; then ln -s "$root/releases/20260915000001" "$root/current"; fi
   local status=0
@@ -44,7 +45,9 @@ run_case() {
     if [[ "$old" == 1 ]]; then [[ "$(readlink "$root/current")" == "$root/releases/20260915000001" ]] || exit 1; else [[ ! -e "$root/current" && ! -L "$root/current" ]] || exit 1; fi
   fi
   [[ "$(cat "$root/state/marker")" == preserve ]] || exit 1
+  [[ "$(cat "$root/state/uptime.json")" == uptime-preserve ]] || exit 1
   [[ -f "$root/backups/20260915000002.tar.gz" ]] || exit 1
+  tar -tzf "$root/backups/20260915000002.tar.gz" | grep -Fxq './uptime.json' || exit 1
   [[ ! -L "$root/current.next" ]] || exit 1
 }
 run_case first 0 0 0 success

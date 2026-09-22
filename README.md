@@ -127,6 +127,17 @@ Deployment gelöscht. Fehlende oder unsichere Static-Pfade liefern 404.
 `GET /api/health` prüft ausschließlich, ob der Prozess läuft und die Config lesbar ist; der
 Endpunkt gibt keine Config-, URL- oder Secretwerte aus und wird vom Deployment als Readiness-Check verwendet.
 
+Das Uptime-Monitoring prüft aktivierte HTTP- und TCP-Ziele einmal pro Minute und bewahrt einen
+24-Stunden-Verlauf in `DASHBOARD_UPTIME` auf. Im Heim-LXC liegt die Datei unter
+`/var/lib/dashboard/uptime.json`, im VPS-Container unter `/data/uptime.json` auf dem persistenten
+Bind-Mount. Beide Installationen führen voneinander unabhängige Historien. Bei einem Ausfall des
+Dashboards entstehen unbekannte Lücken; den eigenen Dienstausfall kann es deshalb nicht zuverlässig
+selbst überwachen. Minecraft wird ausschließlich per TCP auf dem konfigurierten Port geprüft.
+
+Die Historie enthält weder Zugangsdaten noch Request-Header. HTTP-Ziele unterstützen keine
+Authentifizierung und keine Umgehung der TLS-Prüfung. Benachrichtigungen und öffentlicher Zugriff
+sind bewusst nicht Teil des Betriebswegs.
+
 `homelab.enabled` des aktiven Profils steuert das Proxmox-Monitoring und den Zugriff auf
 `/api/homelab?profile=<id>`.
 `layout.homelab.visible` steuert nur die HOMELAB-Pane; bei aktiviertem Monitoring läuft die
@@ -145,7 +156,8 @@ ssh root@10.0.10.20 'cp /var/lib/dashboard/config.json.1 /var/lib/dashboard/conf
 
 Nur auf dem Server als `/etc/dashboard/dashboard.env`, `chmod 600`, nicht in Git. Variablen siehe `.env.example`:
 `PVE_URL`, `PVE_TOKEN_ID`, `PVE_TOKEN_SECRET`, `PVE_CA_PATH`, `PORT`, `DASHBOARD_CONFIG`,
-`DASHBOARD_WRITE_ALLOW`, `DASHBOARD_WRITE_HOSTS` und `DASHBOARD_STATIC`. Leeres `PVE_TOKEN_SECRET`
+`DASHBOARD_WRITE_ALLOW`, `DASHBOARD_WRITE_HOSTS`, `DASHBOARD_STATIC` und `DASHBOARD_UPTIME`.
+Leeres `PVE_TOKEN_SECRET`
 ergibt unabhängig vom Monitoring-Schalter den Zustand `configured: false` („nicht konfiguriert“);
 für diesen Zustand bleiben die übrigen PVE-Felder ebenfalls leer.
 
@@ -199,6 +211,12 @@ Die Config wird bei der ersten Installation als Version-2-Profildokument mit dem
 `default` / `Standard` aus den Defaults angelegt, mit ausgeschalteter HOMELAB-Pane und
 deaktiviertem Monitoring. Bestehende Configs bleiben unverändert. Es werden
 keine Daten vom Heim-LXC und keine Proxmox-Zugangsdaten übertragen.
+
+Die Uptime-Historie liegt hier in `/var/lib/dashboard/uptime.json` beziehungsweise im Container
+unter `/data/uptime.json`. Das vor jedem Releasewechsel erzeugte Archiv sichert sie zusammen mit
+`config.json`; bei einer manuellen Wiederherstellung werden beide Dateien bei gestopptem Dienst aus
+demselben Archiv zurückgespielt. Ein automatisches Rollback behält den inzwischen entstandenen
+State dagegen unverändert bei.
 
 ### Updates und Betrieb
 
