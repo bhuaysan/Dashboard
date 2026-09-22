@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { profileIdSchema, type ProfileId, type UptimeTarget } from "../src/config/schema";
 import {
@@ -67,10 +68,10 @@ export type UptimeStateDocument = z.infer<typeof uptimeStateDocumentSchema>;
 export const emptyUptimeState: UptimeStateDocument = { version: 1, profiles: [] };
 
 export function targetFingerprint(target: UptimeTarget): string {
-  if (target.type === "http") {
-    return JSON.stringify(["http", new URL(target.url).toString()]);
-  }
-  return JSON.stringify(["tcp", target.host.toLowerCase(), target.port]);
+  const identity = target.type === "http"
+    ? JSON.stringify(["http", new URL(target.url).toString()])
+    : JSON.stringify(["tcp", target.host.toLowerCase(), target.port]);
+  return `sha256:${createHash("sha256").update(identity).digest("hex")}`;
 }
 
 export function recordProbe(
@@ -150,9 +151,16 @@ export function projectTarget(
     };
   }
 
+  const currentMinute = Math.max(0, Math.floor(nowMs / MINUTE_MS));
+  const elapsedMinutes = Math.min(
+    Math.max(currentMinute - state.sampleMinute, 0),
+    HISTORY_MINUTES,
+  );
+  const samples = `${state.samples}${"?".repeat(elapsedMinutes)}`.slice(-HISTORY_MINUTES);
+
   let successes = 0;
   let failures = 0;
-  for (const sample of state.samples) {
+  for (const sample of samples) {
     if (sample === "1") successes += 1;
     if (sample === "0") failures += 1;
   }
@@ -170,7 +178,7 @@ export function projectTarget(
     responseTimeMs: state.responseTimeMs,
     uptime24h,
     measuredMinutes,
-    history: projectHistory(state.samples),
+    history: projectHistory(samples),
     error: state.error,
   };
 }

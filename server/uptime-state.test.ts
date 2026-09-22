@@ -5,6 +5,7 @@ import {
   projectProfile,
   projectTarget,
   recordProbe,
+  storedTargetStateSchema,
   targetFingerprint,
   uptimeStateDocumentSchema,
   type StoredTargetState,
@@ -126,6 +127,16 @@ describe("projectTarget", () => {
     expect(projectTarget(HTTP_ID, stored({ samples: "?" }), NOW).uptime24h).toBeNull();
   });
 
+  it("lässt alte Messungen aus dem rollierenden 24-Stunden-Fenster fallen", () => {
+    const projected = projectTarget(HTTP_ID, stored({ samples: "1" }), NOW + 25 * 60 * 60_000);
+
+    expect(projected).toMatchObject({
+      uptime24h: null,
+      measuredMinutes: 0,
+      history: Array.from({ length: 24 }, () => "unknown"),
+    });
+  });
+
   it("leitet nach mehr als 150 Sekunden unbekannt seit der Altersgrenze ab", () => {
     const checkedAt = "2026-09-22T10:00:00.000Z";
     const result = projectTarget(HTTP_ID, stored({ checkedAt, status: "up", statusSince: checkedAt, responseTimeMs: 12, error: null }), Date.parse("2026-09-22T10:02:31Z"));
@@ -169,6 +180,16 @@ describe("targetFingerprint", () => {
     expect(targetFingerprint(upperTcp)).toBe(targetFingerprint({ ...upperTcp, host: "mc.example" }));
     expect(targetFingerprint({ ...target, url: "https://PHOTOS.EXAMPLE:443/a/../health" }))
       .toBe(targetFingerprint(target));
+  });
+
+  it("begrenzt Fingerprints auch für stark expandierende Unicode-URLs", () => {
+    const fingerprint = targetFingerprint({
+      ...target,
+      url: `https://example.com/${"界".repeat(500)}`,
+    });
+
+    expect(fingerprint.length).toBeLessThanOrEqual(4096);
+    expect(storedTargetStateSchema.safeParse(stored({ fingerprint })).success).toBe(true);
   });
 });
 

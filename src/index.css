@@ -151,6 +151,35 @@ body {
   .pane--wide { grid-column: span 1; }
 }
 
+/* PaneGrid gruppiert das Standardlayout in Spalten-Wrapper. Die Regeln bleiben getrennt
+   vom Legacy-Raster, dessen Panes weiterhin direkte Grid-Kinder sind. */
+.grid--grouped { gap: 22px; align-items: start; }
+.column { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.grid--grouped .pane--clip { height: auto; }
+.grid--grouped > .pane--full { grid-column: 1 / -1; }
+.grid--grouped-1 { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 701px) {
+  .grid--grouped-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid--grouped-3 {
+    grid-template-columns: minmax(250px, .85fr) minmax(420px, 1.65fr) minmax(290px, 1fr);
+  }
+}
+@media (min-width: 701px) and (max-width: 1100px) {
+  .grid--grouped-3 { grid-template-columns: minmax(240px, .85fr) minmax(0, 1.5fr); }
+  .grid--grouped-3 .column--right {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+@media (max-width: 700px) {
+  .grid--grouped-1,
+  .grid--grouped-2,
+  .grid--grouped-3 { grid-template-columns: minmax(0, 1fr); }
+  .grid--grouped .column--right { display: flex; grid-column: auto; }
+}
+
 /* Kommandozeile und Statusline sind die untersten zwei Zeilen des Terminals: immer sichtbar,
    auch wenn die Homelab-Pane die Seite länger macht als das Fenster. */
 .chrome {
@@ -364,7 +393,8 @@ a.row:not([href]), a.news-row:not([href]) { cursor: default; }
   .uptime-row--responsive .uptime-history { grid-column: 1 / -1; }
 }
 
-.ev { padding: 9px 0; }
+.ev { display: grid; grid-template-columns: 11.5ch 1fr; gap: .6rem;
+      padding: .05rem .4rem; margin: 0 -.4rem; }
 .ev.is-sel { background: var(--color-bg-sel); }
 /* „läuft gerade" trägt den Akzent auf Zeit und Titel, nicht dieselbe Auswahlfläche wie der
    Cursor — sonst sehen das laufende und das angewählte Ereignis gleich aus. So bleiben beide
