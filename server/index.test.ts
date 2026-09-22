@@ -9,6 +9,7 @@ import { createApp, inertProxyResponse, readJsonBody } from "./app.ts";
 import type { DashboardEnvironment } from "./env.ts";
 import { emptyHomelab } from "./pve.ts";
 import type { HomelabFetcher } from "./homelab-cache.ts";
+import type { UptimeReader } from "./uptime-monitor.ts";
 
 type AppFixture = {
   app: ReturnType<typeof createApp>;
@@ -20,6 +21,7 @@ type FixtureOptions = {
   config?: Config;
   document?: ProfileDocument;
   homelabFetcher?: HomelabFetcher;
+  uptimeReader?: UptimeReader;
 };
 
 const secondProfileId = "123e4567-e89b-42d3-a456-426614174000" as ProfileId;
@@ -39,6 +41,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<AppFixture> 
   const testEnv: DashboardEnvironment = {
     port: 7777,
     configPath,
+    uptimePath: join(tempDir, "uptime.json"),
     staticPath,
     writeAllow: ["127.0.0.1"],
     writeHosts: ["start.home.arpa", "10.0.10.20", "localhost", "127.0.0.1"],
@@ -48,6 +51,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<AppFixture> 
       env: testEnv,
       distRoot: join(tempDir, "dist"),
       homelabFetcher: options.homelabFetcher,
+      uptimeReader: options.uptimeReader,
     }),
     configPath,
     tempDir,
@@ -535,6 +539,69 @@ describe("/api/homelab", () => {
       { homelab: { ...defaultConfig.homelab, enabled: true } },
     ),
     homelabFetcher,
+  });
+});
+
+describe("/api/uptime", () => {
+  const snapshot = {
+    updatedAt: "2026-09-22T10:03:00.000Z",
+    storageOk: false,
+    targets: [{
+      id: "123e4567-e89b-42d3-a456-426614174010",
+      status: "down" as const,
+      statusSince: "2026-09-22T10:02:00.000Z",
+      checkedAt: "2026-09-22T10:03:00.000Z",
+      responseTimeMs: null,
+      uptime24h: 50,
+      measuredMinutes: 2,
+      history: Array.from({ length: 24 }, () => "down" as const),
+      error: { code: "timeout" as const },
+    }],
+  };
+  const uptimeReader = { getSnapshot: vi.fn(() => snapshot) };
+
+  itWithApp("verlangt und validiert die Profil-ID", async ({ app }) => {
+    expect((await app.request("/api/uptime")).status).toBe(400);
+    expect((await app.request("/api/uptime?profile=ungueltig")).status).toBe(400);
+    expect((await app.request("/api/uptime?profile=223e4567-e89b-42d3-a456-426614174000")).status).toBe(404);
+  });
+
+  itWithApp("weist deaktiviertes Uptime-Monitoring fachlich ab", async ({ app }) => {
+    const response = await app.request(`/api/uptime?profile=${DEFAULT_PROFILE_ID}`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Uptime deaktiviert" });
+  }, { config: { ...defaultConfig, uptime: { enabled: false, targets: [] } } });
+
+  itWithApp("liefert ausschließlich den letzten Snapshot und ignoriert Zielparameter", async ({ app }) => {
+    uptimeReader.getSnapshot.mockClear();
+    const response = await app.request(
+      `/api/uptime?profile=${DEFAULT_PROFILE_ID}&url=http://10.0.10.10/&host=10.0.10.10&port=22`,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(snapshot);
+    expect(uptimeReader.getSnapshot).toHaveBeenCalledTimes(1);
+    expect(uptimeReader.getSnapshot).toHaveBeenCalledWith(DEFAULT_PROFILE_ID);
+  }, {
+    config: { ...defaultConfig, uptime: { enabled: true, targets: [] } },
+    uptimeReader,
+  });
+
+  itWithApp("gibt bei einem ConfigStore-Fehler nur eine gebundene 503-Antwort zurück", async ({ app, configPath }) => {
+    await writeFile(configPath, "x".repeat(513 * 1024));
+    const response = await app.request(`/api/uptime?profile=${DEFAULT_PROFILE_ID}`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Config nicht verfügbar" });
+  }, {
+    config: { ...defaultConfig, uptime: { enabled: true, targets: [] } },
+    uptimeReader: { getSnapshot: vi.fn(() => snapshot) },
+  });
+
+  itWithApp("beeinflusst Health weder durch ausgefallene Ziele noch durch Speicherfehler", async ({ app }) => {
+    const response = await app.request("/api/health");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok" });
+  }, {
+    uptimeReader: { getSnapshot: vi.fn(() => snapshot) },
   });
 });
 

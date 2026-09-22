@@ -16,6 +16,7 @@ import { profileIdSchema, type Config, type ProfileId } from "../src/config/sche
 import { fetchHomelab } from "./pve.ts";
 import { createHomelabCache, type HomelabFetcher } from "./homelab-cache.ts";
 import type { DashboardEnvironment } from "./env.ts";
+import type { UptimeReader } from "./uptime-monitor.ts";
 
 export const MAX_CONFIG_BODY_BYTES = 512 * 1024;
 
@@ -66,6 +67,7 @@ export type AppOptions = {
   distRoot: string;
   configStore?: ConfigStore;
   homelabFetcher?: HomelabFetcher;
+  uptimeReader?: UptimeReader;
 };
 
 export async function readJsonBody(request: Request, maxBytes: number): Promise<JsonBodyResult> {
@@ -128,6 +130,9 @@ export function createApp(options: AppOptions): Hono {
   const store = options.configStore ?? createConfigStore(runtimeEnv.configPath);
   const homelabFetcher = options.homelabFetcher ?? ((config: Config) => fetchHomelab(config, runtimeEnv));
   const homelabCache = createHomelabCache(homelabFetcher);
+  const uptimeReader = options.uptimeReader ?? {
+    getSnapshot: () => ({ updatedAt: null, storageOk: true, targets: [] }),
+  };
   const app = new Hono();
 
   app.get("/api/profiles", async (c) => {
@@ -327,6 +332,20 @@ export function createApp(options: AppOptions): Hono {
       return c.json(await homelabCache.get(profile.profileId, cfg));
     } catch {
       return c.json({ error: "Homelab nicht erreichbar" }, 502);
+    }
+  });
+
+  app.get("/api/uptime", async (c) => {
+    const profile = requiredProfile(c.req.raw);
+    if (profile.kind !== "ok") return profileParameterError(c, profile);
+    try {
+      const result = await store.readProfileConfig(profile.profileId);
+      if (result.kind === "not-found") return c.json({ error: "Profil nicht gefunden" }, 404);
+      if (!result.config.uptime.enabled) return c.json({ error: "Uptime deaktiviert" }, 404);
+      return c.json(uptimeReader.getSnapshot(profile.profileId));
+    } catch (error) {
+      if (error instanceof ConfigStoreError) return c.json({ error: "Config nicht verfügbar" }, 503);
+      return c.json({ error: "Uptime nicht verfügbar" }, 502);
     }
   });
 

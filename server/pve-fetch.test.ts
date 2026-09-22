@@ -18,6 +18,7 @@ import { fetchHomelab, MAX_PVE_RESPONSE_BYTES } from "./pve";
 const runtimeEnv: DashboardEnvironment = {
   port: 7777,
   configPath: "unused",
+  uptimePath: "unused-uptime",
   staticPath: "unused",
   writeAllow: ["127.0.0.1"],
   writeHosts: ["localhost"],

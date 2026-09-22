@@ -5,6 +5,7 @@ import { EnvironmentError, parseEnv } from "./env.ts";
 const base = {
   PORT: "7777",
   DASHBOARD_CONFIG: "/tmp/dashboard/config.json",
+  DASHBOARD_UPTIME: "/tmp/dashboard/uptime.json",
   DASHBOARD_STATIC: "/tmp/dashboard/static",
   DASHBOARD_WRITE_ALLOW: "127.0.0.1,10.0.10.0/24",
   DASHBOARD_WRITE_HOSTS: "start.home.arpa,localhost",
@@ -15,10 +16,29 @@ describe("parseEnv", () => {
     expect(parseEnv(base)).toEqual({
       port: 7777,
       configPath: "/tmp/dashboard/config.json",
+      uptimePath: "/tmp/dashboard/uptime.json",
       staticPath: "/tmp/dashboard/static",
       writeAllow: ["127.0.0.1", "10.0.10.0/24"],
       writeHosts: ["start.home.arpa", "localhost"],
     });
+  });
+
+  it("legt den Uptime-Pfad ohne eigene Variable neben die Config", () => {
+    const { DASHBOARD_UPTIME: _omit, ...withoutUptime } = base;
+    expect(parseEnv(withoutUptime).uptimePath).toBe("/tmp/dashboard/uptime.json");
+  });
+
+  it.each(["", "kaputt\0pfad"])("weist den ungültigen Uptime-Pfad ohne Wertpreisgabe ab", (uptimePath) => {
+    try {
+      parseEnv({ ...base, DASHBOARD_UPTIME: uptimePath });
+      throw new Error("erwarteter Testfehler fehlt");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvironmentError);
+      if (error instanceof EnvironmentError) {
+        expect(error.variables).toEqual(["DASHBOARD_UPTIME"]);
+        if (uptimePath !== "") expect(error.message).not.toContain(uptimePath);
+      }
+    }
   });
 
   it.each([
